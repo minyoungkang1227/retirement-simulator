@@ -102,7 +102,7 @@ python scripts/sensitivity.py   # 민감도 분석
 
 질문, 피드백, 협업·이용 문의는 이메일로 연락 주세요.
 
-- 이메일: <EMAIL>
+- 이메일: <EMAIL> doongss1@naver.com
 
 ## 저작권
 
