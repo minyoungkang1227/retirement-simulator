@@ -7,7 +7,7 @@
 Instead of a fixed-return calculation, it answers "Will my retirement savings last?" with **10,000 economic and longevity scenarios**.
 Results are presented as **comparisons between choices on the same scenarios**, not as recommendations.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/<GITHUB_ID>/retirement-simulator/blob/main/notebooks/retire_sim_colab.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/minyoungkang1227/retirement-simulator/blob/main/notebooks/retire_sim_colab.ipynb)
 
 ## Motivation
 
@@ -80,7 +80,11 @@ Couple aged 60 and 58, KRW 500M in financial assets, KRW 3M monthly spending. As
 
 - Exact discretization of OU/Vasicek: long-run mean and standard deviation match theory (rate 2.99% / 1.84% vs 3.00% / 1.83%)
 - Vasicek bond price: closed form 0.87706 vs Monte Carlo 0.87723
-- Every probability comes with a 95% confidence interval; choice comparisons use common random numbers
+- Two-factor bond price (Fisher mode): closed form 0.87553 vs Monte Carlo 0.87518
+- Integrated-rate 5×5 joint covariance: closed form vs fine-step simulation, max correlation error 0.005
+- Multi-state care model preserves life expectancy at 60 (23.5 → 23.6 years)
+- Choice comparisons use paired-difference CIs (±1.38pp → ±0.44pp)
+- Every probability comes with a 95% confidence interval; comparisons use common random numbers, and antithetic variates cut the standard error by about 16%
 
 ## Status
 
@@ -89,6 +93,8 @@ Couple aged 60 and 58, KRW 500M in financial assets, KRW 3M monthly spending. As
 | Cash-flow engine, couple mortality, care costs, rate/inflation SDEs, validation | Done |
 | Shock tests, sensitivity analysis, confidence intervals | Done |
 | Taxes, health premiums, holding taxes, inheritance/gift tax, business income (approximate) | Done |
+| Model enhancements v10: Fisher link between rates and inflation (two-factor bond pricing), fees, parameter uncertainty, crash jumps, antithetic variates | Done |
+| Mathematical refinements v11: paired-difference CIs, integrated rates, multi-state care model, term premium, OU maximum likelihood ([changelog](CHANGELOG.md)) | Done |
 | Parameters from Statistics Korea life tables and Bank of Korea (ECOS) data | Planned |
 | Insurance module (life annuities, long-term-care insurance), home sale and reverse mortgage | Planned |
 | Accumulation phase for people in their 40s, account/budget-app import, periodic re-measurement | Planned |
@@ -103,9 +109,9 @@ Couple aged 60 and 58, KRW 500M in financial assets, KRW 3M monthly spending. As
 
 For questions, feedback, collaboration or licensing inquiries, please reach out by email.
 
-- Email: <EMAIL>
+- Email: doongss1@naver.com
+- Full portfolio: [minyoungkang1227/portfolio](https://github.com/minyoungkang1227/portfolio)
 
 ## Copyright
 
-© 2026 Minyoung Kang. All rights reserved.
-The code, documents and figures in this repository are protected by copyright. You are welcome to view them, but copying, modifying, distributing or using them commercially without the author's prior written consent is prohibited. See [COPYRIGHT](COPYRIGHT).
+© 2026 Minyoung Kang. All rights reserved. For usage inquiries, please contact me by email. See [COPYRIGHT](COPYRIGHT).

@@ -22,7 +22,14 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     k = len(hh.members); youngest = min(m.age for m in hh.members)
     T, n = cfg.max_age - youngest, cfg.n_paths
     eco = generate(e, T, n, rng); cpi = eco["cpi"]
-    alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng) for m in hh.members])
+    from .config import CareMarkov
+    markov = isinstance(cfg.care, CareMarkov) and cfg.care.enabled
+    if markov:
+        lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care) for m in hh.members]
+        alive = np.stack([l[0] for l in lives]); incare = np.stack([l[1] for l in lives])
+        care_level = cfg.care.cost_median * np.exp(cfg.care.cost_log_sigma * rng.standard_normal((k, n)))
+    else:
+        alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng) for m in hh.members])
     hh_alive = alive.sum(0) > 0
     own = np.array(tc.ownership if tc.ownership else [1 / k] * k, float)
     hown = np.array(house.owner_share if house.owner_share else [1.0] + [0.0] * (k - 1), float)
@@ -99,7 +106,9 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         ratio = np.where(na >= 2, 1.0, hh.survivor_spending_ratio)
         spend = hh.annual_spending * ratio * cpi[:, t] * live
         care = np.zeros(n)
-        if cfg.care.enabled:
+        if markov:
+            care = (incare[:, :, t] * care_level).sum(0) * cpi[:, t]
+        elif cfg.care.enabled:
             c = cfg.care
             for i, m in enumerate(hh.members):
                 new = a[i] & (care_left[i] == 0) & (m.age + t >= c.start_age) & (rng.random(n) < c.lam)
@@ -195,7 +204,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             etax_real = np.where(died_all, et / cpi[:, t + 1], etax_real)
             transfer_real = np.where(died_all, (est - et + gift_val) / cpi[:, t + 1], transfer_real)
 
-    return {"depleted_at": dep_at, "youngest_age": youngest, "T": T, "tax_y": tax_y, "hi_y": hi_y, "prop_y": prop_y,
+    return {"depleted_at": dep_at, "youngest_age": youngest, "T": T, "antithetic": eco.get("antithetic", False), "tax_y": tax_y, "hi_y": hi_y, "prop_y": prop_y,
             "estate_real": estate_real, "estate_tax_real": etax_real, "transfer_real": transfer_real,
             "W_nominal": W_hist, "W_real": W_hist / cpi, "hh_alive": hh_alive,
             "last_alive_t": hh_alive.sum(1) - 1, "cpi": cpi}
@@ -207,7 +216,8 @@ def progressive_estate(base):
 
 
 def summarize(res):
-    d = res["depleted_at"]; p = float((d >= 0).mean()); se = float(np.sqrt(p * (1 - p) / len(d)))
+    from .metrics import prob_se
+    d = res["depleted_at"]; p = float((d >= 0).mean()); se = prob_se(d >= 0, res.get("antithetic", False))
     y = min(20, res["T"])
     med = lambda x: float(np.median(x[~np.isnan(x)])) if np.any(~np.isnan(x)) else 0.0
     return {"고갈확률": p, "±": 1.96 * se,

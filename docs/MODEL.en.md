@@ -159,3 +159,26 @@ pension income → gifts → account transfers → spending → pension-account 
 
 Not included: dividend gross-up credit, high-dividend separate-taxation special rule, home sale and capital-gains tax, reverse mortgages, pension-account tax credits, first-death inheritance tax, earnings-related National Pension reduction.
 All tax figures live in `retire_sim/tax.py` and need annual updates. **This is not tax or investment advice.**
+
+## 13. v10 model enhancements (economy_v2 options, `EconomyV2.enhanced()`)
+
+| Item | Description | Effect (example household, baseline 39.9%) |
+|---|---|---|
+| Fisher link | Real rate $q$ and inflation $\pi$ follow separate OU processes; nominal rate $r=q+\pi$. Bonds priced with the two-factor Gaussian closed form $P=\exp(-E[\int r]+\tfrac12 Var[\int r])$ | 39.3%. The high-inflation scenario (long-run 3.5%) moves from 69.2% to 50.4%, removing the inconsistency of rates not following inflation |
+| Management fees | 0.5% per year deducted from equity and bond returns | 49.2% (+9.9pp) — the largest change; earlier results were optimistic |
+| Parameter uncertainty | Per-path ERP ~ N(4%, 1%), long-run inflation ~ N(2%, 0.5%) | Mean 49.6%; paths in the lowest ERP third 57.4% vs highest third 41.1% |
+| Crash jumps (Merton) | 0.1 jumps per year, log jump N(−15%, 10%), compensator $-\lambda k$ keeps the mean return | Mean return preserved (7.17% → 7.16%); worst 1% annual return −30.8% → −33.7% |
+| Antithetic variates | Half of the paths use $-Z$; standard errors computed from pair means | 95% CI ±0.98pp → ±0.82pp |
+
+Validation (`scripts/validate_v10.py`): the two-factor formula reduces to Vasicek in the one-factor case (0.877060); two-factor 5-year bond price closed form 0.87553 vs Monte Carlo 0.87518; long-run nominal rate 3.00% (theory 3.00%).
+With the v10 settings the overall depletion probability is 49.1% (74.6% with the tax engine). The default `EconomyV2()` reproduces the original v2 results.
+
+## 14. v11 mathematical refinements
+
+- **① Integrated rate.** Equity returns use the one-year integral $\int r\,ds$ instead of the start-of-year rate, matching how bonds are priced. The end-of-year factor values, their integrals and the equity shock are drawn jointly from a 5×5 Gaussian whose covariance follows from the Itô isometry (formulas in the Korean section 14). Max correlation error vs a fine-step simulation: 0.005.
+- **② Paired differences.** Choice comparisons use $d_i=\mathbb 1[A_i]-\mathbb 1[B_i]$; with common random numbers the CI shrinks from ±1.38pp to ±0.44pp.
+- **③ Multi-state care model.** Markov chain {Healthy, Care, Dead} with care mortality multiplier $m=2.5$ and recovery 0.1; healthy mortality is scaled so the life-table mortality is preserved (life expectancy at 60: 23.5 → 23.6 years).
+- **④ Market price of risk.** Paths under P, bond prices under Q with $\theta^Q=\theta+0.5\%$, producing a term premium (bond mean return 2.46% → 2.77%).
+- **⑤ OU maximum likelihood.** Exact MLE via the AR(1) closed form with delta-method standard errors, plus ECOS fetch and Fisher-mode calibration helpers. Synthetic tests recover θ and σ; κ shows the known small-sample upward bias.
+
+Before/after numbers are in [CHANGELOG.md](../CHANGELOG.md).

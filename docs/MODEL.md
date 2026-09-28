@@ -159,3 +159,38 @@ $$W_{t+1}=\max\big(W_t+I_t-C_t-K_t,\,0\big)\,\big(1+wR^S_t+(1-w)R^B_t\big)$$
 
 미반영: 배당세액공제, 고배당기업 분리과세 특례, 주택 양도세·매도, 주택연금, 연금계좌 세액공제, 1차 상속세, 국민연금 재직자 감액.
 세법 수치는 `retire_sim/tax.py` 한 곳에 모여 있으며 매년 갱신이 필요하다. **세무·투자 자문이 아니다.**
+
+## 13. v10 모델 강화 (economy_v2 옵션, `EconomyV2.enhanced()`)
+
+| 항목 | 내용 | 효과 (예시 가구, 기준 39.9%) |
+|---|---|---|
+| 피셔 연결 | 실질금리 $q$와 물가 $\pi$를 각각 OU로 두고 명목금리 $r=q+\pi$. 채권은 2요인 가우시안 해석해 $P=\exp(-E[\int r]+\tfrac12 Var[\int r])$ | 39.3%. 고물가(장기 3.5%) 시나리오가 69.2% → 50.4%로, 금리가 물가를 따라가지 않던 비일관성 해소 |
+| 운용보수 | 주식·채권 수익률에서 연 0.5% 차감 | 49.2% (+9.9%p) — 가장 큰 변화, 기존 결과가 낙관적이었음 |
+| 파라미터 불확실성 | 경로별 ERP ~ N(4%, 1%), 장기 물가 ~ N(2%, 0.5%) | 평균 49.6%, ERP 하위 1/3 경로 57.4% vs 상위 1/3 41.1% |
+| 폭락 점프 (Merton) | 연 0.1회, 로그 점프 N(−15%, 10%), 보정항 $-\lambda k$로 평균 수익 유지 | 평균 수익 유지(7.17%→7.16%), 하위 1% 연수익 −30.8% → −33.7% |
+| 반대 난수 | 경로 절반을 $-Z$로 짝지음, 표본오차는 짝 평균으로 계산 | 95% 신뢰구간 ±0.98%p → ±0.82%p |
+
+검증(`scripts/validate_v10.py`): 2요인 가격식은 1요인에서 Vasicek과 일치(0.877060), 2요인 5년 채권가격 해석해 0.87553 vs 몬테카를로 0.87518, 명목금리 장기평균 3.00%(이론 3.00%).
+v10 강화 설정 시 전체 고갈확률은 49.1% (세금 엔진 포함 74.6%). `EconomyV2()` 기본값은 기존 v2와 동일한 결과를 재현한다.
+
+## 14. v11 수리적 보완
+
+**① 적분 금리.** OU 요인 X에 대해 연말값과 1년 적분의 조건부 분포는
+$X_{t+1}=\theta+(X_t-\theta)e^{-\kappa}+\varepsilon_1$, $\int_t^{t+1}X\,ds=\theta+(X_t-\theta)E(\kappa)+\varepsilon_2$, $E(a)=\tfrac{1-e^{-a}}{a}$.
+두 요인 $i,j$(브라운 상관 $c_{ij}$)와 주식 충격 $W_s$에 대해 이토 등거리로
+$Cov(\varepsilon_{1i},\varepsilon_{1j})=c_{ij}\sigma_i\sigma_jE(\kappa_i+\kappa_j)$,
+$Cov(\varepsilon_{1i},\varepsilon_{2j})=\tfrac{c_{ij}\sigma_i\sigma_j}{\kappa_j}\big(E(\kappa_i)-E(\kappa_i+\kappa_j)\big)$,
+$Cov(\varepsilon_{2i},\varepsilon_{2j})=\tfrac{c_{ij}\sigma_i\sigma_j}{\kappa_i\kappa_j}\big(1-E(\kappa_i)-E(\kappa_j)+E(\kappa_i+\kappa_j)\big)$,
+$Cov(\varepsilon_{1i},W_s)=c_{is}\sigma_iE(\kappa_i)$, $Cov(\varepsilon_{2i},W_s)=\tfrac{c_{is}\sigma_i}{\kappa_i}(1-E(\kappa_i))$.
+주식 로그수익 $=\int r\,ds+\text{ERP}-\tfrac12\sigma_S^2+\sigma_SW_s$. 세밀 시뮬레이션 대비 상관 최대 오차 0.005.
+
+**② 짝지은 차이.** $d_i=\mathbb 1[A_i]-\mathbb 1[B_i]$, $\widehat{\Delta}=\bar d$, $SE=s_d/\sqrt N$ (반대 난수면 짝 평균 사용). $Var(A-B)=VarA+VarB-2Cov(A,B)$에서 공통 난수가 공분산을 키워 오차가 약 1/3로 줄어든다.
+
+**③ 간병 다중상태 마르코프.** 상태 {H, C, D}, 연 전이확률 $H\to D: q^H_x$, $H\to C:(1-q^H_x)i_x$, $C\to D:\min(1,m\,q^H_x)$, $C\to H:(1-q^C_x)\rho$.
+생명표 $q_x$ 보존을 위해 $q^H_x=q_x/(1+(m-1)p_x)$, 유병률 $p_x\approx i_x/(m\,q_x+\rho)$. 기본값 $m=2.5$, $\rho=0.1$, $i_x$는 나이대별(0.2%·1%·3%·8%, 임시).
+
+**④ 위험의 시장가격.** 경로는 P에서 생성, 채권 가격은 Q에서 $\theta^Q=\theta+\delta$ ($\delta=-\lambda\sigma/\kappa$, 기본 0.5%p)로 계산.
+
+**⑤ OU 최우추정.** $X_{t+\Delta}=a+bX_t+\varepsilon$에서 $\hat\kappa=-\ln\hat b/\Delta$, $\hat\theta=\hat a/(1-\hat b)$, $\hat\sigma^2=\hat s^2\,2\hat\kappa/(1-\hat b^2)$, $SE(\hat\theta)$는 델타 방법. 피셔 모드 보정은 물가(전년동월비)와 사후 실질금리(명목−물가)에 각각 적용하며, 기대물가 기반 실질금리는 칼만 필터로 확장 예정.
+
+전후 수치는 [CHANGELOG.md](../CHANGELOG.md) 참고.

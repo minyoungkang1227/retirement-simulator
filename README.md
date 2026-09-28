@@ -7,7 +7,7 @@
 "은퇴 자금이 버틸까?"를 고정 수익률 계산이 아니라 **1만 개의 경제·수명 시나리오**로 답합니다.
 결과는 추천이 아니라 **같은 시나리오 위에서의 선택지 비교**로 제시합니다.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/<GITHUB_ID>/retirement-simulator/blob/main/notebooks/retire_sim_colab.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/minyoungkang1227/retirement-simulator/blob/main/notebooks/retire_sim_colab.ipynb)
 
 ## 왜 만들었나
 
@@ -79,7 +79,11 @@ python scripts/sensitivity.py   # 민감도 분석
 
 - OU·Vasicek 정확 이산화: 장기 평균·표준편차가 이론값과 일치 (금리 2.99%/1.84% vs 3.00%/1.83%)
 - Vasicek 채권가격: 해석해 0.87706 vs 몬테카를로 0.87723
-- 모든 확률 결과에 95% 신뢰구간 표시, 선택지 비교는 공통 난수 사용
+- 2요인 채권가격(피셔 모드): 해석해 0.87553 vs 몬테카를로 0.87518
+- 적분 금리 5×5 결합공분산: 해석해 vs 세밀 시뮬레이션 상관 최대 오차 0.005
+- 간병 마르코프 모델에서도 60세 기대여명 보존 (23.5년 → 23.6년)
+- 선택지 비교는 경로별 차이로 신뢰구간 계산 (±1.38%p → ±0.44%p)
+- 모든 확률 결과에 95% 신뢰구간 표시, 선택지 비교는 공통 난수, 반대 난수로 표본오차 약 16% 감소
 
 ## 진행 상황
 
@@ -88,6 +92,8 @@ python scripts/sensitivity.py   # 민감도 분석
 | 현금흐름 엔진, 부부 사망률, 간병비, 금리·물가 SDE, 검증 | 완료 |
 | 쇼크 테스트, 민감도, 신뢰구간 | 완료 |
 | 세금·건보료·보유세·상속증여세·사업소득 (근사) | 완료 |
+| 모델 강화 v10: 금리-물가 피셔 연결(2요인 채권가격), 운용보수, 파라미터 불확실성, 폭락 점프, 반대 난수 | 완료 |
+| 수리적 보완 v11: 선택지 차이 신뢰구간, 적분 금리, 간병 다중상태 마르코프, 기간 프리미엄, OU 최우추정 ([변경 내역](CHANGELOG.md)) | 완료 |
 | 통계청 생명표·ECOS 실데이터 파라미터 | 예정 |
 | 보험 모듈(종신연금·간병보험), 주택 매도·주택연금 | 예정 |
 | 40대 적립기, 계좌·가계부 연동, 주기적 재측정 | 예정 |
@@ -102,9 +108,9 @@ python scripts/sensitivity.py   # 민감도 분석
 
 질문, 피드백, 협업·이용 문의는 이메일로 연락 주세요.
 
-- 이메일: <EMAIL> doongss1@naver.com
+- 이메일: doongss1@naver.com
+- 전체 포트폴리오: [minyoungkang1227/portfolio](https://github.com/minyoungkang1227/portfolio)
 
 ## 저작권
 
-© 2026 강민영. All rights reserved.
-이 저장소의 코드, 문서, 그래프는 저작권법의 보호를 받습니다. 자유롭게 열람하실 수 있으나, 저작권자의 사전 서면 동의 없이 복제, 수정, 배포, 상업적으로 이용하는 것을 금합니다. 자세한 내용은 [COPYRIGHT](COPYRIGHT)를 참고하세요.
+© 2026 강민영. All rights reserved. 이용 문의는 이메일로 부탁드립니다. 자세한 내용은 [COPYRIGHT](COPYRIGHT)를 참고하세요.

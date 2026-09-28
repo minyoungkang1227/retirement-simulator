@@ -59,10 +59,32 @@ class CareShock:
 
 
 @dataclass
+class CareMarkov:
+    """간병 다중상태 마르코프 모델 (v11): 건강(H) ⇄ 간병(C) → 사망(D).
+
+    매년 전이: H→D q_H(x), H→C (1-q_H)·i(x), C→D min(1, m·q_x), C→H (1-q_C)·rec
+    q_H는 생명표 전체 사망률 q_x가 유지되도록 간병 유병률로 보정.
+    수치는 임시값 — 장기요양 인정률·사망 통계로 보정 필요.
+    """
+    enabled: bool = True
+    incidence: tuple = ((65, 0.002), (75, 0.01), (85, 0.03), (999, 0.08))  # (이 나이 미만, 연 발생률)
+    mort_mult: float = 2.5        # 간병 상태 사망률 배수
+    recovery: float = 0.10        # 간병 → 건강 회복 확률(연)
+    cost_median: float = 2000     # 간병 중 연 비용 중앙값(만원, 현재가치)
+    cost_log_sigma: float = 0.5
+
+    def inc(self, age):
+        for lim, v in self.incidence:
+            if age < lim:
+                return v
+        return self.incidence[-1][1]
+
+
+@dataclass
 class SimConfig:
     n_paths: int = 10_000
     max_age: int = 110
     seed: Optional[int] = 42
     economy: EconomyAssumptions = field(default_factory=EconomyAssumptions)
     nps: NPSRules = field(default_factory=NPSRules)
-    care: CareShock = field(default_factory=CareShock)
+    care: object = field(default_factory=CareShock)   # CareShock(v2) 또는 CareMarkov(v11)

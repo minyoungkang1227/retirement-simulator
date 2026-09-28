@@ -18,8 +18,15 @@ def run(hh: Household, cfg: SimConfig, qx_table: dict | None = None, economy_v2=
         eco = economy.generate(cfg.economy, T, n, rng)
     cpi = eco["cpi"]
 
-    alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng)
-                      for m in hh.members])            # (k, n, T+1)
+    from .config import CareMarkov
+    markov = isinstance(cfg.care, CareMarkov) and cfg.care.enabled
+    if markov:
+        lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care) for m in hh.members]
+        alive = np.stack([l[0] for l in lives]); incare = np.stack([l[1] for l in lives])
+        care_level = cfg.care.cost_median * np.exp(cfg.care.cost_log_sigma * rng.standard_normal((len(hh.members), n)))
+    else:
+        alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng)
+                          for m in hh.members])            # (k, n, T+1)
     n_alive = alive.sum(axis=0)                        # (n, T+1)
     hh_alive = n_alive > 0
 
@@ -47,7 +54,9 @@ def run(hh: Household, cfg: SimConfig, qx_table: dict | None = None, economy_v2=
         spend = hh.annual_spending * ratio * cpi[:, t] * hh_alive[:, t]
         # 3) 간병비 점프
         care = np.zeros(n)
-        if cfg.care.enabled:
+        if markov:
+            care = (incare[:, :, t] * care_level).sum(0) * cpi[:, t]
+        elif cfg.care.enabled:
             c = cfg.care
             for i, m in enumerate(hh.members):
                 a = alive[i, :, t]
@@ -68,5 +77,5 @@ def run(hh: Household, cfg: SimConfig, qx_table: dict | None = None, economy_v2=
 
     last_alive_t = hh_alive.sum(axis=1) - 1
     return {"W_nominal": W, "W_real": W / cpi, "cpi": cpi, "alive": alive,
-            "hh_alive": hh_alive, "depleted_at": depleted_at,
-            "last_alive_t": last_alive_t, "youngest_age": youngest, "T": T, "rate": eco.get("rate"), "infl": eco["infl"], **comp}
+            "hh_alive": hh_alive, "depleted_at": depleted_at, "in_care": incare if markov else None,
+            "last_alive_t": last_alive_t, "youngest_age": youngest, "T": T, "antithetic": eco.get("antithetic", False), "erp_path": eco.get("erp_path"), "rate": eco.get("rate"), "infl": eco["infl"], **comp}

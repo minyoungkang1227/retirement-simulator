@@ -43,3 +43,28 @@ def simulate_alive(qx: np.ndarray, start_age: int, T: int, n: int, rng) -> np.nd
     alive = np.ones((n, T + 1), dtype=bool)
     alive[:, 1:] = np.cumprod(~die, axis=1).astype(bool)
     return alive
+
+
+def simulate_life(qx: np.ndarray, start_age: int, T: int, n: int, rng, care) -> tuple:
+    """다중상태(건강/간병/사망) 경로. 반환: alive (n, T+1), in_care (n, T+1).
+
+    건강 상태 사망률 q_H는 전체 사망률 q_x가 보존되도록 보정:
+    q_x ≈ (1-p)·q_H + p·m·q_H  →  q_H = q_x / (1 + (m-1)·p),
+    p(x) = 간병 유병률 근사 = i(x)·D(x),  D(x) = 1 / (m·q_x + rec) (평균 간병 기간, 최대 10년)
+    """
+    alive = np.ones((n, T + 1), bool); incare = np.zeros((n, T + 1), bool)
+    m, rec = care.mort_mult, care.recovery
+    for t in range(T):
+        x = min(start_age + t, len(qx) - 1)
+        q = qx[x]; i = care.inc(x)
+        D = min(1.0 / max(m * q + rec, 1e-9), 10.0)
+        p = min(i * D, 0.5)
+        qH = min(q / (1 + (m - 1) * p), 1.0); qC = min(m * qH, 1.0)
+        a, c = alive[:, t], incare[:, t]
+        u = rng.random(n); v = rng.random(n)
+        die = np.where(c, u < qC, u < qH)
+        to_care = ~c & ~die & (v < i)
+        recover = c & ~die & (v < rec)
+        alive[:, t + 1] = a & ~die
+        incare[:, t + 1] = alive[:, t + 1] & ((c & ~recover) | to_care)
+    return alive, incare
