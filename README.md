@@ -6,7 +6,7 @@
 
 기본생활·여행·남길 자산이라는 세 가지 목표를 1만 개의 경제·수명 시나리오 위에서 계산하고, **무엇을 바꾸면 목표에 가까워지는지**를 비교해 보여줍니다. 결과는 추천이 아니라 같은 시나리오 위에서의 비교입니다.
 
-- **웹 앱 (설치 없이 사용):** https://retire-compass.streamlit.app/
+- **웹 앱 (설치 없이 사용):** https://<앱주소>.streamlit.app
 - [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/minyoungkang1227/retirement-simulator/blob/main/notebooks/retire_sim_colab.ipynb) (분석용 노트북)
 
 ## 왜 만들었나
@@ -20,7 +20,7 @@
 ② 1만 개 시나리오: 금리·물가·주가(연결된 확률과정) × 부부 각자의 수명·간병(다중상태 모델)
 ③ 현금흐름: 은퇴 전 저축 → 은퇴 후 기본생활비 우선, 여유가 있을 때만 여행 예산 지출
 ④ 세금·건보료·보유세·상속세 반영
-⑤ 결과: Income Gap, 목표별 달성 확률, 필요 금융자산, "무엇을 바꾸면" 비교
+⑤ 결과: Income Gap, 목표별 달성 확률, 필요 금융자산, "무엇을 바꾸면" 비교, "상품 추가해 보기"(주식·예금·연금·보험)
 ```
 
 ## 차별점
@@ -81,6 +81,7 @@ retire_sim/        모델 패키지
   engine_tax.py    세금·계좌·부동산·사업소득·목표 가드레일 엔진
   tax.py           한국 세법·건보료 규칙 (기준일 2026-09)
   calibrate.py     OU 최우추정, ECOS 데이터 연결
+  market_data.py   종목코드 → 베타·상관·금리 민감도 추정
   metrics.py       고갈확률, 신뢰구간, 짝지은 비교
 notebooks/         Colab 분석 노트북
 scripts/           검증·민감도 스크립트 (validate.py, validate_v10.py, validate_v11.py)
@@ -111,9 +112,10 @@ CHANGELOG.md       버전별 변경 내역 (무엇을 / 어떻게 / 전과 무�
 | 웹 앱 (Streamlit) | 완료 |
 | 목표 기반 재구축 v12 (3단 목표, Income Gap, 적립기, 모델 포트폴리오, 단계별 입력) | 완료 |
 | 통계청 2024 완전생명표 반영 (v13) | 완료 |
+| 상품 추가해 보기 v15: 종목코드 주식(베타·상관·금리 민감도), 예금, 종신연금, 간병보험, 연금저축 | 완료 |
 | ECOS 금리·물가 실데이터 추정 (v14) | 완료 |
 | 사망률 개선(코호트), 주식 수익률·간병 발생률 실데이터 | 예정 |
-| 보험 모듈(종신연금·간병보험), 주택 매도·주택연금 | 예정 |
+| 주택 매도·주택연금 | 예정 |
 | 계좌·가계부 연동, 주기적 재측정 | 예정 |
 
 자세한 변경 내역은 [CHANGELOG.md](CHANGELOG.md), 수식은 [docs/MODEL.md](docs/MODEL.md)를 참고하세요.

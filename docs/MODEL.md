@@ -216,3 +216,13 @@ ECOS 월별 2000-01~2026-08: 물가 $\pi_t$ = CPI 전년동월비, 실질금리 
 | 실질금리 | 0.73% (±0.74%p) | 0.72 → 0.56 | 1.37% | 0.70% |
 
 장기평균의 표준오차는 경로별 파라미터 불확실성($\theta\sim N(\hat\theta, SE^2)$)으로 사용. 명목 장기평균 3.20%.
+
+
+## 17. v15 상품 추가 모듈 (AddOns)
+
+- **개별 주식:** $\ln(1+R_i)=r_t+\beta(\ln(1+R_m)-r_t)+\tfrac12\beta(1-\beta)\sigma_m^2-\tfrac12\sigma_\varepsilon^2+\sigma_\varepsilon\varepsilon+\gamma\,\Delta r_t$. $\beta,\sigma_\varepsilon$는 월별 로그수익률 회귀, $\gamma$는 $r_i-\beta r_m$을 국고채 3년 변화 $\Delta y$에 회귀.
+- **예금:** $D_{t+1}=D_t(1+r_t)$, 이자는 금융소득.
+- **종신연금:** 연금액 $A=P/\big(\ddot a_x^{(0.8q,\,3\%)}(1+0.05)\big)$, 부부형은 $_tp_{\overline{xy}}$.
+- **간병보험:** 연 보험료 $=(1+\ell)\,B\,E[\sum_t v^t\mathbb 1_{C,t}]\,/\,E[\sum_{t<T_p} v^t\mathbb 1_{H,t}]$ — 엔진의 간병 경로 그대로 사용.
+- **연금저축:** 납입액 → 연금계좌(세액공제 원금은 인출 시 과세), 공제 $\min(c,900)\times13.2\%$.
+- **부족액:** $\sum_t \text{short}_t/CPI_t$ (생존 연도).

@@ -5,7 +5,7 @@
 순서(매년): 연금수입 → 증여 → 계좌 이전 → 지출 → 연금계좌 인출 → 세금·건보료 → 과세계좌·ISA 인출 → 수익률 → 상속
 """
 import numpy as np
-from .config import Household, SimConfig
+from .config import Household, SimConfig, AddOns
 from . import mortality, pension
 from .economy_v2 import EconomyV2, generate
 from .tax import (TaxConfig, HouseConfig, income_tax_person, private_pension_tax, health_premium, estate_tax,
@@ -13,7 +13,7 @@ from .tax import (TaxConfig, HouseConfig, income_tax_person, private_pension_tax
 
 
 def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None,
-        house: HouseConfig = None, qx_table=None, buffer_years=5, biz=None):
+        house: HouseConfig = None, qx_table=None, buffer_years=5, biz=None, addons=None):
     """biz: 구성원별 사업 정보 리스트 [dict(income=연 사업소득(만원), until_age=폐업 나이, workplace=직장가입자 여부)] 또는 None"""
     e, tc, house = e or EconomyV2(), tc or TaxConfig(), house or HouseConfig()
     biz = biz or [None] * len(hh.members)
@@ -46,6 +46,36 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     ess_base = hh.essential if hh.essential is not None else hh.annual_spending
     spend_base = ess_base + hh.lifestyle
     life_ratio = np.full((n, T), np.nan)
+
+    # ── v15 상품 추가 (AddOns) ──
+    ad = addons or AddOns()
+    rng2 = np.random.default_rng((cfg.seed or 0) + 7)          # 추가 상품 전용 난수(기존 시나리오 불변 → 짝지은 비교)
+    S = np.zeros(n); D = np.zeros(n)
+    if ad.stock_amount > 0:
+        mv = np.minimum(ad.stock_amount, Wt); Wt -= mv; Bt -= mv; S += mv
+    if ad.deposit_amount > 0:
+        mv = np.minimum(ad.deposit_amount, Wt); Wt -= mv; Bt -= mv; D += mv
+    ann_pay = np.zeros(n); ann_t = max(0, ad.annuity_start_age - hh.members[0].age)
+    ann_members = list(range(k)) if (ad.annuity_joint and k > 1) else [0]
+    def annuity_factor(t0):
+        v = 1 / (1 + ad.annuity_rate); surv = []
+        for i in ann_members:
+            m = hh.members[i]; q = np.minimum(qx_table[m.sex] * ad.annuity_mort_mult, 1.0)
+            x = min(m.age + t0, len(q) - 1)
+            surv.append(np.concatenate([[1.0], np.cumprod(1 - q[x:-1])]))
+        L = min(len(x) for x in surv); p = surv[0][:L]
+        if len(surv) > 1: p = surv[0][:L] + surv[1][:L] - surv[0][:L] * surv[1][:L]
+        return float(np.sum(v ** np.arange(L) * p))
+    ci_prem = 0.0; ci_on = ad.care_benefit > 0 and markov and ad.care_member < k
+    if ci_on:                                                  # 수지상등: 모델 자체의 간병·사망 경로로 보험료 산출
+        i0 = ad.care_member; v = (1 + ad.care_rate) ** -np.arange(T + 1)
+        ages_i = hh.members[i0].age + np.arange(T + 1)
+        pv_ben = (incare[i0] * v).sum(1).mean() * ad.care_benefit
+        pay = alive[i0] & ~incare[i0] & (ages_i < ad.care_pay_until)[None, :]
+        pv_prem = (pay * v).sum(1).mean()
+        ci_prem = (1 + ad.care_loading) * pv_ben / max(pv_prem, 1e-9)
+    stock_ret = np.full((n, T), np.nan); port_ret = np.full((n, T), np.nan)
+    short_real = np.zeros(n)                                   # 생존 중 부족했던 기본생활비 누계(실질)
 
     def sell_from_taxable(amount):
         """과세계좌에서 매도: 실현이익 반환(해외주식분만 과세 대상)."""
@@ -102,7 +132,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             Wp += amt; Pp += amt
 
         # 4) 과세계좌 금융소득
-        fin_tot = Wt * (w * tc.div_yield + (1 - w) * np.maximum(eco["rate"][:, t], 0))
+        fin_tot = Wt * (w * tc.div_yield + (1 - w) * np.maximum(eco["rate"][:, t], 0)) + D * np.maximum(eco["rate"][:, t], 0)
         fin_i = [fshare[i] * fin_tot for i in range(k)]
 
         # 5) 지출·간병비
@@ -123,22 +153,40 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 care_left[i] = np.where(act, care_left[i] - 1, 0)
 
         # 6) 연금계좌 인출
-        income_all = nps.sum(0) + priv.sum(0) + rent + bz.sum(0)
+        if ad.annuity_premium > 0 and t == ann_t:                  # 종신연금 일시납 가입
+            prem = np.minimum(ad.annuity_premium * cpi[:, t] * live, Wt); Wt -= prem; Bt = np.maximum(Bt - prem, 0)
+            ann_pay = prem / (annuity_factor(t) * (1 + ad.annuity_loading))
+        ann_alive = np.zeros(n, bool)
+        for i in ann_members: ann_alive |= a[i]
+        ann_inc = ann_pay * ann_alive if t >= ann_t else np.zeros(n)
+        ci_ben = np.zeros(n); ci_cost = np.zeros(n)
+        if ci_on:
+            i0 = ad.care_member
+            ci_ben = ad.care_benefit * incare[i0, :, t]
+            ci_cost = ci_prem * (a[i0] & ~incare[i0, :, t] & (hh.members[i0].age + t < ad.care_pay_until))
+        income_all = nps.sum(0) + priv.sum(0) + rent + bz.sum(0) + ann_inc + ci_ben
         if retired:
             # 목표 우선순위: 기본생활(Essential) 보호선을 먼저 지키고, 남는 만큼만 여행·취미(Lifestyle) 지출
             yrs_left = max(5, hh.planning_age - (youngest + t))
             ann = (1 - 1.02 ** -yrs_left) / 0.02            # 실질 2%로 할인한 연금현가계수
             floor = np.maximum(ess - income_all, 0) * ann
-            life_paid = np.clip(Wt + Wi + Wp - floor, 0, life_want)
+            life_paid = np.clip(Wt + Wi + Wp + S + D - floor, 0, life_want)
             spend = ess + life_paid
             if hh.lifestyle > 0:
                 life_ratio[:, t] = np.where(live, life_paid / np.maximum(life_want, 1e-9), np.nan)
             saving = 0.0
         else:
             spend = np.zeros(n); saving = hh.annual_saving * cpi[:, t] * live
-        need = spend + care - income_all - saving
+            if ad.pension_contrib_annual > 0:                     # 저축 일부를 연금계좌로, 세액공제 환급은 과세계좌로
+                pc = ad.pension_contrib_annual * cpi[:, t] * live
+                credit = np.minimum(pc, 900) * ad.pension_credit_rate
+                Wp += pc; saving = saving - pc + credit
+        need = spend + care + ci_cost - income_all - saving
         pw = np.zeros(n); pw_taxable = np.zeros(n)
-        if tc.enabled and tc.use_pension and t >= tc.pen_wait_years:
+        pen_active = tc.enabled and (tc.use_pension or ad.pension_contrib_annual > 0)
+        pen_open = (tc.use_pension and t >= tc.pen_wait_years) or (ad.pension_contrib_annual > 0 and retired
+                                                                   and hh.members[0].age + t >= 55)
+        if pen_active and pen_open:
             pw = np.clip(np.minimum(need, tc.pen_withdraw_cap * na), 0, Wp)
             frac = np.where(Wp > 0, np.clip(1 - Pp / np.maximum(Wp, 1e-9), 0, 1), 0)
             Pp = np.maximum(Pp - pw * (1 - frac), 0); Wp -= pw; pw_taxable = pw * frac
@@ -194,24 +242,35 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         from_i = np.minimum(np.maximum(rest, 0) - amt, Wi); Wi -= from_i
         surplus = np.maximum(-rest, 0); Wt += surplus; Bt += surplus
         short = np.maximum(rest, 0) - amt - from_i
-        if tc.enabled and tc.use_pension:
+        from_d = np.minimum(short, D); D -= from_d; short -= from_d
+        from_s = np.minimum(short, S); S -= from_s; short -= from_s
+        if pen_active:
             frac2 = np.where(Wp > 0, np.clip(1 - Pp / np.maximum(Wp, 1e-9), 0, 1), 0)
             gross = np.minimum(short / np.maximum(1 - .165 * frac2, 1e-9), Wp)
             Pp = np.maximum(Pp - gross * (1 - frac2), 0); Wp -= gross
             tax_y[:, t] += gross * frac2 * .165 / cpi[:, t]
             short = np.maximum(short - gross * (1 - .165 * frac2), 0)
         newly = (short > 1e-6) & (dep_at < 0) & live; dep_at[newly] = t
+        short_real += np.where(live, short, 0) / cpi[:, t]
         cg_due = realized
 
         # 9) 수익률
         r = w * eco["stock"][:, t] + (1 - w) * eco["bond"][:, t]
         Wt *= (1 + r); Wi *= (1 + r); Wp *= (1 + r); gift_val *= (1 + r)
-        W_hist[:, t + 1] = (Wt + Wi + Wp) * (dep_at < 0)
+        rt = eco["rate"][:, t]
+        D *= (1 + np.maximum(rt, 0))
+        if ad.stock_amount > 0:                                    # 단일지수(CAPM) + 금리 민감도
+            lm = np.log1p(eco["stock"][:, t]) - np.log1p(-e.fee)  # 시장 로그수익(펀드 보수 제외)
+            b = ad.stock_beta; s_e = ad.stock_idio_sigma
+            li = (rt + b * (lm - rt) + 0.5 * b * (1 - b) * e.s_sigma ** 2 - 0.5 * s_e ** 2
+                  + s_e * rng2.standard_normal(n) + ad.stock_rate_beta * (eco["rate"][:, t + 1] - rt))
+            S *= np.exp(li); stock_ret[:, t] = np.expm1(li); port_ret[:, t] = r
+        W_hist[:, t + 1] = (Wt + Wi + Wp + S + D) * (dep_at < 0)
 
         # 10) 마지막 생존자 사망 → 상속세(10년 내 증여 합산, 기납부 증여세 공제)
         died_all = live & (alive[:, :, t + 1].sum(0) == 0)
         if died_all.any():
-            fin_est = (Wt + Wi + Wp) * (dep_at < 0)
+            fin_est = (Wt + Wi + Wp + S + D) * (dep_at < 0)
             est = fin_est + house.market * cpi[:, t + 1]
             recent = sum(g for (tg, g, _) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
             recent_gt = sum(gt for (tg, _, gt) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
@@ -223,7 +282,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             transfer_real = np.where(died_all, (est - et + gift_val) / cpi[:, t + 1], transfer_real)
 
     return {"depleted_at": dep_at, "youngest_age": youngest, "T": T, "antithetic": eco.get("antithetic", False), "tax_y": tax_y, "hi_y": hi_y, "prop_y": prop_y,
-            "estate_real": estate_real, "life_ratio": life_ratio, "legacy_target": hh.legacy_target, "estate_tax_real": etax_real, "transfer_real": transfer_real,
+            "estate_real": estate_real, "life_ratio": life_ratio, "stock_ret": stock_ret, "port_ret": port_ret, "short_real": short_real,
+            "annuity_pay": float(np.median(ann_pay[ann_pay > 0])) if (ann_pay > 0).any() else 0.0, "care_premium": ci_prem, "legacy_target": hh.legacy_target, "estate_tax_real": etax_real, "transfer_real": transfer_real,
             "W_nominal": W_hist, "W_real": W_hist / cpi, "hh_alive": hh_alive,
             "last_alive_t": hh_alive.sum(1) - 1, "cpi": cpi}
 
@@ -251,6 +311,10 @@ def goal_summary(res):
     """목표별 달성 지표: 기본생활 유지 확률, 여행·취미 충족률, 유산 달성 확률."""
     d = res["depleted_at"]
     out = {"기본생활 유지 확률": float((d < 0).mean())}
+    sr = res.get("short_real")
+    if sr is not None:
+        out["평균 부족액(실질)"] = float(sr.mean())
+        out["부족 시 평균 부족액(실질)"] = float(sr[sr > 0].mean()) if (sr > 0).any() else 0.0
     lr = res.get("life_ratio")
     if lr is not None and np.any(~np.isnan(lr)):
         cnt = (~np.isnan(lr)).sum(1)

@@ -10,7 +10,7 @@ import pandas as pd
 import altair as alt
 import streamlit as st
 
-from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShock
+from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShock, AddOns
 from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality
 from retire_sim.tax import TaxConfig, HouseConfig
@@ -94,22 +94,40 @@ def build(p: dict, v: dict):
     if v.get("q_mult"):
         q = {s: np.minimum(a * v["q_mult"], 1) for s, a in mortality.default_qx().items()}
         for a in q.values(): a[-1] = 1
-    return hh, cfg, eco, TaxConfig(**tkw), house, biz, q
+    return hh, cfg, eco, TaxConfig(**tkw), house, biz, q, AddOns(**v.get("addons", {}))
 
 
 @st.cache_data(ttl=600, max_entries=128, show_spinner=False)
 def simulate(p_json: str, v_json: str) -> dict:
     p, v = json.loads(p_json), json.loads(v_json)
-    hh, cfg, eco, tc, house, biz, q = build(p, v)
-    res = engine_tax.run(hh, cfg, e=eco, tc=tc, house=house, qx_table=q, biz=biz)
+    hh, cfg, eco, tc, house, biz, q, ad = build(p, v)
+    res = engine_tax.run(hh, cfg, e=eco, tc=tc, house=house, qx_table=q, biz=biz, addons=ad)
     s = engine_tax.summarize(res)
     d = res["depleted_at"]; y = res["youngest_age"]; ages = np.arange(res["T"] + 1) + y
     W, alive = res["W_real"], res["hh_alive"]
     fan = [[ages[t], *np.percentile(W[alive[:, t], t], [5, 25, 50, 75, 95])]
            for t in range(W.shape[1]) if alive[:, t].sum() > 200]
     curve = [(int(ages[t]), float(((d >= 0) & (d <= t)).mean())) for t in range(res["T"] + 1)]
+    t85 = max(0, min(85 - y, res["T"]))
+    w85 = W[alive[:, t85], t85]
+    corr = None
+    if np.any(~np.isnan(res["stock_ret"])):
+        sr, pr = res["stock_ret"].ravel(), res["port_ret"].ravel(); ok = ~np.isnan(sr)
+        corr = float(np.corrcoef(sr[ok], pr[ok])[0, 1])
     return {"s": s, "dep": (d >= 0), "anti": bool(res.get("antithetic")),
-            "dep_age": float(np.median(d[d >= 0] + y)) if (d >= 0).any() else None, "fan": fan, "curve": curve}
+            "dep_age": float(np.median(d[d >= 0] + y)) if (d >= 0).any() else None, "fan": fan, "curve": curve,
+            "p50_85": float(np.percentile(w85, 50)) if w85.size else 0.0, "annuity_pay": res.get("annuity_pay", 0.0),
+            "care_premium": res.get("care_premium", 0.0), "stock_corr": corr}
+
+
+@st.cache_data(ttl=86400, max_entries=64, show_spinner=False)
+def stock_lookup(code: str):
+    from retire_sim.market_data import stock_stats
+    try:
+        key = st.secrets.get("ECOS_AUTH_KEY", None)
+    except Exception:
+        key = None
+    return stock_stats(code, years=10, ecos_key=key)
 
 
 def run(p, v=None):
@@ -309,7 +327,7 @@ s = base["s"]
 if st.button("입력 수정하기"):
     ss.done = False; ss.step = len(STEPS) - 1; st.rerun()
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["목표 달성", "무엇을 바꾸면", "위기 상황", "세금·절세", "가정과 한계"])
+tab1, tab2, tab6, tab3, tab4, tab5 = st.tabs(["목표 달성", "무엇을 바꾸면", "상품 추가해 보기", "위기 상황", "세금·절세", "가정과 한계"])
 
 with tab1:
     need, pension, gap = income_gap(p)
@@ -379,6 +397,97 @@ with tab2:
     for a in (p["nps_start"] - 5, p["nps_start"] + 3):
         if 60 <= a <= 70 and a >= min(p["age"], 70): rows.append((f"국민연금 {a}세부터", {"nps_start": a}))
     whatif(rows)
+
+with tab6:
+    st.markdown("주식·예금·연금·보험을 **더했을 때** 목표 달성과 위험이 어떻게 바뀌는지 봅니다. "
+                "주식·예금·연금 일시납은 지금 금융자산에서 옮기는 것으로 계산합니다. **매수·가입 권유가 아닙니다.**")
+    with st.form("addons"):
+        st.markdown("**주식 (종목코드)**")
+        c1, c2 = st.columns(2)
+        code = c1.text_input("종목코드 6자리", value=ss.get("ad_code", ""), placeholder="예: 005930")
+        s_amt = c2.number_input("투자 금액 (억 원)", 0.0, 100.0, float(ss.get("ad_samt", 0.0)), step=0.1)
+        with st.expander("종목 통계를 직접 입력 (자동 조회가 안 될 때)"):
+            c1, c2, c3 = st.columns(3)
+            m_beta = c1.number_input("시장 베타", -1.0, 3.0, 1.0, step=0.1)
+            m_idio = c2.number_input("고유 변동성 (%)", 0.0, 100.0, 25.0, step=1.0)
+            m_rate = c3.number_input("금리 +1%p 때 수익률 변화 (%)", -20.0, 20.0, 0.0, step=0.5)
+            manual = st.checkbox("직접 입력값 사용")
+        st.markdown("**예금**")
+        d_amt = st.number_input("예금으로 옮길 금액 (억 원)", 0.0, 100.0, 0.0, step=0.1)
+        st.markdown("**종신연금 (일시납)**")
+        c1, c2, c3 = st.columns(3)
+        a_amt = c1.number_input("일시납 보험료 (억 원, 오늘 가치)", 0.0, 50.0, 0.0, step=0.1)
+        a_age = c2.number_input("가입·개시 나이", max(p["age"], 45), 90, max(p["age"], 65))
+        a_joint = c3.checkbox("부부형 (한 명이라도 살아있으면 지급)")
+        st.markdown("**간병보험**")
+        c1, c2 = st.columns(2)
+        c_ben = c1.number_input("간병 시 연 보장액 (만 원)", 0, 10000, 0, step=100)
+        c_who = c2.radio("피보험자", ["본인", "배우자"], horizontal=True, disabled=not p["spouse"])
+        pc = 0
+        if p["age"] < p["retire_age"]:
+            st.markdown("**연금저축·IRP 추가 납입 (은퇴 전)**")
+            pc = st.number_input("월 납입액 (만 원) — 저축액 중 일부를 연금계좌로", 0, 500, 0, step=10)
+        go_cmp = st.form_submit_button("비교하기", type="primary", width="stretch")
+
+    if go_cmp:
+        ss.ad_code, ss.ad_samt = code.strip(), s_amt
+        items, info = [], {}
+        if s_amt > 0:
+            if manual or not code.strip():
+                stt = {"beta": m_beta, "idio_sigma": m_idio / 100, "rate_beta": m_rate, "name": "직접 입력"}
+            else:
+                try:
+                    with st.spinner("종목 데이터 조회 중"):
+                        stt = stock_lookup(code.strip())
+                    stt["name"] = code.strip()
+                except Exception as ex:
+                    st.error(f"종목 데이터를 가져오지 못했습니다: {ex} — '직접 입력값 사용'으로 계산할 수 있습니다.")
+                    stt = None
+            if stt:
+                info["stock"] = stt
+                items.append((f"주식 {stt['name']} {s_amt:.1f}억", {"stock_amount": s_amt * 10000, "stock_beta": stt["beta"],
+                              "stock_idio_sigma": stt["idio_sigma"], "stock_rate_beta": stt["rate_beta"]}))
+        if d_amt > 0: items.append((f"예금 {d_amt:.1f}억", {"deposit_amount": d_amt * 10000}))
+        if a_amt > 0: items.append((f"종신연금 {a_amt:.1f}억 ({a_age}세{', 부부형' if a_joint else ''})",
+                                   {"annuity_premium": a_amt * 10000, "annuity_start_age": int(a_age), "annuity_joint": bool(a_joint)}))
+        if c_ben > 0: items.append((f"간병보험 연 {c_ben:,}만 원 ({c_who})", {"care_benefit": float(c_ben), "care_member": 0 if c_who == "본인" else 1}))
+        if pc > 0: items.append((f"연금저축 월 {pc}만 원", {"pension_contrib_annual": float(pc * 12)}))
+        if not items:
+            st.info("추가할 상품의 금액을 하나 이상 입력하세요.")
+        else:
+            if len(items) > 1:
+                allv = {}
+                for _, v in items: allv.update(v)
+                items.append(("모두 추가", allv))
+            rows, results = [], {}
+            with st.spinner("비교 계산 중"):
+                for label, v in [("지금 계획", {})] + items:
+                    r = run(p, {"addons": v} if v else {}); results[label] = r; rs = r["s"]
+                    dlt, ci = paired(r, base) if v else (0.0, 0.0)
+                    rows.append({"구성": label, "기본생활 유지": pct(rs["기본생활 유지 확률"]),
+                                 "변화": "—" if not v else f"{-dlt * 100:+.1f}%p (±{ci * 100:.1f})",
+                                 "부족할 때 평균 부족액": f"{rs.get('부족 시 평균 부족액(실질)', 0) / 10000:.2f}억",
+                                 "85세 금융자산 (중간값)": f"{r['p50_85'] / 10000:.2f}억",
+                                 "여행·취미 충족": pct(rs.get("여행·취미 평균 충족률", 0)) if p["lifestyle"] > 0 else "—",
+                                 "남길 자산 달성": pct(rs.get("유산 목표 달성 확률", 0)) if p["legacy"] > 0 else "—"})
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+            st.caption("변화: 같은 1만 가지 미래에서의 기본생활 유지 확률 차이(95% 신뢰구간). "
+                       "부족할 때 평균 부족액: 돈이 모자란 경우 평생 모자란 기본생활비 합계(오늘 가치) — 작을수록 덜 심각합니다.")
+            if "stock" in info:
+                stt = info["stock"]; r = next(v for k, v in results.items() if k.startswith("주식"))
+                st.markdown(f"**종목 {stt['name']} 통계**" + (f" ({stt.get('start','')} ~ {stt.get('end','')}, {stt.get('months','')}개월)" if "months" in stt else ""))
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("시장 베타", f"{stt['beta']:.2f}")
+                c2.metric("기존 자산과 상관", f"{r['stock_corr']:.2f}" if r["stock_corr"] is not None else "—")
+                c3.metric("연 변동성", f"{stt.get('sigma', np.sqrt(stt['beta']**2*0.18**2+stt['idio_sigma']**2)) * 100:.0f}%")
+                c4.metric("금리 +1%p 때", f"{stt['rate_beta']:+.1f}%" if abs(stt["rate_beta"]) > 1e-9 else "자료 없음")
+                st.caption("기대수익은 과거 수익률이 아니라 '금리 + 베타 × 위험프리미엄'으로 계산합니다. "
+                           "금리 민감도는 ECOS 키가 설정된 경우에만 추정됩니다.")
+            for k, r in results.items():
+                if k.startswith("종신연금") and r["annuity_pay"] > 0:
+                    st.caption(f"{k}: 예상 연금액 연 약 {r['annuity_pay']:,.0f}만 원 (가입 시점 명목 금액, 물가연동 아님, 사업비 5% 가정)")
+                if k.startswith("간병보험") and r["care_premium"] > 0:
+                    st.caption(f"{k}: 모델로 산출한 보험료 연 약 {r['care_premium']:,.0f}만 원 ({80}세까지 납입, 부가보험료 30% 가정)")
 
 with tab3:
     st.markdown("정해진 위기가 온다고 가정했을 때 목표가 얼마나 흔들리는지 봅니다.")

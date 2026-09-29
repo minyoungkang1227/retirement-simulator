@@ -66,6 +66,36 @@ class CareShock:
 
 
 @dataclass
+class AddOns:
+    """v15 '상품 추가해 보기': 기존 계획에 금융상품을 더했을 때 위험이 어떻게 바뀌는지 비교.
+    금액 단위 만원(현재가치). 주식·예금·연금 일시납은 기존 금융자산에서 옮기는 것으로 가정."""
+    # 개별 주식 (종목 통계는 market_data.stock_stats로 추정)
+    stock_amount: float = 0.0
+    stock_beta: float = 1.0          # 시장(KOSPI) 베타
+    stock_idio_sigma: float = 0.25   # 고유 변동성(연)
+    stock_rate_beta: float = 0.0     # 금리 1.0(=100%p) 변화당 로그수익률 변화 (예: -2.0 → 금리 +1%p에 -2%)
+    stock_name: str = ""
+    # 예금 (단기금리로 운용, 이자는 금융소득)
+    deposit_amount: float = 0.0
+    # 종신연금 (일시납 즉시·거치형, 연금보험 비과세 가정)
+    annuity_premium: float = 0.0
+    annuity_start_age: int = 65      # 본인 나이 기준 가입·개시 시점
+    annuity_joint: bool = False      # 부부 중 한 명이라도 살아있으면 지급
+    annuity_loading: float = 0.05    # 사업비
+    annuity_rate: float = 0.03       # 가격 산출 할인율(공시이율 가정)
+    annuity_mort_mult: float = 0.8   # 가입자 선택효과: 사망률 80%로 가격 산출
+    # 간병보험 (간병 상태에서 매년 정액 지급, 다중상태 모델 필요)
+    care_benefit: float = 0.0        # 연 보장액(명목 정액)
+    care_member: int = 0             # 피보험자 (0=본인, 1=배우자)
+    care_pay_until: int = 80         # 보험료 납입 종료 나이
+    care_loading: float = 0.3        # 부가보험료율
+    care_rate: float = 0.03
+    # 연금저축·IRP 추가 납입 (은퇴 전, 세액공제 후 연금계좌로)
+    pension_contrib_annual: float = 0.0
+    pension_credit_rate: float = 0.132
+
+
+@dataclass
 class CareMarkov:
     """간병 다중상태 마르코프 모델 (v11): 건강(H) ⇄ 간병(C) → 사망(D).
 

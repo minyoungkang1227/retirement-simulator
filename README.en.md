@@ -20,7 +20,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 ② 10,000 scenarios: rates, inflation and equities (linked stochastic processes) × each spouse's lifespan and long-term care (multi-state model)
 ③ Cash flow: savings before retirement; after retirement, essential spending first and lifestyle only when affordable
 ④ Taxes, health premiums, property taxes and inheritance tax
-⑤ Output: income gap, goal-by-goal success, required assets, what-if comparisons
+⑤ Output: income gap, goal-by-goal success, required assets, what-if comparisons, add-on products (stocks, deposits, annuities, insurance)
 ```
 
 ## What makes it different
@@ -81,6 +81,7 @@ retire_sim/        model package
   engine_tax.py    tax, accounts, housing, business income and goal guardrail engine
   tax.py           Korean tax and health-insurance rules (as of 2026-09)
   calibrate.py     OU maximum likelihood and ECOS data helpers
+  market_data.py   ticker → beta, correlation, rate sensitivity
   metrics.py       depletion probability, confidence intervals, paired comparisons
 notebooks/         Colab analysis notebook
 scripts/           validation and sensitivity scripts
@@ -108,9 +109,10 @@ python scripts/validate_v11.py      # validation
 | Web app (Streamlit) | Done |
 | v12 goal-based rebuild (three goals, income gap, accumulation phase, model portfolios, step-by-step input) | Done |
 | Statistics Korea 2024 complete life table (v13) | Done |
+| Add-on products v15: stocks by ticker (beta, correlation, rate sensitivity), deposits, life annuities, long-term-care insurance, pension contributions | Done |
 | ECOS rate/inflation estimation (v14) | Done |
 | Cohort mortality improvement, real data for equity returns and care incidence | Planned |
-| Insurance module, home sale and reverse mortgage | Planned |
+| Home sale and reverse mortgage | Planned |
 | Account/budget-app import, periodic re-measurement | Planned |
 
 See [CHANGELOG.md](CHANGELOG.md) and [docs/MODEL.en.md](docs/MODEL.en.md) for details.
