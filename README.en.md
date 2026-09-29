@@ -37,12 +37,16 @@ retire_sim/        model package
   engine_tax.py    tax, account, housing and business-income engine
   tax.py           Korean tax and health-insurance rules (as of 2026-09)
   metrics.py       depletion probability, confidence intervals, fan charts
+streamlit_app.py   web app (Streamlit)
 notebooks/         Colab notebook (edit only the input cell)
 scripts/           validation, sensitivity and example scripts
 docs/              equations and design notes (MODEL.md / MODEL.en.md), figures
 ```
 
 ## Usage
+
+**Web app (no install):** https://<app-url>.streamlit.app — step-by-step inputs (retirement timing, assets, essential spending, lifestyle budget, pensions, legacy, risk profile) lead to goal-by-goal success probabilities and what-if actions (retire later, save more, spend less, change profile). Korean UI; inputs are not stored.
+
 
 **Colab:** click the badge above and select `Runtime > Run all`. Change only the numbers in the Step 2 input cell. The notebook is in Korean; its first cell has an English guide. Amounts are in units of KRW 10,000 (만원).
 
@@ -95,9 +99,11 @@ Couple aged 60 and 58, KRW 500M in financial assets, KRW 3M monthly spending. As
 | Taxes, health premiums, holding taxes, inheritance/gift tax, business income (approximate) | Done |
 | Model enhancements v10: Fisher link between rates and inflation (two-factor bond pricing), fees, parameter uncertainty, crash jumps, antithetic variates | Done |
 | Mathematical refinements v11: paired-difference CIs, integrated rates, multi-state care model, term premium, OU maximum likelihood ([changelog](CHANGELOG.md)) | Done |
+| Web app (Streamlit): results, choice comparison, crisis scenarios, tax comparison | Done |
+| Goal-based rebuild v12: essential/lifestyle/legacy goals, income gap, accumulation phase, model portfolios, step-by-step input ([changelog](CHANGELOG.md)) | Done |
 | Parameters from Statistics Korea life tables and Bank of Korea (ECOS) data | Planned |
 | Insurance module (life annuities, long-term-care insurance), home sale and reverse mortgage | Planned |
-| Accumulation phase for people in their 40s, account/budget-app import, periodic re-measurement | Planned |
+| Account/budget-app import, periodic re-measurement | Planned |
 
 ## Limitations
 

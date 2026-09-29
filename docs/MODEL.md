@@ -194,3 +194,12 @@ $Cov(\varepsilon_{1i},W_s)=c_{is}\sigma_iE(\kappa_i)$, $Cov(\varepsilon_{2i},W_s
 **⑤ OU 최우추정.** $X_{t+\Delta}=a+bX_t+\varepsilon$에서 $\hat\kappa=-\ln\hat b/\Delta$, $\hat\theta=\hat a/(1-\hat b)$, $\hat\sigma^2=\hat s^2\,2\hat\kappa/(1-\hat b^2)$, $SE(\hat\theta)$는 델타 방법. 피셔 모드 보정은 물가(전년동월비)와 사후 실질금리(명목−물가)에 각각 적용하며, 기대물가 기반 실질금리는 칼만 필터로 확장 예정.
 
 전후 수치는 [CHANGELOG.md](../CHANGELOG.md) 참고.
+
+
+## 15. v12 목표 기반 구조
+
+- 지출: 기본생활 $E_t$(보호 대상), 선택지출 $L_t$(여행·취미), 남길 자산 목표 $G$.
+- 가드레일: 은퇴 후 매년 보호선 $F_t=\max(E_t-I_t,0)\cdot\ddot a_{\overline{n}|2\%}$, $n=\max(5,\,95-x_t)$. 선택지출 지급액 $=\min(L_t,\max(W_t-F_t,0))$.
+- 지표: 기본생활 유지 확률 $P(\text{고갈 없음})$, 선택지출 충족률(은퇴 후 생존 연도의 지급률 평균), 유산 달성 확률 $P(\text{세후 상속액}\ge G)$.
+- 적립기: 은퇴 전에는 지출 없이 연 저축액을 과세계좌에 더함.
+- 필요 금융자산: 기본생활 유지 확률이 90%가 되는 초기 자산을 공통 난수 위에서 이분법으로 탐색.

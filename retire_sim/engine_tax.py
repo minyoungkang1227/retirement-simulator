@@ -43,6 +43,9 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     tax_y = np.zeros((n, T)); hi_y = np.zeros((n, T)); prop_y = np.zeros((n, T))
     estate_real = np.full(n, np.nan); etax_real = np.full(n, np.nan); transfer_real = np.full(n, np.nan)
     w = hh.stock_weight; W_hist = np.zeros((n, T + 1)); W_hist[:, 0] = Wt
+    ess_base = hh.essential if hh.essential is not None else hh.annual_spending
+    spend_base = ess_base + hh.lifestyle
+    life_ratio = np.full((n, T), np.nan)
 
     def sell_from_taxable(amount):
         """과세계좌에서 매도: 실현이익 반환(해외주식분만 과세 대상)."""
@@ -81,7 +84,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         realized = np.zeros(n); gift_tax_now = np.zeros(n)
         if tc.enabled and tc.gift_per_child_10y > 0 and t % 10 == 0:
             want = tc.gift_per_child_10y * tc.n_children * cpi[:, t] * live
-            buf = np.maximum(Wt - buffer_years * hh.annual_spending * cpi[:, t], 0)
+            buf = np.maximum(Wt - buffer_years * spend_base * cpi[:, t], 0)
             g = np.minimum(want, buf)
             amt, gain = sell_from_taxable(g); realized += gain
             per_child = amt / max(tc.n_children, 1)
@@ -89,7 +92,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             gifts_hist.append((t, amt, gtax)); gift_val += amt - gtax; gift_tax_now = gtax
 
         # 3) 계좌 이전 (생활비 버퍼 유지)
-        buf = np.maximum(Wt - buffer_years * hh.annual_spending * cpi[:, t], 0)
+        buf = np.maximum(Wt - buffer_years * spend_base * cpi[:, t], 0)
         if tc.enabled and tc.use_isa:
             room = np.minimum(tc.isa_annual * na, np.maximum(tc.isa_total * na - isa_in, 0))
             amt, gain = sell_from_taxable(np.minimum(room, buf) * live); realized += gain
@@ -104,7 +107,9 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
 
         # 5) 지출·간병비
         ratio = np.where(na >= 2, 1.0, hh.survivor_spending_ratio)
-        spend = hh.annual_spending * ratio * cpi[:, t] * live
+        retired = True if hh.retire_age is None else (hh.members[0].age + t >= hh.retire_age)
+        ess = ess_base * ratio * cpi[:, t] * live
+        life_want = hh.lifestyle * ratio * cpi[:, t] * live
         care = np.zeros(n)
         if markov:
             care = (incare[:, :, t] * care_level).sum(0) * cpi[:, t]
@@ -118,7 +123,20 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 care_left[i] = np.where(act, care_left[i] - 1, 0)
 
         # 6) 연금계좌 인출
-        need = spend + care - nps.sum(0) - priv.sum(0) - rent - bz.sum(0)
+        income_all = nps.sum(0) + priv.sum(0) + rent + bz.sum(0)
+        if retired:
+            # 목표 우선순위: 기본생활(Essential) 보호선을 먼저 지키고, 남는 만큼만 여행·취미(Lifestyle) 지출
+            yrs_left = max(5, hh.planning_age - (youngest + t))
+            ann = (1 - 1.02 ** -yrs_left) / 0.02            # 실질 2%로 할인한 연금현가계수
+            floor = np.maximum(ess - income_all, 0) * ann
+            life_paid = np.clip(Wt + Wi + Wp - floor, 0, life_want)
+            spend = ess + life_paid
+            if hh.lifestyle > 0:
+                life_ratio[:, t] = np.where(live, life_paid / np.maximum(life_want, 1e-9), np.nan)
+            saving = 0.0
+        else:
+            spend = np.zeros(n); saving = hh.annual_saving * cpi[:, t] * live
+        need = spend + care - income_all - saving
         pw = np.zeros(n); pw_taxable = np.zeros(n)
         if tc.enabled and tc.use_pension and t >= tc.pen_wait_years:
             pw = np.clip(np.minimum(need, tc.pen_withdraw_cap * na), 0, Wp)
@@ -205,7 +223,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             transfer_real = np.where(died_all, (est - et + gift_val) / cpi[:, t + 1], transfer_real)
 
     return {"depleted_at": dep_at, "youngest_age": youngest, "T": T, "antithetic": eco.get("antithetic", False), "tax_y": tax_y, "hi_y": hi_y, "prop_y": prop_y,
-            "estate_real": estate_real, "estate_tax_real": etax_real, "transfer_real": transfer_real,
+            "estate_real": estate_real, "life_ratio": life_ratio, "legacy_target": hh.legacy_target, "estate_tax_real": etax_real, "transfer_real": transfer_real,
             "W_nominal": W_hist, "W_real": W_hist / cpi, "hh_alive": hh_alive,
             "last_alive_t": hh_alive.sum(1) - 1, "cpi": cpi}
 
@@ -225,4 +243,23 @@ def summarize(res):
             "20년 건보료": float(res["hi_y"][:, :y].sum(1).mean()),
             "20년 보유세": float(res["prop_y"][:, :y].sum(1).mean()),
             "상속세(중앙값)": med(res["estate_tax_real"]),
-            "가족 이전 총액(중앙값)": med(res["transfer_real"])}
+            "가족 이전 총액(중앙값)": med(res["transfer_real"]),
+            **goal_summary(res)}
+
+
+def goal_summary(res):
+    """목표별 달성 지표: 기본생활 유지 확률, 여행·취미 충족률, 유산 달성 확률."""
+    d = res["depleted_at"]
+    out = {"기본생활 유지 확률": float((d < 0).mean())}
+    lr = res.get("life_ratio")
+    if lr is not None and np.any(~np.isnan(lr)):
+        cnt = (~np.isnan(lr)).sum(1)
+        per = np.where(cnt > 0, np.nansum(lr, 1) / np.maximum(cnt, 1), np.nan)
+        per = per[~np.isnan(per)]
+        out["여행·취미 평균 충족률"] = float(per.mean())
+        out["여행·취미 90% 이상 유지 확률"] = float((per >= 0.9).mean())
+    tgt = res.get("legacy_target", 0) or 0
+    if tgt > 0:
+        est = res["estate_real"]
+        out["유산 목표 달성 확률"] = float(np.mean(np.nan_to_num(est, nan=0.0) >= tgt))
+    return out

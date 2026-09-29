@@ -22,6 +22,13 @@ class Household:
     stock_weight: float = 0.5     # 주식 비중(연 1회 리밸런싱)
     annual_spending: float = 3600 # 부부 기준 연 생활비(만원, 현재가치)
     survivor_spending_ratio: float = 0.7  # 한 명 사망 시 생활비 비율
+    # ── v12 목표 기반(Goal-Based) 설정 ──
+    essential: Optional[float] = None     # 기본생활비(연, 만원). None이면 annual_spending 사용
+    lifestyle: float = 0.0                # 여행·취미 등 선택 지출(연, 만원). 자산이 부족하면 먼저 줄임
+    legacy_target: float = 0.0            # 남기고 싶은 금액(만원, 현재가치)
+    retire_age: Optional[int] = None      # 본인(첫 구성원) 은퇴 나이. None이면 이미 은퇴
+    annual_saving: float = 0.0            # 은퇴 전 연 저축액(만원, 현재가치)
+    planning_age: int = 95                # 기본생활비 보호선 계산용 계획 나이
 
 
 @dataclass

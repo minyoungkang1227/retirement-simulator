@@ -182,3 +182,12 @@ With the v10 settings the overall depletion probability is 49.1% (74.6% with the
 - **⑤ OU maximum likelihood.** Exact MLE via the AR(1) closed form with delta-method standard errors, plus ECOS fetch and Fisher-mode calibration helpers. Synthetic tests recover θ and σ; κ shows the known small-sample upward bias.
 
 Before/after numbers are in [CHANGELOG.md](../CHANGELOG.md).
+
+
+## 15. v12 goal-based structure
+
+- Spending split into Essential $E_t$ (protected), Lifestyle $L_t$ (flexible) and a Legacy target $G$.
+- Guardrail: after retirement, the floor $F_t=\max(E_t-I_t,0)\cdot\ddot a_{\overline{n}|2\%}$ with $n=\max(5,95-x_t)$; lifestyle paid $=\min(L_t,\max(W_t-F_t,0))$.
+- Metrics: essential success probability, average lifestyle funding ratio, probability that after-tax estate ≥ $G$.
+- Accumulation phase: before retirement no spending, annual savings added.
+- Required assets: bisection on initial assets for a 90% essential success probability, using common random numbers.
