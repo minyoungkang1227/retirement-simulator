@@ -71,7 +71,8 @@ def build(p: dict, v: dict):
                    lifestyle=p["lifestyle"] * m, legacy_target=p["legacy"] * 10000,
                    retire_age=retire if p["age"] < retire else None,
                    annual_saving=(p["saving"] + v.get("saving_delta", 0)) * 12,
-                   survivor_spending_ratio=p["survivor"] / 100)
+                   survivor_spending_ratio=p["survivor"] / 100,
+                   floor_method="fixed95" if p.get("floor") == "보수적" else "actuarial")
     care = CareMarkov() if p["enhanced"] else CareShock()
     if v.get("care_mult"):
         care = CareMarkov(incidence=tuple((a, x * v["care_mult"]) for a, x in CareMarkov().incidence)) \
@@ -289,13 +290,15 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 overseas = c1.slider("주식 중 해외주식 (%)", 0, 100, p["overseas"], step=10)
                 own_equal = c2.checkbox("금융자산 부부 균등 명의", value=p["own_equal"])
                 survivor = st.slider("한 명만 남았을 때 생활비 (%)", 40, 100, p["survivor"], step=5)
+                floor = st.radio("기본생활비 보호 방식", ["계리적", "보수적"], index=0 if p.get("floor", "계리적") == "계리적" else 1, horizontal=True,
+                                 captions=["생존확률로 가중한 앞으로의 부족분 (연금 개시 반영)", "95세까지 지금 부족분이 계속된다고 가정"])
                 enhanced = st.toggle("강화 모델 (금리-물가 연결, 운용보수, 간병 다중상태 등)", value=p["enhanced"])
                 paths = st.select_slider("시나리오 수", [2000, 5000, 10000], value=p["paths"])
             back, nxt = nav(i, "s7")
             if nxt or back:
                 p.update(h_official=h_off, h_market=h_mkt, h_n=int(h_n), h_joint=bool(h_joint), h_years=int(h_years),
                          h_hi=float(h_hi), rent=int(rent), biz=int(biz), biz_until=int(biz_until), biz_work=bool(biz_work),
-                         overseas=int(overseas), own_equal=bool(own_equal), survivor=int(survivor),
+                         overseas=int(overseas), own_equal=bool(own_equal), survivor=int(survivor), floor=floor,
                          enhanced=bool(enhanced), paths=int(paths)); go(1 if nxt else -1)
         else:
             need, pension, gap = income_gap(p)
@@ -519,7 +522,7 @@ with tab5:
     st.markdown("""
 **계산 방식**
 - 금리·물가·주가가 서로 연결되어 움직이는 1만 가지 미래와, 통계청 생명표 기반 부부 각자의 수명·간병을 계산합니다.
-- 목표는 **기본생활 → 여행·취미 → 남길 자산** 순으로 지킵니다. 매년 남은 금융자산이 "95세까지 기본생활비 부족분의 현재가치(실질 2% 할인)"보다 많을 때만 여행·취미 예산을 씁니다.
+- 목표는 **기본생활 → 여행·취미 → 남길 자산** 순으로 지킵니다. 매년 남은 금융자산이 "앞으로 기본생활비 부족분의 기대 현재가치"(생존확률 가중, 연금 개시 반영, 실질 2% 할인, 사망률 80%로 보수적 계산)보다 많을 때만 여행·취미 예산을 씁니다.
 - 국민연금, 사적연금 분리과세, 금융소득종합과세, 건강보험료, 재산세·종부세, 상속·증여세를 반영합니다.
 
 **알아두실 점**

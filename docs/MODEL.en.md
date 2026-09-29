@@ -209,3 +209,8 @@ Standard errors of the long-run means are used as per-path parameter uncertainty
 ## 17. v15 add-on products
 
 Individual stocks (single-index model with a rate-change term; β, idiosyncratic volatility and rate sensitivity estimated from 10 years of monthly prices), deposits, single-premium life annuities (priced with 0.8× life-table mortality, 3% discount, 5% loading; single or joint-last), long-term-care insurance (premium by the equivalence principle on the engine's own care paths, 30% loading) and pension-account contributions (13.2% tax credit). New metric: average real shortfall when depleted. Add-on noise uses a separate random stream so paired comparisons remain valid.
+
+
+## 18. v16 actuarial floor
+
+The essential floor becomes the survival-weighted present value of future essential shortfalls, computed separately for three household states (both alive, only you, only spouse), using life-table survival × 0.8 mortality, a 2% real discount rate, and projected guaranteed income (National Pension from its start age, fixed-nominal private pensions deflated by expected inflation, rent). Lifestyle spending is paid only above this floor. Previously (v12–v15) the current-year shortfall was treated as lasting to age 95 with certainty.

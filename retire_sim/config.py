@@ -28,7 +28,10 @@ class Household:
     legacy_target: float = 0.0            # 남기고 싶은 금액(만원, 현재가치)
     retire_age: Optional[int] = None      # 본인(첫 구성원) 은퇴 나이. None이면 이미 은퇴
     annual_saving: float = 0.0            # 은퇴 전 연 저축액(만원, 현재가치)
-    planning_age: int = 95                # 기본생활비 보호선 계산용 계획 나이
+    planning_age: int = 95                # (v12 방식) 기본생활비 보호선 계산용 계획 나이
+    floor_method: str = "actuarial"       # "actuarial"(v16): 생존확률 가중 현가 / "fixed95"(v12): 95세까지 확정
+    floor_mort_mult: float = 0.8          # 보호선 산출용 사망률 배수 (<1이면 오래 사는 쪽으로 보수적)
+    floor_real_rate: float = 0.02         # 보호선 할인율(실질)
 
 
 @dataclass

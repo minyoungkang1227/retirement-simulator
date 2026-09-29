@@ -226,3 +226,15 @@ ECOS 월별 2000-01~2026-08: 물가 $\pi_t$ = CPI 전년동월비, 실질금리 
 - **간병보험:** 연 보험료 $=(1+\ell)\,B\,E[\sum_t v^t\mathbb 1_{C,t}]\,/\,E[\sum_{t<T_p} v^t\mathbb 1_{H,t}]$ — 엔진의 간병 경로 그대로 사용.
 - **연금저축:** 납입액 → 연금계좌(세액공제 원금은 인출 시 과세), 공제 $\min(c,900)\times13.2\%$.
 - **부족액:** $\sum_t \text{short}_t/CPI_t$ (생존 연도).
+
+
+## 18. v16 계리적 보호선
+
+은퇴 후 $t$년, 가구 생존 상태 $\sigma\in\{\text{부부},\text{본인},\text{배우자}\}$일 때 (오늘 가치)
+
+$$F_t(\sigma)=\sum_{s\ge0} v^s\sum_{\sigma'}P(\sigma'_{t+s}\mid\sigma_t)\,\max\!\big(E\,\rho(\sigma')-I_{t+s}(\sigma'),\,0\big),\quad v=\tfrac1{1.02}$$
+
+- $P$: 각자의 생존확률 $_sp_x$(생명표 × 0.8)로 계산한 상태 확률, $\rho$: 1인 생존 시 생활비 비율
+- $I$: 국민연금(실질 일정, 개시 나이 이후) + 사적연금(명목 정액을 기대물가로 실질화) + 임대수입
+- 선택지출 지급액 $=\min\big(L_t,\ \max(W_t-F_t(\sigma_t)\,CPI_t,\ 0)\big)$, 종신연금 가입 시 그 현가만큼 $F$에서 차감
+- 이전(v12~v15): $F_t=\max(E_t-I_t,0)\cdot\ddot a_{\overline{n}|2\%}$, $n=\max(5,95-x_t)$

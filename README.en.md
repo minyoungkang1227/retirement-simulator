@@ -25,7 +25,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 
 ## What makes it different
 
-1. **Goal-based structure** — essential (protected), lifestyle (flexible) and legacy goals, with a guardrail that cuts flexible spending first in bad scenarios
+1. **Goal-based structure** — essential (protected), lifestyle (flexible) and legacy goals, with a guardrail that cuts flexible spending first in bad scenarios (floor = survival-weighted present value of expected essential shortfalls)
 2. **Korean institutions** — National Pension early/deferred claiming, KRW 15M private-pension threshold, comprehensive financial-income taxation, health premiums (regional/workplace, dependents), property taxes, inheritance and gift taxes
 3. **Actuarial modeling** — joint-life survival from the Statistics Korea 2024 complete life table, multi-state long-term-care Markov model (healthy ⇄ care → dead) calibrated to preserve life-table mortality
 4. **Stochastic economy** — OU real rate and inflation estimated from Bank of Korea (ECOS) data, with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
@@ -34,26 +34,26 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 ## Example (couple aged 52 and 50, retiring at 60, KRW 500M, saving KRW 1.5M/month · placeholder assumptions)
 
 - Essential KRW 3M/month + lifestyle KRW 12M/year − pensions KRW 1.6M/month → **income gap KRW 2.4M/month**
-- Goal success: essential **43%**, lifestyle funding **45%**, KRW 100M legacy **31%**
+- Goal success: essential **37%**, lifestyle funding **52%**, KRW 100M legacy **26%**
 
 | What if | Change in essential success (95% CI) |
 |---|---|
-| Retire 2 years later | **+10.2pp** (±0.6) |
-| Spend 10% less | +8.8pp (±0.6) |
-| Growth profile | +5.8pp (±0.5) |
-| Save KRW 0.5M more per month | +4.6pp (±0.4) |
-| Conservative profile | −10.8pp (±0.6) |
+| Retire 2 years later | **+12.1pp** (±0.6) |
+| Spend 10% less | +9.4pp (±0.6) |
+| Growth profile | +7.4pp (±0.5) |
+| Save KRW 0.5M more per month | +4.7pp (±0.4) |
+| Conservative profile | −11.6pp (±0.6) |
 
 | Crisis | Change in essential success |
 |---|---|
-| Equities −40% in the first year of retirement | −15.9pp |
-| Equities −40% ten years into retirement | −11.1pp |
-| Long-term care risk doubled | −8.4pp |
-| Longer life (mortality −20%) | −6.7pp |
+| Equities −40% in the first year of retirement | −15.0pp |
+| Equities −40% ten years into retirement | −9.8pp |
+| Long-term care risk doubled | −7.6pp |
 | Three years of 6% inflation | −5.5pp |
+| Longer life (mortality −20%) | −4.9pp |
 
 - For this household **retirement timing is the strongest lever**, and the same crash hurts most right after retirement (sequence-of-returns risk).
-- Splitting spending into essential + flexible lowers the depletion probability versus fixed spending of the same total (65.6% → 54.1%).
+- Splitting spending into essential + flexible lowers the depletion probability versus fixed spending of the same total (65.6% → 59.4%).
 
 ![goals](docs/images/goals_whatif.png)
 ![tax strategies](docs/images/tax_strategies.png)
@@ -109,6 +109,7 @@ python scripts/validate_v11.py      # validation
 | Web app (Streamlit) | Done |
 | v12 goal-based rebuild (three goals, income gap, accumulation phase, model portfolios, step-by-step input) | Done |
 | Statistics Korea 2024 complete life table (v13) | Done |
+| Actuarial essential floor v16: survival-weighted present value reflecting pension start and couple survival states | Done |
 | Add-on products v15: stocks by ticker (beta, correlation, rate sensitivity), deposits, life annuities, long-term-care insurance, pension contributions | Done |
 | ECOS rate/inflation estimation (v14) | Done |
 | Cohort mortality improvement, real data for equity returns and care incidence | Planned |

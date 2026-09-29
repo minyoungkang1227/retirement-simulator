@@ -75,6 +75,40 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         pv_prem = (pay * v).sum(1).mean()
         ci_prem = (1 + ad.care_loading) * pv_ben / max(pv_prem, 1e-9)
     stock_ret = np.full((n, T), np.nan); port_ret = np.full((n, T), np.nan)
+
+    # ── v16 기본생활비 보호선: 생존확률 가중 현가 (계리적) ──
+    # 상태 0 = 부부 모두 생존(1인 가구는 본인 생존), 1 = 본인만, 2 = 배우자만.
+    # F[t, 상태] = Σ_s v^s Σ_상태' P(상태'|상태, t→t+s) · max(기본생활비×비율 − 보장소득_실질, 0)   (오늘 가치)
+    floor_tab = None
+    if hh.floor_method == "actuarial":
+        v_r = 1 / (1 + hh.floor_real_rate); pibar = e.pi_theta
+        qf = [np.minimum(qx_table[m.sex] * hh.floor_mort_mult, 1.0) for m in hh.members]
+        def inc_real(i, yr):                               # 구성원 i의 yr년차 보장소득(실질): 국민연금(물가연동) + 사적연금(명목 정액)
+            m = hh.members[i]; age = m.age + yr; x = 0.0
+            if age >= m.nps_start_age: x += pension.nps_annual_amount(m, cfg.nps)
+            if m.private_pension_start <= age < m.private_pension_start + m.private_pension_years:
+                x += m.private_pension_annual / (1 + pibar) ** yr
+            return x
+        rent_real = house.rent_annual
+        H = T + 1; floor_tab = np.zeros((H, 3))
+        for t0 in range(H):
+            horizon = H - t0
+            surv = []
+            for i, m in enumerate(hh.members):
+                x0 = min(m.age + t0, len(qf[i]) - 1)
+                q = qf[i][x0:x0 + horizon]; q = np.concatenate([q, np.ones(max(0, horizon - len(q)))])
+                surv.append(np.concatenate([[1.0], np.cumprod(1 - q)[:-1]]))   # s년 뒤 생존확률
+            vs = v_r ** np.arange(horizon)
+            yrs = np.arange(t0, t0 + horizon)
+            gap = lambda members, ratio: np.array([max(ess_base * ratio - sum(inc_real(i, y) for i in members) - rent_real, 0.0) for y in yrs])
+            g0 = gap([0], 1.0 if k == 1 else hh.survivor_spending_ratio)
+            if k == 1:
+                floor_tab[t0, :] = np.sum(vs * surv[0] * g0); continue
+            g1 = gap([1], hh.survivor_spending_ratio); gb = gap([0, 1], 1.0)
+            p0, p1 = surv[0], surv[1]
+            floor_tab[t0, 0] = np.sum(vs * (p0 * p1 * gb + p0 * (1 - p1) * g0 + (1 - p0) * p1 * g1))
+            floor_tab[t0, 1] = np.sum(vs * p0 * g0)
+            floor_tab[t0, 2] = np.sum(vs * p1 * g1)
     short_real = np.zeros(n)                                   # 생존 중 부족했던 기본생활비 누계(실질)
 
     def sell_from_taxable(amount):
@@ -167,9 +201,15 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         income_all = nps.sum(0) + priv.sum(0) + rent + bz.sum(0) + ann_inc + ci_ben
         if retired:
             # 목표 우선순위: 기본생활(Essential) 보호선을 먼저 지키고, 남는 만큼만 여행·취미(Lifestyle) 지출
-            yrs_left = max(5, hh.planning_age - (youngest + t))
-            ann = (1 - 1.02 ** -yrs_left) / 0.02            # 실질 2%로 할인한 연금현가계수
-            floor = np.maximum(ess - income_all, 0) * ann
+            if floor_tab is not None:
+                st_idx = np.where(a[0] & (a[1] if k > 1 else True), 0, np.where(a[0], 1, 2)) if k > 1 else np.zeros(n, int)
+                floor = floor_tab[t, st_idx] * cpi[:, t] * live
+                if ad.annuity_premium > 0 and t >= ann_t:           # 종신연금 소득은 보장소득으로 보호선에서 차감
+                    floor = np.maximum(floor - ann_inc * annuity_factor(t) / (1 + e.pi_theta), 0)
+            else:
+                yrs_left = max(5, hh.planning_age - (youngest + t))
+                ann = (1 - 1.02 ** -yrs_left) / 0.02            # (v12) 실질 2%로 할인한 확정 연금현가계수
+                floor = np.maximum(ess - income_all, 0) * ann
             life_paid = np.clip(Wt + Wi + Wp + S + D - floor, 0, life_want)
             spend = ess + life_paid
             if hh.lifestyle > 0:
@@ -283,7 +323,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
 
     return {"depleted_at": dep_at, "youngest_age": youngest, "T": T, "antithetic": eco.get("antithetic", False), "tax_y": tax_y, "hi_y": hi_y, "prop_y": prop_y,
             "estate_real": estate_real, "life_ratio": life_ratio, "stock_ret": stock_ret, "port_ret": port_ret, "short_real": short_real,
-            "annuity_pay": float(np.median(ann_pay[ann_pay > 0])) if (ann_pay > 0).any() else 0.0, "care_premium": ci_prem, "legacy_target": hh.legacy_target, "estate_tax_real": etax_real, "transfer_real": transfer_real,
+            "floor_tab": floor_tab, "annuity_pay": float(np.median(ann_pay[ann_pay > 0])) if (ann_pay > 0).any() else 0.0, "care_premium": ci_prem, "legacy_target": hh.legacy_target, "estate_tax_real": etax_real, "transfer_real": transfer_real,
             "W_nominal": W_hist, "W_real": W_hist / cpi, "hh_alive": hh_alive,
             "last_alive_t": hh_alive.sum(1) - 1, "cpi": cpi}
 
