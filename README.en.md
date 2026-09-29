@@ -1,122 +1,125 @@
-# Probabilistic Retirement Simulator (Korea)
+# Nohu Compass — Probabilistic Retirement Simulator (Korea)
 
 [한국어](README.md) | **English**
 
-**An actuarial, probability-based retirement simulator built around Korea's pension, tax, and health-insurance rules.**
+**An actuarial, probability-based retirement simulator built around Korea's pension, tax and health-insurance rules — asking not "how much have I saved?" but "can I sustain the retirement I want?"**
 
-Instead of a fixed-return calculation, it answers "Will my retirement savings last?" with **10,000 economic and longevity scenarios**.
-Results are presented as **comparisons between choices on the same scenarios**, not as recommendations.
+It evaluates three goals — essential living, lifestyle (travel, hobbies) and legacy — across 10,000 economic and longevity scenarios, and compares **what changes bring you closer to your goals**. Results are comparisons on the same scenarios, not recommendations.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/minyoungkang1227/retirement-simulator/blob/main/notebooks/retire_sim_colab.ipynb)
+- **Web app (no install, Korean UI):** https://<app-url>.streamlit.app
+- [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/minyoungkang1227/retirement-simulator/blob/main/notebooks/retire_sim_colab.ipynb) (analysis notebook)
 
 ## Motivation
 
-Most retirement calculators offered by Korean banks and insurers fix both returns and lifespan. International tools (Boldin, ProjectionLab) use Monte Carlo simulation, but their tax and pension rules are US-specific. This project fills the gap between the two.
+Most Korean retirement calculators fix returns and lifespan and ignore taxes and health-insurance premiums, so results are optimistic. International tools (Boldin, ProjectionLab) use Monte Carlo simulation but US rules. This project combines **Korean institutions, stochastic models and actuarial models** to fill that gap.
+
+## How it works
+
+```
+① Step-by-step input: retirement timing → assets → essential spending → lifestyle budget → pensions → legacy → risk profile → final check
+② 10,000 scenarios: rates, inflation and equities (linked stochastic processes) × each spouse's lifespan and long-term care (multi-state model)
+③ Cash flow: savings before retirement; after retirement, essential spending first and lifestyle only when affordable
+④ Taxes, health premiums, property taxes and inheritance tax
+⑤ Output: income gap, goal-by-goal success, required assets, what-if comparisons
+```
 
 ## What makes it different
 
-1. **Korean institutions** — National Pension early/deferred claiming, the KRW 15M private-pension separate-taxation threshold, comprehensive financial-income taxation, National Health Insurance premiums (regional/workplace, dependent eligibility), property and comprehensive real-estate holding taxes, inheritance and gift taxes
-2. **Actuarial modeling** — joint-life survival of couples from life tables, long-term-care cost jumps, mortality credits
-3. **Stochastic economy** — Vasicek short rate and Ornstein–Uhlenbeck inflation with exact discretization, closed-form bond pricing, rate-linked equity returns
-4. **Choice comparison** — pension claiming age, ISA and pension-account strategies, ownership splitting, and gifting strategies compared with common random numbers
+1. **Goal-based structure** — essential (protected), lifestyle (flexible) and legacy goals, with a guardrail that cuts flexible spending first in bad scenarios
+2. **Korean institutions** — National Pension early/deferred claiming, KRW 15M private-pension threshold, comprehensive financial-income taxation, health premiums (regional/workplace, dependents), property taxes, inheritance and gift taxes
+3. **Actuarial modeling** — joint-life survival from life tables, multi-state long-term-care Markov model (healthy ⇄ care → dead) calibrated to preserve life-table mortality
+4. **Stochastic economy** — OU real rate and inflation with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
+5. **Statistically honest comparisons** — paired-difference confidence intervals on common random numbers decide "different / not different"
+
+## Example (couple aged 52 and 50, retiring at 60, KRW 500M, saving KRW 1.5M/month · placeholder assumptions)
+
+- Essential KRW 3M/month + lifestyle KRW 12M/year − pensions KRW 1.6M/month → **income gap KRW 2.4M/month**
+- Goal success: essential **42%**, lifestyle funding **46%**, KRW 100M legacy **31%**
+
+| What if | Change in essential success (95% CI) |
+|---|---|
+| Retire 2 years later | **+10.4pp** (±0.6) |
+| Spend 10% less | +9.2pp (±0.6) |
+| Growth profile | +6.6pp (±0.5) |
+| Save KRW 0.5M more per month | +4.9pp (±0.4) |
+| Conservative profile | −10.8pp (±0.6) |
+
+| Crisis | Change in essential success |
+|---|---|
+| Equities −40% in the first year of retirement | −14.9pp |
+| Equities −40% ten years into retirement | −10.1pp |
+| Long-term care risk doubled | −8.2pp |
+| Longer life (mortality −20%) | −7.0pp |
+| Three years of 6% inflation | −6.7pp |
+
+- For this household **retirement timing is the strongest lever**, and the same crash hurts most right after retirement (sequence-of-returns risk).
+- Splitting spending into essential + flexible lowers the depletion probability versus fixed spending of the same total (65.6% → 54.2%).
+
+![goals](docs/images/goals_whatif.png)
+![tax strategies](docs/images/tax_strategies.png)
+![sensitivity](docs/images/sensitivity.png)
+
+## Validation
+
+- Exact OU/Vasicek discretization matches theoretical moments (rate 2.99%/1.84% vs 3.00%/1.83%)
+- Bond prices: Vasicek closed form 0.87706 vs Monte Carlo 0.87723; two-factor 0.87553 vs 0.87518
+- Integrated-rate 5×5 joint covariance: max correlation error 0.005 vs fine-step simulation
+- Multi-state care model preserves life expectancy at 60 (23.5 → 23.6 years)
+- OU maximum likelihood recovers long-run mean and volatility on synthetic data (small-sample upward bias in mean-reversion speed confirmed)
+- Paired-difference CIs for comparisons (±1.38pp under independence → ±0.44pp)
 
 ## Structure
 
 ```
-Inputs → Economic scenarios (Vasicek, OU, equity, bonds) → Mortality (couple)
-       → Institutions & tax module → Cash-flow engine (10,000 paths, 3 accounts + housing) → Metrics
-       → Choice comparison / shock tests / sensitivity
-```
-
-```
+streamlit_app.py   web app (step-by-step input → goal results → what-if)
 retire_sim/        model package
-  config.py        input schema
-  economy_v2.py    rate, inflation, equity and bond scenarios (shock inputs supported)
-  mortality.py     mortality (placeholder Gompertz; Statistics Korea life-table CSV loader)
-  engine.py        base cash-flow engine
-  engine_tax.py    tax, account, housing and business-income engine
+  config.py        input schema (three goals, accumulation phase, care model)
+  economy_v2.py    rate, inflation, equity and bond scenarios (Fisher link, integrated rates, jumps, shocks)
+  mortality.py     mortality and multi-state care Markov model
+  engine_tax.py    tax, accounts, housing, business income and goal guardrail engine
   tax.py           Korean tax and health-insurance rules (as of 2026-09)
-  metrics.py       depletion probability, confidence intervals, fan charts
-streamlit_app.py   web app (Streamlit)
-notebooks/         Colab notebook (edit only the input cell)
-scripts/           validation, sensitivity and example scripts
+  calibrate.py     OU maximum likelihood and ECOS data helpers
+  metrics.py       depletion probability, confidence intervals, paired comparisons
+notebooks/         Colab analysis notebook
+scripts/           validation and sensitivity scripts
 docs/              equations and design notes (MODEL.md / MODEL.en.md), figures
+CHANGELOG.md       version history (what / how / what changed)
 ```
 
 ## Usage
 
-**Web app (no install):** https://<app-url>.streamlit.app — step-by-step inputs (retirement timing, assets, essential spending, lifestyle budget, pensions, legacy, risk profile) lead to goal-by-goal success probabilities and what-if actions (retire later, save more, spend less, change profile). Korean UI; inputs are not stored.
-
-
-**Colab:** click the badge above and select `Runtime > Run all`. Change only the numbers in the Step 2 input cell. The notebook is in Korean; its first cell has an English guide. Amounts are in units of KRW 10,000 (만원).
-
-**Local:**
 ```bash
 pip install -r requirements.txt
-python scripts/validate.py      # checks against theoretical values
-python scripts/sensitivity.py   # sensitivity analysis
+streamlit run streamlit_app.py      # web app
+python scripts/validate_v11.py      # validation
 ```
-
-## Example results
-Couple aged 60 and 58, KRW 500M in financial assets, KRW 3M monthly spending. Assumptions are placeholders.
-
-| National Pension start age | Depletion probability (±1.0pp) |
-|---|---|
-| 60 | 46.6% |
-| 65 | 39.9% |
-| 70 | 40.4% |
-
-| Shock | Depletion probability |
-|---|---|
-| Baseline | 39.9% |
-| Equities −40% in the first year of retirement | 65.3% |
-| Equities −40% ten years later | 55.0% |
-
-- The same crash is far more damaging **right after retirement** (sequence-of-returns risk).
-- The most sensitive input is **spending**, not market assumptions (±10% → 19.7% to 62.4%).
-- Adding taxes, health premiums and holding taxes (example: one home with a KRW 600M assessed value) raises depletion probability from 39.9% to 69.5%; ISA plus pension accounts bring it to 66.7%, while concentrating financial assets in one spouse's name raises it to 71.2%.
-
-![results](docs/images/v2_results.png)
-![sensitivity](docs/images/sensitivity.png)
-![tax strategies](docs/images/tax_strategies.png)
-
-## Validation
-
-- Exact discretization of OU/Vasicek: long-run mean and standard deviation match theory (rate 2.99% / 1.84% vs 3.00% / 1.83%)
-- Vasicek bond price: closed form 0.87706 vs Monte Carlo 0.87723
-- Two-factor bond price (Fisher mode): closed form 0.87553 vs Monte Carlo 0.87518
-- Integrated-rate 5×5 joint covariance: closed form vs fine-step simulation, max correlation error 0.005
-- Multi-state care model preserves life expectancy at 60 (23.5 → 23.6 years)
-- Choice comparisons use paired-difference CIs (±1.38pp → ±0.44pp)
-- Every probability comes with a 95% confidence interval; comparisons use common random numbers, and antithetic variates cut the standard error by about 16%
 
 ## Status
 
 | Component | Status |
 |---|---|
-| Cash-flow engine, couple mortality, care costs, rate/inflation SDEs, validation | Done |
-| Shock tests, sensitivity analysis, confidence intervals | Done |
-| Taxes, health premiums, holding taxes, inheritance/gift tax, business income (approximate) | Done |
-| Model enhancements v10: Fisher link between rates and inflation (two-factor bond pricing), fees, parameter uncertainty, crash jumps, antithetic variates | Done |
-| Mathematical refinements v11: paired-difference CIs, integrated rates, multi-state care model, term premium, OU maximum likelihood ([changelog](CHANGELOG.md)) | Done |
-| Web app (Streamlit): results, choice comparison, crisis scenarios, tax comparison | Done |
-| Goal-based rebuild v12: essential/lifestyle/legacy goals, income gap, accumulation phase, model portfolios, step-by-step input ([changelog](CHANGELOG.md)) | Done |
-| Parameters from Statistics Korea life tables and Bank of Korea (ECOS) data | Planned |
-| Insurance module (life annuities, long-term-care insurance), home sale and reverse mortgage | Planned |
+| Cash-flow engine, couple mortality, rate/inflation SDEs, validation | Done |
+| Shock tests, sensitivity, confidence intervals | Done |
+| Taxes, health premiums, property, inheritance/gift, business income (approximate) | Done |
+| v10 enhancements (Fisher link, fees, parameter uncertainty, crash jumps, antithetic variates) | Done |
+| v11 refinements (paired CIs, integrated rates, multi-state care, term premium, OU MLE) | Done |
+| Web app (Streamlit) | Done |
+| v12 goal-based rebuild (three goals, income gap, accumulation phase, model portfolios, step-by-step input) | Done |
+| Statistics Korea life tables and ECOS data | Planned |
+| Insurance module, home sale and reverse mortgage | Planned |
 | Account/budget-app import, periodic re-measurement | Planned |
+
+See [CHANGELOG.md](CHANGELOG.md) and [docs/MODEL.en.md](docs/MODEL.en.md) for details.
 
 ## Limitations
 
-- Return, inflation, mortality and care assumptions are **placeholders**. Focus on **differences between choices** rather than absolute levels.
-- Tax rules are simplified and reflect Korean law as of 2026-09. **This is not tax or investment advice**; consult a professional before making decisions.
-- See [docs/MODEL.en.md](docs/MODEL.en.md) for equations and limitations.
+- Return, inflation, mortality and care assumptions are **placeholders**. Focus on **differences between choices**.
+- Tax rules are simplified (Korea, as of 2026-09). **Not investment or tax advice.**
+- Web-app inputs are used only for calculation and are not stored.
 
 ## Contact
 
-For questions, feedback, collaboration or licensing inquiries, please reach out by email.
-
 - Email: doongss1@naver.com
-- Full portfolio: [minyoungkang1227/portfolio](https://github.com/minyoungkang1227/portfolio)
 
 ## Copyright
 
