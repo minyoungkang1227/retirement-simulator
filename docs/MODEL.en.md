@@ -192,3 +192,15 @@ Before/after numbers are in [CHANGELOG.md](../CHANGELOG.md).
 - Metrics: essential success probability, average lifestyle funding ratio, probability that after-tax estate ≥ $G$.
 - Accumulation phase: before retirement no spending, annual savings added.
 - Required assets: bisection on initial assets for a 90% essential success probability, using common random numbers.
+
+
+## 16. v14 rate and inflation estimation
+
+ECOS monthly data 2000-01 to 2026-08: inflation = CPI year-on-year; ex-post real rate = 3-year treasury yield − inflation. Exact OU MLE with AR(1) small-sample bias correction $\hat b\to\hat b+(1+3\hat b)/n$.
+
+| Factor | Long-run mean θ (±95%) | Mean reversion κ (before→after correction) | Volatility σ | Start |
+|---|---|---|---|---|
+| Inflation | 2.47% (±1.02pp) | 0.51 → 0.35 | 1.33% | 3.09% |
+| Real rate | 0.73% (±0.74pp) | 0.72 → 0.56 | 1.37% | 0.70% |
+
+Standard errors of the long-run means are used as per-path parameter uncertainty. Nominal long-run mean 3.20%.

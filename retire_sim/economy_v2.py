@@ -47,6 +47,7 @@ class EconomyV2:
     fee: float = 0.0           # 연 운용보수 (예: 0.005 = 0.5%)
     erp_sd: float = 0.0        # ERP 추정 불확실성 (경로별 추출 표준편차)
     pi_theta_sd: float = 0.0   # 장기 물가 추정 불확실성
+    q_theta_sd: float = 0.0    # 장기 실질금리 추정 불확실성 (피셔 모드)
     jump_lambda: float = 0.0   # 주가 점프 연평균 횟수 (Merton)
     jump_mu: float = -0.15     # 점프 크기 로그평균
     jump_sigma: float = 0.10   # 점프 크기 로그표준편차
@@ -56,12 +57,24 @@ class EconomyV2:
     term_premium: float = 0.0      # 위험의 시장가격: 가격용(Q) 장기평균 = θ + term_premium → 채권 기간 프리미엄
 
     @classmethod
-    def enhanced(cls, **kw):
-        """v10 권장 설정: 피셔 연결 + 운용보수 0.5% + 파라미터 불확실성 + 폭락 점프 + 반대 난수."""
+    def enhanced(cls, calibrated: bool = True, **kw):
+        """권장 설정: 피셔 연결 + 운용보수 0.5% + 파라미터 불확실성 + 폭락 점프 + 반대 난수 + 적분 금리 + 기간 프리미엄.
+        calibrated=True(v14 기본): 물가·실질금리 파라미터를 ECOS 실데이터 추정치(CALIBRATED_2026_08)로 사용."""
         base = dict(fisher=True, rho_rp=0.0, fee=0.005, erp_sd=0.01, pi_theta_sd=0.005,
                     jump_lambda=0.1, antithetic=True, integrated_rate=True, term_premium=0.005)
+        if calibrated:
+            base.update(CALIBRATED_2026_08)
         base.update(kw)
         return cls(**base)
+
+
+# ECOS 실데이터 추정 (2000-01~2026-08 월별, 소비자물가지수 901Y009 · 국고채 3년 721Y001/5020000)
+# 물가 = 전년동월비, 실질금리 = 국고채 3년 − 물가(사후). OU 정확 MLE 후 회귀속도는 AR(1) 소표본 편의 보정
+# (Kendall·Marriott-Pope: b + (1+3b)/n). 장기평균의 표준오차는 경로별 파라미터 불확실성으로 사용.
+CALIBRATED_2026_08 = dict(
+    pi_theta=0.0247, pi_kappa=0.35, pi_sigma=0.0133, pi_theta_sd=0.0052, pi0=0.0309,
+    q_theta=0.0073, q_kappa=0.56, q_sigma=0.0137, q_theta_sd=0.0038, q0=0.0070,
+)
 
 
 def _ou_step(x, theta, kappa, sigma, z):
@@ -126,18 +139,19 @@ def generate(e: EconomyV2, T: int, n: int, rng) -> dict:
     L = np.linalg.cholesky(C)
     if e.integrated_rate:
         return _generate_integrated(e, T, n, rng)
-    need_u = e.erp_sd > 0 or e.pi_theta_sd > 0          # 불확실성 끄면 v2와 난수 흐름 동일
+    need_u = e.erp_sd > 0 or e.pi_theta_sd > 0 or e.q_theta_sd > 0   # 불확실성 끄면 v2와 난수 흐름 동일
     if e.antithetic:
         h = (n + 1) // 2
         Zh = rng.standard_normal((h, T, 3)); Z = np.concatenate([Zh, -Zh])[:n]
-        u = rng.standard_normal((h, 2)) if need_u else np.zeros((h, 2)); U = np.concatenate([u, -u])[:n]
+        u = rng.standard_normal((h, 3)) if need_u else np.zeros((h, 3)); U = np.concatenate([u, -u])[:n]
     else:
-        Z = rng.standard_normal((n, T, 3)); U = rng.standard_normal((n, 2)) if need_u else np.zeros((n, 2))
+        Z = rng.standard_normal((n, T, 3)); U = rng.standard_normal((n, 3)) if need_u else np.zeros((n, 3))
     Z = Z @ L.T
 
     # 파라미터 불확실성: 경로별 ERP·장기 물가
     erp = e.erp + e.erp_sd * U[:, 0]
     pth = e.pi_theta + e.pi_theta_sd * U[:, 1]
+    qth = e.q_theta + e.q_theta_sd * U[:, 2]
 
     pi = np.empty((n, T + 1)); pi[:, 0] = e.pi0
     r = np.empty((n, T + 1))
@@ -152,9 +166,9 @@ def generate(e: EconomyV2, T: int, n: int, rng) -> dict:
     for t in range(T):
         pi[:, t + 1] = _ou_step(pi[:, t], pth, e.pi_kappa, e.pi_sigma, Z[:, t, 1])
         if e.fisher:
-            q[:, t + 1] = _ou_step(q[:, t], e.q_theta, e.q_kappa, e.q_sigma, Z[:, t, 0])
+            q[:, t + 1] = _ou_step(q[:, t], qth, e.q_kappa, e.q_sigma, Z[:, t, 0])
             r[:, t + 1] = q[:, t + 1] + pi[:, t + 1]
-            g = lambda tau, qq, pp: gaussian2_price(tau, qq, pp, e.q_kappa, e.q_theta + e.term_premium, e.q_sigma,
+            g = lambda tau, qq, pp: gaussian2_price(tau, qq, pp, e.q_kappa, qth + e.term_premium, e.q_sigma,
                                                      e.pi_kappa, pth, e.pi_sigma, e.rho_rp)
             bond[:, t] = g(D - 1, q[:, t + 1], pi[:, t + 1]) / g(D, q[:, t], pi[:, t]) - 1
         else:
@@ -183,22 +197,25 @@ def generate(e: EconomyV2, T: int, n: int, rng) -> dict:
 def _generate_integrated(e: EconomyV2, T: int, n: int, rng) -> dict:
     """v11: (금리 요인의 연말값, 1년 적분)을 결합정규로 정확히 뽑아 주식은 ∫r, 채권은 가격식을 사용."""
     if e.fisher:
-        k1, th1, s1, x0 = e.q_kappa, e.q_theta, e.q_sigma, e.q0
+        k1, th1, s1, x0 = e.q_kappa, None, e.q_sigma, e.q0
     else:
         k1, th1, s1, x0 = e.r_kappa, e.r_theta, e.r_sigma, e.r0
     k2, s2 = e.pi_kappa, e.pi_sigma
     M = integrated_cov(k1, s1, k2, s2, e.rho_rp, e.rho_rs, e.rho_ps)
     L = np.linalg.cholesky(M + 1e-14 * np.eye(5))
-    need_u = e.erp_sd > 0 or e.pi_theta_sd > 0
+    need_u = e.erp_sd > 0 or e.pi_theta_sd > 0 or e.q_theta_sd > 0
     if e.antithetic:
         h = (n + 1) // 2
         Zh = rng.standard_normal((h, T, 5)); Z = np.concatenate([Zh, -Zh])[:n]
-        u = rng.standard_normal((h, 2)) if need_u else np.zeros((h, 2)); U = np.concatenate([u, -u])[:n]
+        u = rng.standard_normal((h, 3)) if need_u else np.zeros((h, 3)); U = np.concatenate([u, -u])[:n]
     else:
-        Z = rng.standard_normal((n, T, 5)); U = rng.standard_normal((n, 2)) if need_u else np.zeros((n, 2))
+        Z = rng.standard_normal((n, T, 5)); U = rng.standard_normal((n, 3)) if need_u else np.zeros((n, 3))
     X = Z @ L.T
     erp = e.erp + e.erp_sd * U[:, 0]
     pth = e.pi_theta + e.pi_theta_sd * U[:, 1]
+    qth = e.q_theta + e.q_theta_sd * U[:, 2]
+    if th1 is None:
+        th1 = qth                                         # 피셔 모드: 경로별 실질금리 장기평균
     f1 = np.empty((n, T + 1)); f1[:, 0] = x0
     pi = np.empty((n, T + 1)); pi[:, 0] = e.pi0
     r = np.empty((n, T + 1)); w2 = 1.0 if e.fisher else 0.0

@@ -28,32 +28,32 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 1. **Goal-based structure** — essential (protected), lifestyle (flexible) and legacy goals, with a guardrail that cuts flexible spending first in bad scenarios
 2. **Korean institutions** — National Pension early/deferred claiming, KRW 15M private-pension threshold, comprehensive financial-income taxation, health premiums (regional/workplace, dependents), property taxes, inheritance and gift taxes
 3. **Actuarial modeling** — joint-life survival from the Statistics Korea 2024 complete life table, multi-state long-term-care Markov model (healthy ⇄ care → dead) calibrated to preserve life-table mortality
-4. **Stochastic economy** — OU real rate and inflation with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
+4. **Stochastic economy** — OU real rate and inflation estimated from Bank of Korea (ECOS) data, with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
 5. **Statistically honest comparisons** — paired-difference confidence intervals on common random numbers decide "different / not different"
 
 ## Example (couple aged 52 and 50, retiring at 60, KRW 500M, saving KRW 1.5M/month · placeholder assumptions)
 
 - Essential KRW 3M/month + lifestyle KRW 12M/year − pensions KRW 1.6M/month → **income gap KRW 2.4M/month**
-- Goal success: essential **45%**, lifestyle funding **47%**, KRW 100M legacy **32%**
+- Goal success: essential **43%**, lifestyle funding **45%**, KRW 100M legacy **31%**
 
 | What if | Change in essential success (95% CI) |
 |---|---|
-| Retire 2 years later | **+11.1pp** (±0.6) |
-| Spend 10% less | +9.6pp (±0.6) |
+| Retire 2 years later | **+10.2pp** (±0.6) |
+| Spend 10% less | +8.8pp (±0.6) |
 | Growth profile | +5.8pp (±0.5) |
-| Save KRW 0.5M more per month | +5.1pp (±0.4) |
-| Conservative profile | −11.4pp (±0.7) |
+| Save KRW 0.5M more per month | +4.6pp (±0.4) |
+| Conservative profile | −10.8pp (±0.6) |
 
 | Crisis | Change in essential success |
 |---|---|
-| Equities −40% in the first year of retirement | −16.9pp |
-| Equities −40% ten years into retirement | −11.6pp |
-| Long-term care risk doubled | −8.8pp |
-| Three years of 6% inflation | −7.6pp |
-| Longer life (mortality −20%) | −6.5pp |
+| Equities −40% in the first year of retirement | −15.9pp |
+| Equities −40% ten years into retirement | −11.1pp |
+| Long-term care risk doubled | −8.4pp |
+| Longer life (mortality −20%) | −6.7pp |
+| Three years of 6% inflation | −5.5pp |
 
 - For this household **retirement timing is the strongest lever**, and the same crash hurts most right after retirement (sequence-of-returns risk).
-- Splitting spending into essential + flexible lowers the depletion probability versus fixed spending of the same total (62.4% → 50.9%).
+- Splitting spending into essential + flexible lowers the depletion probability versus fixed spending of the same total (65.6% → 54.1%).
 
 ![goals](docs/images/goals_whatif.png)
 ![tax strategies](docs/images/tax_strategies.png)
@@ -66,7 +66,8 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 - Integrated-rate 5×5 joint covariance: max correlation error 0.005 vs fine-step simulation
 - Mortality: Statistics Korea 2024 complete life table; model life expectancy matches published values (ages 0, 60, 65, 80, both sexes)
 - Multi-state care model preserves male life expectancy at 60 (table 23.7 → 23.9 years)
-- OU maximum likelihood recovers long-run mean and volatility on synthetic data (small-sample upward bias in mean-reversion speed confirmed)
+- OU maximum likelihood recovers long-run mean and volatility on synthetic data (small-sample upward bias in mean-reversion speed confirmed and corrected for real data)
+- Rates and inflation estimated from ECOS monthly data 2000-01 to 2026-08 (inflation long-run mean 2.47% ±1.02pp, real rate 0.73% ±0.74pp)
 - Paired-difference CIs for comparisons (±1.38pp under independence → ±0.44pp)
 
 ## Structure
@@ -107,7 +108,8 @@ python scripts/validate_v11.py      # validation
 | Web app (Streamlit) | Done |
 | v12 goal-based rebuild (three goals, income gap, accumulation phase, model portfolios, step-by-step input) | Done |
 | Statistics Korea 2024 complete life table (v13) | Done |
-| ECOS rate/inflation estimation, cohort mortality improvement | Planned |
+| ECOS rate/inflation estimation (v14) | Done |
+| Cohort mortality improvement, real data for equity returns and care incidence | Planned |
 | Insurance module, home sale and reverse mortgage | Planned |
 | Account/budget-app import, periodic re-measurement | Planned |
 
@@ -115,7 +117,7 @@ See [CHANGELOG.md](CHANGELOG.md) and [docs/MODEL.en.md](docs/MODEL.en.md) for de
 
 ## Limitations
 
-- Mortality uses the Statistics Korea 2024 period life table (no future improvement yet); return, inflation and care assumptions are **placeholders**. Focus on **differences between choices**.
+- Mortality uses the Statistics Korea 2024 period life table (no future improvement yet); rates and inflation are estimated from ECOS 2000–2026 data. Equity returns and care incidence are still **placeholders**. Focus on **differences between choices**.
 - Tax rules are simplified (Korea, as of 2026-09). **Not investment or tax advice.**
 - Web-app inputs are used only for calculation and are not stored.
 
