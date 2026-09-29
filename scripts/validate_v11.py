@@ -20,7 +20,7 @@ cA = M / np.sqrt(np.outer(np.diag(M), np.diag(M))); cE = emp / np.sqrt(np.outer(
 print(f"[①] 5×5 결합공분산: 해석해 vs 세밀 시뮬 상관 최대 차이 {np.abs(cA - cE).max():.4f}, "
       f"분산 상대오차 최대 {np.max(np.abs(np.diag(M) - np.diag(emp)) / np.diag(M)):.4f}")
 
-q = mortality.gompertz_qx(); n = 100000
+q = mortality.default_qx(); n = 100000
 a0 = mortality.simulate_alive(q["M"], 60, 50, n, np.random.default_rng(0))
 a1, ic = mortality.simulate_life(q["M"], 60, 50, n, np.random.default_rng(0), CareMarkov())
 print(f"[③] 60세 남 기대여명: 생명표 {a0.sum(1).mean() - .5:.2f}년 / 간병 마르코프 {a1.sum(1).mean() - .5:.2f}년")

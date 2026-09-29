@@ -1,8 +1,10 @@
 """사망률 모듈.
 
-v1은 Gompertz 근사(임시값). 실제 사용 시 통계청(KOSIS) 완전생명표 CSV를
-load_life_table()로 불러와 교체한다. CSV 형식: age,qx_M,qx_F
+기본값(v13): 통계청 「생명표」 2024 완전생명표(1세별, KOSIS DT_1B42)의 성별 사망확률.
+100세 이상은 90~99세 사망력에 Gompertz(로그-선형)를 맞춰 109세까지 외삽하고 110세에서 종료.
+CSV 형식: age,qx_M,qx_F (retire_sim/data/life_table_2024.csv). gompertz_qx()는 이전 임시값(비교용).
 """
+import os
 import numpy as np
 import csv
 
@@ -19,6 +21,16 @@ def gompertz_qx(max_age: int = 110) -> dict:
         q[-1] = 1.0
         out[sex] = np.clip(q, 0, 1)
     return out
+
+
+_DEFAULT_TABLE = os.path.join(os.path.dirname(__file__), "data", "life_table_2024.csv")
+
+
+def default_qx(max_age: int = 110) -> dict:
+    """기본 사망률: 통계청 2024 완전생명표(0~99세) + 100~109세 Gompertz 외삽. 파일이 없으면 임시 Gompertz."""
+    if os.path.exists(_DEFAULT_TABLE):
+        return load_life_table(_DEFAULT_TABLE, max_age)
+    return gompertz_qx(max_age)
 
 
 def load_life_table(path: str, max_age: int = 110) -> dict:

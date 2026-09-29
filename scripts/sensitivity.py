@@ -8,7 +8,7 @@ from retire_sim import engine, metrics, mortality
 def hh(spend=3600, w=0.4):
     return Household(members=[Person(60,"M",nps_monthly=110,private_pension_annual=600,private_pension_start=60),
                               Person(58,"F",nps_monthly=50)], liquid_assets=50_000, stock_weight=w, annual_spending=spend)
-q0 = mortality.gompertz_qx()
+q0 = mortality.default_qx()
 def run(h=None, e=None, cfg=None, q=None):
     r = engine.run(h or hh(), cfg or SimConfig(), qx_table=q or q0, economy_v2=e or EconomyV2())
     return metrics.summarize(r)["고갈확률(생존 중)"]*100

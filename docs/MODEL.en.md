@@ -63,8 +63,9 @@ $(\varepsilon^r,\varepsilon^\pi,\varepsilon^S)$ are standard normals with correl
 
 ## 4. Mortality
 
-- Current: Gompertz $\mu(x)=a e^{bx}$, calibrated to life expectancy at 60 of 23.5 years (male) and 29.5 years (female) (**placeholder**)
-- Planned: Statistics Korea complete life table $q_x$ (CSV loader already implemented)
+- **From v13:** Statistics Korea 2024 complete life table (single-year ages) by sex. Ages 100+ extrapolated to 109 by fitting a Gompertz line to $\ln\mu_x$ at ages 90–99, with $q_{110}=1$. Life expectancies match published values.
+- Before (v1–v12): placeholder Gompertz (life expectancy at 60: 23.5 male, 29.5 female)
+- Limitation: period table, no future mortality improvement
 - Each spouse is simulated independently. Last-survivor probability ${}_tp_{\overline{xy}}={}_tp_x+{}_tp_y-{}_tp_x\,{}_tp_y$
 
 ## 5. Institutional rules (as of 2026-09, kept in a separate configuration)

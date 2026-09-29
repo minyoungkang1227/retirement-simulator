@@ -18,7 +18,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     e, tc, house = e or EconomyV2(), tc or TaxConfig(), house or HouseConfig()
     biz = biz or [None] * len(hh.members)
     rng = np.random.default_rng(cfg.seed)
-    qx_table = qx_table or mortality.gompertz_qx(cfg.max_age)
+    qx_table = qx_table or mortality.default_qx(cfg.max_age)
     k = len(hh.members); youngest = min(m.age for m in hh.members)
     T, n = cfg.max_age - youngest, cfg.n_paths
     eco = generate(e, T, n, rng); cpi = eco["cpi"]

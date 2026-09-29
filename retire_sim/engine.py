@@ -6,7 +6,7 @@ from . import economy, mortality, pension
 
 def run(hh: Household, cfg: SimConfig, qx_table: dict | None = None, economy_v2=None) -> dict:
     rng = np.random.default_rng(cfg.seed)
-    qx_table = qx_table or mortality.gompertz_qx(cfg.max_age)
+    qx_table = qx_table or mortality.default_qx(cfg.max_age)
     youngest = min(m.age for m in hh.members)
     T = cfg.max_age - youngest
     n = cfg.n_paths

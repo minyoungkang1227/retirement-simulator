@@ -13,7 +13,7 @@ hh = Household(
     liquid_assets=50_000, stock_weight=0.4, annual_spending=3600)
 cfg = SimConfig()
 
-q = mortality.gompertz_qx()
+q = mortality.default_qx()
 print(f"[사망률 체크] 60세 남 기대여명 {mortality.life_expectancy(q['M'], 60):.1f}년, "
       f"58세 여 {mortality.life_expectancy(q['F'], 58):.1f}년")
 
