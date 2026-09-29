@@ -6,7 +6,7 @@
 
 기본생활·여행·남길 자산이라는 세 가지 목표를 1만 개의 경제·수명 시나리오 위에서 계산하고, **무엇을 바꾸면 목표에 가까워지는지**를 비교해 보여줍니다. 결과는 추천이 아니라 같은 시나리오 위에서의 비교입니다.
 
-- **웹 앱 (설치 없이 사용):** https://<앱주소>.streamlit.app
+- **웹 앱 (설치 없이 사용):** https://retire-compass.streamlit.app/
 - [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/minyoungkang1227/retirement-simulator/blob/main/notebooks/retire_sim_colab.ipynb) (분석용 노트북)
 
 ## 왜 만들었나
