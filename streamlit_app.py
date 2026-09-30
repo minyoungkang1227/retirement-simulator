@@ -448,7 +448,7 @@ s = base["s"]
 if st.button("입력 수정하기"):
     ss.done = False; ss.step = len(STEPS) - 1; st.rerun()
 
-tab1, tab2, tab6, tab3, tab4, tab5 = st.tabs(["목표 달성", "무엇을 바꾸면", "상품 추가해 보기", "위기 상황", "세금·절세", "가정과 한계"])
+tab1, tab2, tab6, tab3, tab4, tab5 = st.tabs(["목표 달성", "직접 바꿔보기", "상품 추가해 보기", "위기 상황", "세금·절세", "가정과 한계"])
 
 with tab1:
     need, pension, gap = income_gap(p)
@@ -517,10 +517,10 @@ def whatif(rows):
     for label, v in rows:
         r = run(p, v); rs = r["s"]; dlt, ci = paired(r, base)
         verdict = "지금 계획" if not v else ("차이 없음" if abs(dlt) <= ci else ("나빠짐" if dlt > 0 else "좋아짐"))
-        row = {"바꾸는 것": label, "기본생활 유지": pct(rs["기본생활 유지 확률"]),
-               "변화": "—" if not v else f"{-dlt * 100:+.1f}%p (±{ci * 100:.1f})", "판단": verdict}
-        if p["lifestyle"] > 0: row["여행·취미 충족"] = pct(rs.get("여행·취미 평균 충족률", 0))
-        if p["legacy"] > 0: row["남길 자산 달성"] = pct(rs.get("유산 목표 달성 확률", 0))
+        row = {"바꾸는 것": label, "기본생활 지킬 확률": pct(rs["기본생활 유지 확률"]),
+               "변화 (%p)": "—" if not v else f"{-dlt * 100:+.1f} (±{ci * 100:.1f})", "판단": verdict}
+        if p["lifestyle"] > 0: row["여행·취미 예산 충족"] = pct(rs.get("여행·취미 평균 충족률", 0))
+        if p["legacy"] > 0: row["남길 자산 달성 확률"] = pct(rs.get("유산 목표 달성 확률", 0))
         note = []
         if r.get("rm_monthly"): note.append(f"주택연금 월 {r['rm_monthly']:.0f}만 원")
         if r.get("ds_cash"): note.append(f"확보 현금 {r['ds_cash'] / 10000:.1f}억")
@@ -529,25 +529,102 @@ def whatif(rows):
     st.dataframe(pd.DataFrame(out), hide_index=True, width="stretch")
 
 with tab2:
-    st.markdown("같은 1만 가지 미래 위에서 **한 가지만 바꿔** 비교합니다. 변화가 오차 범위 안이면 '차이 없음'입니다.")
-    rows = [("지금 계획", {})]
-    if p["age"] < p["retire_age"]:
-        rows += [("은퇴 2년 늦추기", {"retire_delta": 2}), ("월 저축 50만 원 늘리기", {"saving_delta": 50})]
-    rows += [("생활비 10% 줄이기", {"spend_mult": 0.9})]
-    rows += [(f"투자 성향 {k}", {"stock_weight": w}) for k, w in PROFILES.items() if k != p["profile"]]
-    for a in (p["nps_start"] - 5, p["nps_start"] + 3):
-        if 60 <= a <= 70 and a >= min(p["age"], 70): rows.append((f"국민연금 {a}세부터", {"nps_start": a}))
-    if p["h_market"] > 0 and not p.get("rm_age") and not p.get("ds_age"):
-        young = min(p["age"], p["s_age"]) if p["spouse"] else p["age"]
-        if p["h_n"] == 1 and p["h_official"] <= 12:
-            for ra in sorted({max(young, 55, p["retire_age"] - (p["age"] - young)), max(young, 70)}):
-                rows.append((f"주택연금 {ra}세 가입 (연소자 기준)", {"house": {"rm_age": int(ra)}}))
-        da = max(p["age"], 70)
-        rows.append((f"{da}세에 절반 가격 집으로 이사", {"house": {"ds_age": int(da), "ds_ratio": 50}}))
-    whatif(rows)
-    if p["h_market"] > 0:
-        st.caption("주택연금: 한국주택금융공사 2026-03 종신지급 정액형 월지급금 기준(명목 정액), 대출이자(금리+1.1%p)·보증료 0.75%가 쌓여 사망 시 집값에서 상환(집값 초과분은 청구 안 함), 재산세 25% 감면. "
-                   "집 줄이기: 매도 비용 0.6%, 1주택 양도세(12억 초과분), 새 집 취득세 반영.")
+    pre = p["age"] < p["retire_age"]
+    st.markdown("조건을 **직접 바꿔 보고** 결과가 어떻게 달라지는지 확인하세요. 같은 1만 가지 미래 위에서 비교하므로, 달라진 만큼이 순수하게 그 선택의 효과입니다.")
+    with st.expander("숫자 읽는 법", expanded=not ss.get("tweak")):
+        st.markdown(f"""
+- **기본생활 지킬 확률 {pct(s["기본생활 유지 확률"])}**: 1만 가지 미래 중 {s["기본생활 유지 확률"] * 10000:,.0f}가지에서, 살아있는 동안 기본생활비(월 {p["essential"]}만 원)를 끝까지 낼 수 있다는 뜻입니다. 10번 중 약 {s["기본생활 유지 확률"] * 10:.0f}번입니다.
+- **여행·취미 예산 충족**: 은퇴 후 원하는 여행·취미 예산 중 평균 몇 %를 실제로 쓸 수 있는지입니다. 기본생활이 위험해지면 이 예산부터 줄입니다.
+- **남길 자산 달성 확률**: 세금을 뺀 상속 재산(집 포함)이 목표({p["legacy"]:.1f}억 원) 이상일 확률입니다.
+- **변화 +5.0%p**: 확률이 5 **퍼센트포인트** 오른다는 뜻입니다 (예: 48% → 53%). 괄호 안(±)은 계산 오차 범위이고, 변화가 이보다 작으면 '차이 없음'으로 봅니다.""")
+
+    with st.form("tweak_form"):
+        st.markdown("**바꿔 볼 조건**")
+        c1, c2 = st.columns(2)
+        rd = c1.slider(f"은퇴 시기 조정 (지금 계획 {p['retire_age']}세)", -5, 10, int(ss.get("tweak", {}).get("rd", 0)),
+                       format="%+d년", disabled=not pre, help="+3이면 3년 늦게 은퇴")
+        sd = c2.slider(f"월 저축 조정 (지금 월 {monthly_saving(p):.0f}만 원)", -100, 300, int(ss.get("tweak", {}).get("sd", 0)),
+                       step=10, format="%+d만 원", disabled=not pre)
+        c1, c2 = st.columns(2)
+        sm = c1.slider(f"생활비 조정 (지금 기본 월 {p['essential']}만 원 + 여행 연 {p['lifestyle']:,}만 원)", -30, 20,
+                       int(ss.get("tweak", {}).get("sm", 0)), step=5, format="%+d%%")
+        ns = c2.slider("국민연금 받기 시작할 나이", 60, 70, int(ss.get("tweak", {}).get("ns", p["nps_start"])))
+        prof_list = list(PROFILES)
+        pf = st.radio("투자 성향", prof_list, index=prof_list.index(ss.get("tweak", {}).get("pf", p["profile"])), horizontal=True)
+        go_tw = st.form_submit_button("이 조건으로 다시 계산", type="primary", width="stretch")
+    if go_tw:
+        ss.tweak = dict(rd=rd, sd=sd, sm=sm, ns=ns, pf=pf)
+
+    tw = ss.get("tweak")
+    if tw:
+        v, desc = {}, []
+        if tw["rd"] and pre: v["retire_delta"] = tw["rd"]; desc.append(f"은퇴 {p['retire_age'] + tw['rd']}세({tw['rd']:+d}년)")
+        if tw["sd"] and pre: v["saving_delta"] = tw["sd"]; desc.append(f"월 저축 {tw['sd']:+d}만 원")
+        if tw["sm"]: v["spend_mult"] = 1 + tw["sm"] / 100; desc.append(f"생활비 {tw['sm']:+d}%")
+        if tw["ns"] != p["nps_start"]: v["nps_start"] = tw["ns"]; desc.append(f"국민연금 {tw['ns']}세부터")
+        if tw["pf"] != p["profile"]: v["stock_weight"] = PROFILES[tw["pf"]]; desc.append(f"투자 성향 {tw['pf']}")
+        if not v:
+            st.info("바꾼 조건이 없습니다. 슬라이더를 움직인 뒤 '이 조건으로 다시 계산'을 누르세요.")
+        else:
+            with st.spinner("다시 계산하는 중"):
+                r = run(p, v)
+            rs = r["s"]; dlt, ci = paired(r, base)
+            new_ok, old_ok = rs["기본생활 유지 확률"], s["기본생활 유지 확률"]
+            st.markdown(f"**{', '.join(desc)}** 로 바꾸면")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("기본생활 지킬 확률", pct(new_ok), f"{(new_ok - old_ok) * 100:+.1f}%p")
+            if p["lifestyle"] > 0:
+                c2.metric("여행·취미 예산 충족", pct(rs.get("여행·취미 평균 충족률", 0)),
+                          f"{(rs.get('여행·취미 평균 충족률', 0) - s.get('여행·취미 평균 충족률', 0)) * 100:+.1f}%p")
+            if p["legacy"] > 0:
+                c3.metric("남길 자산 달성 확률", pct(rs.get("유산 목표 달성 확률", 0)),
+                          f"{(rs.get('유산 목표 달성 확률', 0) - s.get('유산 목표 달성 확률', 0)) * 100:+.1f}%p")
+            n_old, n_new = int(round(old_ok * 10)), int(round(new_ok * 10))
+            dots = lambda k: "".join(f'<div class="dot {"ok" if i < k else "bad"}"></div>' for i in range(10))
+            st.markdown(f'<div class="legend">지금 계획: 10번 중 {n_old}번 지킴</div><div class="dots">{dots(n_old)}</div>'
+                        f'<div class="legend">바꾼 뒤: 10번 중 {n_new}번 지킴</div><div class="dots">{dots(n_new)}</div>', unsafe_allow_html=True)
+            if abs(dlt) <= ci:
+                st.caption(f"변화({-dlt * 100:+.1f}%p)가 계산 오차 범위(±{ci * 100:.1f}%p) 안이라 사실상 차이가 없습니다.")
+            else:
+                st.caption(f"계산 오차 범위 ±{ci * 100:.1f}%p를 넘는 변화라, 이 선택의 실제 효과로 볼 수 있습니다.")
+
+    st.divider()
+    if st.checkbox("변화 곡선 보기 (조건을 조금씩 바꿨을 때 확률이 어떻게 움직이는지)", key="curves"):
+        cp = min(p["paths"], 5000)
+        charts = []
+        if pre:
+            charts.append(("은퇴 시기 조정 (년)", [(d, {"retire_delta": d, "paths": cp}) for d in range(0, 6)]))
+            charts.append(("월 저축 조정 (만 원)", [(d, {"saving_delta": d, "paths": cp}) for d in (0, 50, 100, 150, 200)]))
+        charts.append(("생활비 조정 (%)", [(d, {"spend_mult": 1 + d / 100, "paths": cp}) for d in (-30, -20, -10, 0, 10)]))
+        cols = st.columns(len(charts))
+        with st.spinner("곡선 계산 중"):
+            for col, (title, pts) in zip(cols, charts):
+                df = pd.DataFrame([(x, run(p, v)["s"]["기본생활 유지 확률"] * 100) for x, v in pts], columns=["x", "y"])
+                col.markdown(f"**{title}**")
+                col.altair_chart(alt.Chart(df).mark_line(point=True, color=TEAL).encode(
+                    x=alt.X("x:Q", title=None), y=alt.Y("y:Q", title="기본생활 지킬 확률 (%)", scale=alt.Scale(domain=[0, 100])),
+                    tooltip=["x", alt.Tooltip("y:Q", format=".0f")]).properties(height=200), width="stretch")
+        st.caption("곡선이 가파를수록 그 조건이 결과에 큰 영향을 줍니다 (계산 속도를 위해 5천 개 시나리오 기준).")
+
+    with st.expander("자주 쓰는 선택지 한 번에 비교"):
+        rows = [("지금 계획", {})]
+        if pre:
+            rows += [("은퇴 2년 늦추기", {"retire_delta": 2}), ("월 저축 50만 원 늘리기", {"saving_delta": 50})]
+        rows += [("생활비 10% 줄이기", {"spend_mult": 0.9})]
+        rows += [(f"투자 성향 {k}", {"stock_weight": w}) for k, w in PROFILES.items() if k != p["profile"]]
+        for a in (p["nps_start"] - 5, p["nps_start"] + 3):
+            if 60 <= a <= 70 and a >= min(p["age"], 70): rows.append((f"국민연금 {a}세부터", {"nps_start": a}))
+        if p["h_market"] > 0 and not p.get("rm_age") and not p.get("ds_age"):
+            young = min(p["age"], p["s_age"]) if p["spouse"] else p["age"]
+            if p["h_n"] == 1 and p["h_official"] <= 12:
+                for ra in sorted({max(young, 55, p["retire_age"] - (p["age"] - young)), max(young, 70)}):
+                    rows.append((f"주택연금 {ra}세 가입 (연소자 기준)", {"house": {"rm_age": int(ra)}}))
+            da = max(p["age"], 70)
+            rows.append((f"{da}세에 절반 가격 집으로 이사", {"house": {"ds_age": int(da), "ds_ratio": 50}}))
+        whatif(rows)
+        if p["h_market"] > 0:
+            st.caption("주택연금: 한국주택금융공사 2026-03 종신지급 정액형 월지급금 기준(명목 정액), 대출이자(금리+1.1%p)·보증료 0.75%가 쌓여 사망 시 집값에서 상환(집값 초과분은 청구 안 함), 재산세 25% 감면. "
+                       "집 줄이기: 매도 비용 0.6%, 1주택 양도세(12억 초과분), 새 집 취득세 반영.")
 
 with tab6:
     st.markdown("주식·예금·연금·보험을 **더했을 때** 목표 달성과 위험이 어떻게 바뀌는지 봅니다. "

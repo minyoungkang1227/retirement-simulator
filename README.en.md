@@ -20,7 +20,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 ② 10,000 scenarios: rates, inflation and equities (linked stochastic processes) × each spouse's lifespan and long-term care (multi-state model)
 ③ Cash flow: savings before retirement; after retirement, essential spending first and lifestyle only when affordable
 ④ Taxes, health premiums, property taxes and inheritance tax
-⑤ Output: income gap, goal-by-goal success, required assets and required savings, what-if comparisons (including reverse mortgage and downsizing), add-on products (stocks, deposits, annuities, insurance)
+⑤ Output: income gap, goal-by-goal success, required assets and required savings, interactive what-if sliders (retirement timing, savings, spending, pension start, risk profile) with change curves, reverse mortgage and downsizing comparisons, add-on products (stocks, deposits, annuities, insurance)
 ```
 
 ## What makes it different
@@ -127,6 +127,7 @@ python scripts/validate_v11.py      # validation
 | Web app (Streamlit) | Done |
 | v12 goal-based rebuild (three goals, income gap, accumulation phase, model portfolios, step-by-step input) | Done |
 | Statistics Korea 2024 complete life table (v13) | Done |
+| Interactive what-if v22: combine slider changes, before/after comparison, change curves, reading guide | Done |
 | Big-expense planning v21: education, wedding support, home purchase (amortizing mortgage, jeonse deposit, acquisition tax), pre-retirement shortfalls as loans | Done |
 | Accumulation phase for ages 20–40s v20: income, saving rate and wage growth, workplace pension, automatic National Pension estimate (2026 reform), required-saving solver | Done |
 | Housing v19: reverse mortgage (HF 2026 payment table, loan balance, non-recourse, property-tax relief) and downsizing (capital-gains and acquisition taxes) | Done |
