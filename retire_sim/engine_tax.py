@@ -25,9 +25,10 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     from .config import CareMarkov
     markov = isinstance(cfg.care, CareMarkov) and cfg.care.enabled
     if markov:
-        lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care) for m in hh.members]
-        alive = np.stack([l[0] for l in lives]); incare = np.stack([l[1] for l in lives])
+        lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care, return_severe=True) for m in hh.members]
+        alive = np.stack([l[0] for l in lives]); incare = np.stack([l[1] for l in lives]); severe = np.stack([l[2] for l in lives])
         care_level = cfg.care.cost_median * np.exp(cfg.care.cost_log_sigma * rng.standard_normal((k, n)))
+        sev_level = getattr(cfg.care, 'cost_severe_median', cfg.care.cost_median) * np.exp(getattr(cfg.care, 'cost_severe_sigma', cfg.care.cost_log_sigma) * rng.standard_normal((k, n)))
     else:
         alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng) for m in hh.members])
     hh_alive = alive.sum(0) > 0
@@ -70,7 +71,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     if ci_on:                                                  # 수지상등: 모델 자체의 간병·사망 경로로 보험료 산출
         i0 = ad.care_member; v = (1 + ad.care_rate) ** -np.arange(T + 1)
         ages_i = hh.members[i0].age + np.arange(T + 1)
-        pv_ben = (incare[i0] * v).sum(1).mean() * ad.care_benefit
+        trig = severe if (ad.care_trigger == "severe" and getattr(cfg.care, "two_level", False)) else incare
+        pv_ben = (trig[i0] * v).sum(1).mean() * ad.care_benefit
         pay = alive[i0] & ~incare[i0] & (ages_i < ad.care_pay_until)[None, :]
         pv_prem = (pay * v).sum(1).mean()
         ci_prem = (1 + ad.care_loading) * pv_ben / max(pv_prem, 1e-9)
@@ -176,7 +178,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         life_want = hh.lifestyle * ratio * cpi[:, t] * live
         care = np.zeros(n)
         if markov:
-            care = (incare[:, :, t] * care_level).sum(0) * cpi[:, t]
+            care = ((incare[:, :, t] & ~severe[:, :, t]) * care_level + severe[:, :, t] * sev_level).sum(0) * cpi[:, t]
         elif cfg.care.enabled:
             c = cfg.care
             for i, m in enumerate(hh.members):
@@ -196,7 +198,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         ci_ben = np.zeros(n); ci_cost = np.zeros(n)
         if ci_on:
             i0 = ad.care_member
-            ci_ben = ad.care_benefit * incare[i0, :, t]
+            ci_ben = ad.care_benefit * trig[i0, :, t]
             ci_cost = ci_prem * (a[i0] & ~incare[i0, :, t] & (hh.members[i0].age + t < ad.care_pay_until))
         income_all = nps.sum(0) + priv.sum(0) + rent + bz.sum(0) + ann_inc + ci_ben
         if retired:

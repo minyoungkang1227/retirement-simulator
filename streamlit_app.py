@@ -426,6 +426,7 @@ with tab6:
         c1, c2 = st.columns(2)
         c_ben = c1.number_input("간병 시 연 보장액 (만 원)", 0, 10000, 0, step=100)
         c_who = c2.radio("피보험자", ["본인", "배우자"], horizontal=True, disabled=not p["spouse"])
+        c_trig = st.radio("지급 조건", ["중증(1~2등급)", "모든 장기요양 등급"], horizontal=True)
         pc = 0
         if p["age"] < p["retire_age"]:
             st.markdown("**연금저축·IRP 추가 납입 (은퇴 전)**")
@@ -453,7 +454,8 @@ with tab6:
         if d_amt > 0: items.append((f"예금 {d_amt:.1f}억", {"deposit_amount": d_amt * 10000}))
         if a_amt > 0: items.append((f"종신연금 {a_amt:.1f}억 ({a_age}세{', 부부형' if a_joint else ''})",
                                    {"annuity_premium": a_amt * 10000, "annuity_start_age": int(a_age), "annuity_joint": bool(a_joint)}))
-        if c_ben > 0: items.append((f"간병보험 연 {c_ben:,}만 원 ({c_who})", {"care_benefit": float(c_ben), "care_member": 0 if c_who == "본인" else 1}))
+        if c_ben > 0: items.append((f"간병보험 연 {c_ben:,}만 원 ({c_who})", {"care_benefit": float(c_ben), "care_member": 0 if c_who == "본인" else 1,
+                                                                    "care_trigger": "severe" if c_trig.startswith("중증") else "any"}))
         if pc > 0: items.append((f"연금저축 월 {pc}만 원", {"pension_contrib_annual": float(pc * 12)}))
         if not items:
             st.info("추가할 상품의 금액을 하나 이상 입력하세요.")
@@ -490,7 +492,7 @@ with tab6:
                 if k.startswith("종신연금") and r["annuity_pay"] > 0:
                     st.caption(f"{k}: 예상 연금액 연 약 {r['annuity_pay']:,.0f}만 원 (가입 시점 명목 금액, 물가연동 아님, 사업비 5% 가정)")
                 if k.startswith("간병보험") and r["care_premium"] > 0:
-                    st.caption(f"{k}: 모델로 산출한 보험료 연 약 {r['care_premium']:,.0f}만 원 ({80}세까지 납입, 부가보험료 30% 가정)")
+                    st.caption(f"{k}: 모델로 산출한 보험료 연 약 {r['care_premium']:,.0f}만 원 (80세까지 납입, 부가보험료 30% 가정, 지급 조건: {c_trig})")
 
 with tab3:
     st.markdown("정해진 위기가 온다고 가정했을 때 목표가 얼마나 흔들리는지 봅니다.")
@@ -526,7 +528,7 @@ with tab5:
 - 국민연금, 사적연금 분리과세, 금융소득종합과세, 건강보험료, 재산세·종부세, 상속·증여세를 반영합니다.
 
 **알아두실 점**
-- 사망률은 통계청 2024 완전생명표(미래 수명 연장 미반영), 금리·물가는 한국은행 ECOS 2000~2026년 데이터로 추정했습니다. 주식 수익률·간병 발생률은 아직 **임시 가정값**입니다. 결과의 절대값보다 **선택지 사이의 차이**를 보세요.
+- 사망률은 통계청 2024 완전생명표(미래 수명 연장 미반영), 금리·물가는 한국은행 ECOS 2000~2026년 데이터로 추정했습니다. 간병은 건강보험공단 장기요양 통계(연령별 인정률, 등급 구성)와 2026 본인부담·간병비 시세로 보정했습니다. 주식 수익률만 아직 **임시 가정값**입니다. 결과의 절대값보다 **선택지 사이의 차이**를 보세요.
 - 세법은 2026년 9월 기준으로 단순화했습니다. **투자 추천이나 세무 자문이 아니며**, 실제 결정 전 전문가와 상의하세요.
 - 입력하신 정보는 계산에만 쓰이고 서버에 저장하지 않습니다.
 """)

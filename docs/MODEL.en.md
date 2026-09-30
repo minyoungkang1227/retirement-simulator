@@ -214,3 +214,8 @@ Individual stocks (single-index model with a rate-change term; β, idiosyncratic
 ## 18. v16 actuarial floor
 
 The essential floor becomes the survival-weighted present value of future essential shortfalls, computed separately for three household states (both alive, only you, only spouse), using life-table survival × 0.8 mortality, a 2% real discount rate, and projected guaranteed income (National Pension from its start age, fixed-nominal private pensions deflated by expected inflation, rent). Lifestyle spending is paid only above this floor. Previously (v12–v15) the current-year shortfall was treated as lasting to age 95 with certainty.
+
+
+## 19. v17 two-level long-term-care model
+
+States healthy / mild (grades 3–5, cognitive support) / severe (grades 1–2) / dead. Incidence by age is calibrated so that simulated prevalence matches national figures (1.235M recognised in 2025 × age mix ÷ population: 1.5% at 65–69 up to 55.4% at 90+), with the severe share matched to 12.7%. Mortality multipliers 1.8 (mild) and 4.0 (severe), healthy mortality rescaled to preserve the life table. Annual costs (today's KRW): mild median 7.2M, severe median 18M (lognormal), based on 2026 out-of-pocket rules and caregiver market prices.

@@ -93,6 +93,7 @@ class AddOns:
     care_pay_until: int = 80         # 보험료 납입 종료 나이
     care_loading: float = 0.3        # 부가보험료율
     care_rate: float = 0.03
+    care_trigger: str = "severe"     # 지급 조건: "severe"(1~2등급 중증) / "any"(모든 장기요양 등급)
     # 연금저축·IRP 추가 납입 (은퇴 전, 세액공제 후 연금계좌로)
     pension_contrib_annual: float = 0.0
     pension_credit_rate: float = 0.132
@@ -100,24 +101,51 @@ class AddOns:
 
 @dataclass
 class CareMarkov:
-    """간병 다중상태 마르코프 모델 (v11): 건강(H) ⇄ 간병(C) → 사망(D).
+    """간병 다중상태 마르코프 모델.
 
-    매년 전이: H→D q_H(x), H→C (1-q_H)·i(x), C→D min(1, m·q_x), C→H (1-q_C)·rec
-    q_H는 생명표 전체 사망률 q_x가 유지되도록 간병 유병률로 보정.
-    수치는 임시값 — 장기요양 인정률·사망 통계로 보정 필요.
+    v17(기본): 건강(H) → 경증 간병(M, 장기요양 3~5등급·인지지원) → 중증 간병(S, 1~2등급) → 사망(D)
+      매년: H→M (1-q_H)·i(x)·(1-e), H→S (1-q_H)·i(x)·e, M→S progress, M·S→H recovery,
+            사망률 q_H·m_M(경증), q_H·m_S(중증)
+      q_H는 생명표 q_x가 보존되도록 목표 유병률 p(x)와 중증 비율 s로 보정:
+            q_H = q_x / (1 + (m_M−1)·p(x)(1−s) + (m_S−1)·p(x)·s)
+      발생률 i(x)와 진행률은 건강보험공단 장기요양 통계(2025 인정자 123.5만 명, 등급 구성)와
+      연령 분포(2022 장기요양실태조사), 2025 고령자 통계로 만든 연령별 유병률에 맞춰 보정
+      (scripts/calibrate_care.py). 비용은 2026 장기요양 본인부담·비급여·간병비 시세 기준(오늘 가치, 연).
+    v11~v16: CareMarkov.legacy() — 단일 간병 상태, 임시값.
     """
     enabled: bool = True
-    incidence: tuple = ((65, 0.002), (75, 0.01), (85, 0.03), (999, 0.08))  # (이 나이 미만, 연 발생률)
-    mort_mult: float = 2.5        # 간병 상태 사망률 배수
-    recovery: float = 0.10        # 간병 → 건강 회복 확률(연)
-    cost_median: float = 2000     # 간병 중 연 비용 중앙값(만원, 현재가치)
-    cost_log_sigma: float = 0.5
+    two_level: bool = True
+    incidence: tuple = ((65, 0.0015), (70, 0.0043), (75, 0.0075), (80, 0.0268), (85, 0.0693), (90, 0.0998), (999, 0.1260))
+    prevalence: tuple = ((65, 0.003), (70, 0.015), (75, 0.039), (80, 0.099), (85, 0.240), (90, 0.423), (999, 0.554))
+    severe_share: float = 0.127       # 인정자 중 1~2등급 비율 (2025: 4.5% + 8.2%)
+    severe_entry: float = 0.10        # 처음 인정 시 중증으로 들어가는 비율
+    progress: float = 0.0209          # 경증 → 중증 연 전이 확률 (보정값)
+    recovery: float = 0.02            # 간병 → 건강 (등급외 판정 등)
+    mort_mult: float = 1.8            # 경증 간병 사망률 배수
+    mort_mult_severe: float = 4.0     # 중증 간병 사망률 배수
+    cost_median: float = 720          # 경증 연 비용 중앙값(만원): 재가 본인부담 15% + 비급여·가사 지원
+    cost_log_sigma: float = 0.6
+    cost_severe_median: float = 1800  # 중증 연 비용 중앙값(만원): 요양원(월 60~75만) ~ 요양병원 개인간병(월 300만+) 혼합
+    cost_severe_sigma: float = 0.8
 
-    def inc(self, age):
-        for lim, v in self.incidence:
+    @classmethod
+    def legacy(cls):
+        """v11~v16 설정 (단일 간병 상태, 임시값)."""
+        return cls(two_level=False, incidence=((65, 0.002), (75, 0.01), (85, 0.03), (999, 0.08)), prevalence=(),
+                   mort_mult=2.5, recovery=0.10, cost_median=2000, cost_log_sigma=0.5)
+
+    @staticmethod
+    def _lookup(table, age):
+        for lim, v in table:
             if age < lim:
                 return v
-        return self.incidence[-1][1]
+        return table[-1][1]
+
+    def inc(self, age):
+        return self._lookup(self.incidence, age)
+
+    def prev(self, age):
+        return self._lookup(self.prevalence, age) if self.prevalence else None
 
 
 @dataclass

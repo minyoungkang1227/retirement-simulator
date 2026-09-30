@@ -21,9 +21,10 @@ def run(hh: Household, cfg: SimConfig, qx_table: dict | None = None, economy_v2=
     from .config import CareMarkov
     markov = isinstance(cfg.care, CareMarkov) and cfg.care.enabled
     if markov:
-        lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care) for m in hh.members]
-        alive = np.stack([l[0] for l in lives]); incare = np.stack([l[1] for l in lives])
+        lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care, return_severe=True) for m in hh.members]
+        alive = np.stack([l[0] for l in lives]); incare = np.stack([l[1] for l in lives]); severe = np.stack([l[2] for l in lives])
         care_level = cfg.care.cost_median * np.exp(cfg.care.cost_log_sigma * rng.standard_normal((len(hh.members), n)))
+        sev_level = getattr(cfg.care, 'cost_severe_median', cfg.care.cost_median) * np.exp(getattr(cfg.care, 'cost_severe_sigma', cfg.care.cost_log_sigma) * rng.standard_normal((len(hh.members), n)))
     else:
         alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng)
                           for m in hh.members])            # (k, n, T+1)
@@ -55,7 +56,7 @@ def run(hh: Household, cfg: SimConfig, qx_table: dict | None = None, economy_v2=
         # 3) 간병비 점프
         care = np.zeros(n)
         if markov:
-            care = (incare[:, :, t] * care_level).sum(0) * cpi[:, t]
+            care = ((incare[:, :, t] & ~severe[:, :, t]) * care_level + severe[:, :, t] * sev_level).sum(0) * cpi[:, t]
         elif cfg.care.enabled:
             c = cfg.care
             for i, m in enumerate(hh.members):
