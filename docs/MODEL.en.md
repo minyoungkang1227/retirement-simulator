@@ -229,3 +229,8 @@ KOSPI monthly data 2000-02 to 2026-08: diffusion volatility 21% plus Merton jump
 ## 21. v19 housing strategies
 
 Reverse mortgage: fixed nominal monthly payment from the Korea Housing Finance Corporation 2026 table (interpolated by the younger spouse's age and home value, capped at KRW 1.2B), paid while either spouse lives; the loan balance accrues at the model short rate + 1.1pp plus a 0.75% annual guarantee fee (1% upfront) and is repaid from the house at death without recourse; 25% property-tax relief. Downsizing: sale at a chosen age with 0.6% costs, one-home capital-gains tax above KRW 1.2B, and acquisition tax on the new home; released cash joins financial assets.
+
+
+## 22. v20 accumulation phase
+
+Pre-retirement savings = household gross salary growing at a real wage rate × saving rate (or a fixed amount); workplace pension adds one-twelfth of salary per year to the tax-deferred pension account, withdrawable after 55 and retirement. National Pension is estimated with the 2026 reform formula (43% replacement, constant 1.29, A ≈ KRW 3.19M, income cap/floor KRW 6.59M/0.41M). A bisection solver finds the saving (amount or rate) that keeps essential success at 90%.

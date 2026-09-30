@@ -35,7 +35,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     own = np.array(tc.ownership if tc.ownership else [1 / k] * k, float)
     hown = np.array(house.owner_share if house.owner_share else [1.0] + [0.0] * (k - 1), float)
 
-    Wt = np.full(n, float(hh.liquid_assets)); Bt = Wt.copy(); Wi = np.zeros(n); Wp = np.zeros(n); Pp = np.zeros(n)
+    Wt = np.full(n, float(hh.liquid_assets)); Bt = Wt.copy(); Wi = np.zeros(n); Wp = np.full(n, float(hh.pension_balance)); Pp = np.zeros(n)
     isa_in = np.zeros(n); cg_due = np.zeros(n)
     gifts_hist = []                                   # (t, 명목 증여액, 증여세)
     gift_val = np.zeros(n)                          # 증여한 돈의 현재 가치(자녀도 같은 수익률로 운용 가정, 명목)
@@ -253,16 +253,20 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 life_ratio[:, t] = np.where(live, life_paid / np.maximum(life_want, 1e-9), np.nan)
             saving = 0.0
         else:
-            spend = np.zeros(n); saving = hh.annual_saving * cpi[:, t] * live
+            spend = np.zeros(n)
+            sal = sum(a[i] * m.salary * (1 + hh.wage_growth) ** t for i, m in enumerate(hh.members)) * cpi[:, t]
+            saving = (sal * hh.saving_rate if hh.saving_rate > 0 else hh.annual_saving * cpi[:, t]) * live
+            if hh.retirement_contrib:                             # 퇴직연금: 매년 연봉의 1/12 적립(회사 부담, 과세이연)
+                Wp += sal / 12 * live
             if ad.pension_contrib_annual > 0:                     # 저축 일부를 연금계좌로, 세액공제 환급은 과세계좌로
                 pc = ad.pension_contrib_annual * cpi[:, t] * live
                 credit = np.minimum(pc, 900) * ad.pension_credit_rate
                 Wp += pc; saving = saving - pc + credit
         need = spend + care + ci_cost - income_all - saving
         pw = np.zeros(n); pw_taxable = np.zeros(n)
-        pen_active = tc.enabled and (tc.use_pension or ad.pension_contrib_annual > 0)
-        pen_open = (tc.use_pension and t >= tc.pen_wait_years) or (ad.pension_contrib_annual > 0 and retired
-                                                                   and hh.members[0].age + t >= 55)
+        pen_self = ad.pension_contrib_annual > 0 or hh.pension_balance > 0 or hh.retirement_contrib
+        pen_active = tc.enabled and (tc.use_pension or pen_self)
+        pen_open = (tc.use_pension and t >= tc.pen_wait_years) or (pen_self and retired and hh.members[0].age + t >= 55)
         if pen_active and pen_open:
             pw = np.clip(np.minimum(need, tc.pen_withdraw_cap * na), 0, Wp)
             frac = np.where(Wp > 0, np.clip(1 - Pp / np.maximum(Wp, 1e-9), 0, 1), 0)

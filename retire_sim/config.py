@@ -13,6 +13,7 @@ class Person:
     private_pension_annual: float = 0.0   # 사적연금 연액(명목 고정, 만원)
     private_pension_start: int = 60
     private_pension_years: int = 20
+    salary: float = 0.0           # (v20) 연 세전 근로소득(만원, 오늘 가치). 은퇴 전 저축·퇴직연금 계산용
 
 
 @dataclass
@@ -29,6 +30,11 @@ class Household:
     retire_age: Optional[int] = None      # 본인(첫 구성원) 은퇴 나이. None이면 이미 은퇴
     annual_saving: float = 0.0            # 은퇴 전 연 저축액(만원, 현재가치)
     planning_age: int = 95                # (v12 방식) 기본생활비 보호선 계산용 계획 나이
+    # ── v20 적립기 강화 (20~40대) ──
+    saving_rate: float = 0.0              # 세전 근로소득 대비 저축률. >0이면 annual_saving 대신 소득 × 저축률
+    wage_growth: float = 0.01             # 실질 임금상승률(연)
+    pension_balance: float = 0.0          # 퇴직연금·연금저축 적립금(만원) — 55세 이후 연금으로 인출, 인출 시 과세
+    retirement_contrib: bool = False      # 직장 퇴직연금 적립(매년 연봉의 1/12, 은퇴 전)
     floor_method: str = "actuarial"       # "actuarial"(v16): 생존확률 가중 현가 / "fixed95"(v12): 95세까지 확정
     floor_mort_mult: float = 0.8          # 보호선 산출용 사망률 배수 (<1이면 오래 사는 쪽으로 보수적)
     floor_real_rate: float = 0.02         # 보호선 할인율(실질)

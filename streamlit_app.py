@@ -14,6 +14,7 @@ from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShoc
 from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality
 from retire_sim.tax import TaxConfig, HouseConfig
+from retire_sim.pension import estimate_nps_monthly
 
 st.set_page_config(page_title="노후나침반 · 은퇴 목표 진단", page_icon="🧭", layout="centered")
 TEAL, CORAL, INK, MUTED = "#1F6F78", "#C8553D", "#1C2B33", "#5B6B73"
@@ -40,7 +41,7 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
 ss = st.session_state
 if "p" not in ss:
     ss.p = dict(age=52, sex="M", retire_age=60, spouse=True, s_age=50, s_sex="F",
-                deposit=1.5, invest=2.0, ret_acct=1.5, other=0.0, saving=150,
+                deposit=1.5, invest=2.0, ret_acct=1.5, other=0.0, saving=150, salary=0, s_salary=0, save_mode="월 금액", save_rate=15, wage_g=1.0, ret_contrib=False, nps_auto=False, nps_years=10, s_nps_years=10,
                 essential=300, lifestyle=1200, nps=110, s_nps=50, nps_start=65,
                 priv=0, priv_start=60, priv_years=20, legacy=1.0, children=2, profile="균형형",
                 h_official=0.0, h_market=0.0, h_n=1, h_joint=False, h_years=10, h_hi=0.0, rent=0,
@@ -55,22 +56,44 @@ def total_assets(p):
     return p["deposit"] + p["invest"] + p["ret_acct"] + p["other"]
 
 
+def nps_values(p):
+    """국민연금 월액(본인, 배우자): 자동 계산이면 소득·가입기간으로 추정."""
+    if p.get("nps_auto"):
+        n1 = estimate_nps_monthly(p.get("salary", 0), p.get("nps_years", 0), p["age"], p["retire_age"])
+        n2 = estimate_nps_monthly(p.get("s_salary", 0), p.get("s_nps_years", 0), p["s_age"], p["retire_age"] - (p["age"] - p["s_age"])) if p["spouse"] else 0.0
+        return n1, n2
+    return float(p["nps"]), float(p["s_nps"]) if p["spouse"] else 0.0
+
+
+def monthly_saving(p):
+    if p["age"] >= p["retire_age"]: return 0.0
+    if p.get("save_mode") == "소득의 %":
+        return (p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)) * p.get("save_rate", 0) / 100 / 12
+    return float(p["saving"])
+
+
 def build(p: dict, v: dict):
     nps_start = v.get("nps_start", p["nps_start"])
     retire = p["retire_age"] + v.get("retire_delta", 0)
     mk = lambda age, sex, nps, priv=0, ps=0, py=0: Person(
         age=age, sex=sex, nps_monthly=nps, nps_start_age=nps_start,
         private_pension_annual=priv, private_pension_start=ps, private_pension_years=py)
-    members = [mk(p["age"], p["sex"], p["nps"], p["priv"], p["priv_start"], p["priv_years"] if p["priv"] > 0 else 0)]
+    n1, n2 = nps_values(p)
+    members = [mk(p["age"], p["sex"], n1, p["priv"], p["priv_start"], p["priv_years"] if p["priv"] > 0 else 0)]
+    members[0].salary = float(p.get("salary", 0))
     if p["spouse"]:
-        members.append(mk(p["s_age"], p["s_sex"], p["s_nps"]))
+        members.append(mk(p["s_age"], p["s_sex"], n2)); members[1].salary = float(p.get("s_salary", 0))
     m = v.get("spend_mult", 1.0)
-    hh = Household(members=members, liquid_assets=v.get("assets", total_assets(p)) * 10000,
+    liquid = max(v.get("assets", total_assets(p)) - p["ret_acct"], 0)
+    use_rate = p.get("save_mode") == "소득의 %" and "saving_monthly" not in v
+    hh = Household(members=members, liquid_assets=liquid * 10000, pension_balance=p["ret_acct"] * 10000,
+                   saving_rate=(v.get("save_rate_override", p.get("save_rate", 0) / 100) + v.get("saving_delta", 0) * 12 / max((p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)), 1)) if use_rate else 0.0, wage_growth=p.get("wage_g", 1.0) / 100,
+                   retirement_contrib=bool(p.get("ret_contrib")) and p["age"] < p["retire_age"],
                    stock_weight=v.get("stock_weight", PROFILES[p["profile"]]),
                    annual_spending=p["essential"] * 12 * m, essential=p["essential"] * 12 * m,
                    lifestyle=p["lifestyle"] * m, legacy_target=p["legacy"] * 10000,
                    retire_age=retire if p["age"] < retire else None,
-                   annual_saving=(p["saving"] + v.get("saving_delta", 0)) * 12,
+                   annual_saving=(v.get("saving_monthly", p["saving"]) + v.get("saving_delta", 0)) * 12,
                    survivor_spending_ratio=p["survivor"] / 100,
                    floor_method="fixed95" if p.get("floor") == "보수적" else "actuarial")
     care = CareMarkov() if p["enhanced"] else CareShock()
@@ -153,6 +176,31 @@ def required_assets(p_json: str, target: float = 0.9):
     return hi, None
 
 
+@st.cache_data(ttl=600, max_entries=32, show_spinner=False)
+def required_saving(p_json: str, target: float = 0.9):
+    """은퇴 전 월 저축액(만원) 역산: 기본생활 유지 확률이 target이 되는 최소 저축액."""
+    p = json.loads(p_json); paths = min(p["paths"], 5000)
+    inc = (p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)) / 12
+    if p.get("save_mode") == "소득의 %" and inc > 0:        # 저축률 방식: 소득과 함께 늘어나는 저축률을 역산 → 첫해 월액으로 표시
+        okr = lambda r: run(p, {"save_rate_override": r, "paths": paths})["s"]["기본생활 유지 확률"] >= target
+        if okr(0.0): return 0.0, None
+        if not okr(0.9): return None, 0.9 * inc
+        lo, hi = 0.0, 0.9
+        for _ in range(10):
+            mid = (lo + hi) / 2
+            lo, hi = (lo, mid) if okr(mid) else (mid, hi)
+        return hi * inc, None
+    ok = lambda m: run(p, {"saving_monthly": m, "paths": paths})["s"]["기본생활 유지 확률"] >= target
+    hi = max(monthly_saving(p) * 3, 500.0)
+    if ok(0): return 0.0, None
+    if not ok(hi): return None, hi
+    lo = 0.0
+    for _ in range(10):
+        mid = (lo + hi) / 2
+        lo, hi = (lo, mid) if ok(mid) else (mid, hi)
+    return hi, None
+
+
 def paired(a, b):
     x = a["dep"].astype(float) - b["dep"].astype(float); n = len(x)
     if a["anti"] and b["anti"]:
@@ -165,7 +213,8 @@ def pct(x): return f"{x * 100:.0f}%"
 
 def income_gap(p):
     need = p["essential"] + p["lifestyle"] / 12
-    pension = p["nps"] + (p["s_nps"] if p["spouse"] else 0) + p["priv"] / 12
+    n1, n2 = nps_values(p)
+    pension = n1 + n2 + p["priv"] / 12
     return need, pension, need - pension
 
 
@@ -193,7 +242,7 @@ if ss.step < len(STEPS) and not ss.get("done"):
     with st.sidebar:
         st.markdown("**지금까지 확인한 내용**")
         if ss.step > 0: st.caption(f"은퇴: 현재 {p['age']}세 → {p['retire_age']}세 은퇴")
-        if ss.step > 1: st.caption(f"금융자산: {total_assets(p):.1f}억 원" + (f", 은퇴 전 월 {p['saving']}만 원 저축" if p['age'] < p['retire_age'] else ""))
+        if ss.step > 1: st.caption(f"금융자산: {total_assets(p):.1f}억 원" + (f", 은퇴 전 월 {monthly_saving(p):.0f}만 원 저축" if p['age'] < p['retire_age'] else ""))
         if ss.step > 2: st.caption(f"기본생활비: 월 {p['essential']}만 원")
         if ss.step > 3: st.caption(f"여행·취미: 연 {p['lifestyle']:,}만 원")
         if ss.step > 4: st.caption(f"연금: 월 {income_gap(p)[1]:.0f}만 원")
@@ -204,11 +253,11 @@ if ss.step < len(STEPS) and not ss.get("done"):
     with st.form(f"step{i}"):
         if i == 0:
             c1, c2, c3 = st.columns(3)
-            age = c1.number_input("현재 나이", 30, 90, p["age"]); sex = c2.radio("성별", ["남", "여"], index=0 if p["sex"] == "M" else 1, horizontal=True)
+            age = c1.number_input("현재 나이", 20, 90, p["age"]); sex = c2.radio("성별", ["남", "여"], index=0 if p["sex"] == "M" else 1, horizontal=True)
             retire = c3.number_input("은퇴 (예정) 나이", 40, 90, p["retire_age"], help="이미 은퇴했다면 현재 나이 이하로 입력")
             spouse = st.checkbox("배우자와 함께", value=p["spouse"])
             c1, c2 = st.columns(2)
-            s_age = c1.number_input("배우자 나이", 30, 90, p["s_age"]); s_sex = c2.radio("배우자 성별", ["남", "여"], index=0 if p["s_sex"] == "M" else 1, horizontal=True)
+            s_age = c1.number_input("배우자 나이", 20, 90, p["s_age"]); s_sex = c2.radio("배우자 성별", ["남", "여"], index=0 if p["s_sex"] == "M" else 1, horizontal=True)
             st.caption("계획은 95세까지를 기준으로 기본생활비를 보호합니다. 실제 수명은 생명표로 확률적으로 계산합니다.")
             back, nxt = nav(i, "s0")
             if nxt or back:
@@ -223,11 +272,27 @@ if ss.step < len(STEPS) and not ss.get("done"):
             c1, c2 = st.columns(2)
             ret = c1.number_input("퇴직연금·연금저축 적립금", 0.0, 500.0, p["ret_acct"], step=0.1)
             oth = c2.number_input("기타 금융자산", 0.0, 500.0, p["other"], step=0.1)
-            sav = st.number_input("은퇴 전까지 한 달 저축·투자액 (만 원)", 0, 5000, p["saving"], step=10,
-                                  help="이미 은퇴했다면 0", disabled=p["age"] >= p["retire_age"])
+            pre = p["age"] < p["retire_age"]
+            if pre:
+                st.markdown("**은퇴 전 소득과 저축**")
+                c1, c2, c3 = st.columns(3)
+                sal = c1.number_input("본인 연 소득 (세전, 만 원)", 0, 100000, int(p.get("salary", 0)), step=100)
+                ssal = c2.number_input("배우자 연 소득 (세전, 만 원)", 0, 100000, int(p.get("s_salary", 0)), step=100, disabled=not p["spouse"])
+                wg = c3.number_input("실질 임금상승률 (%/년)", 0.0, 5.0, float(p.get("wage_g", 1.0)), step=0.5)
+                mode = st.radio("저축 입력 방식", ["월 금액", "소득의 %"], index=0 if p.get("save_mode", "월 금액") == "월 금액" else 1, horizontal=True)
+                c1, c2 = st.columns(2)
+                sav = c1.number_input("한 달 저축·투자액 (만 원)", 0, 5000, int(p["saving"]), step=10)
+                rate = c2.slider("저축률 (세전 소득 대비 %)", 0, 60, int(p.get("save_rate", 15)))
+                rc = st.checkbox("직장 퇴직연금 적립 중 (매년 연봉의 1/12이 퇴직연금으로)", value=bool(p.get("ret_contrib")))
+                st.caption("퇴직연금·연금저축 적립금은 55세 이후 연금으로 꺼내 쓰는 계좌로 따로 계산합니다.")
             back, nxt = nav(i, "s1")
             if nxt or back:
-                p.update(deposit=dep, invest=inv, ret_acct=ret, other=oth, saving=int(sav) if p["age"] < p["retire_age"] else 0)
+                p.update(deposit=dep, invest=inv, ret_acct=ret, other=oth)
+                if pre:
+                    p.update(saving=int(sav), salary=float(sal), s_salary=float(ssal), wage_g=float(wg), save_mode=mode,
+                             save_rate=int(rate), ret_contrib=bool(rc))
+                else:
+                    p.update(saving=0, salary=0, s_salary=0, ret_contrib=False)
                 go(1 if nxt else -1)
         elif i == 2:
             st.markdown("**꼭 필요한 기본생활비**는 얼마인가요? 식비·주거·의료·보험료 등 줄이기 어려운 지출입니다.")
@@ -245,17 +310,25 @@ if ss.step < len(STEPS) and not ss.get("done"):
             if nxt or back:
                 p.update(lifestyle=int(life)); go(1 if nxt else -1)
         elif i == 4:
+            auto = st.checkbox("국민연금 예상액 자동 계산 (소득·가입기간으로 추정)", value=bool(p.get("nps_auto")),
+                               help="2026 개혁(소득대체율 43%) 기준 근사. 정확한 값은 국민연금공단 '내 연금 알아보기'")
             c1, c2, c3 = st.columns(3)
-            nps = c1.number_input("국민연금 예상 월액 (만 원)", 0, 500, p["nps"], help="국민연금공단 '내 연금 알아보기'")
-            s_nps = c2.number_input("배우자 국민연금 (만 원)", 0, 500, p["s_nps"], disabled=not p["spouse"])
+            nps = c1.number_input("국민연금 예상 월액 (만 원, 직접 입력 시)", 0, 500, int(p["nps"]))
+            s_nps = c2.number_input("배우자 국민연금 (만 원, 직접 입력 시)", 0, 500, int(p["s_nps"]), disabled=not p["spouse"])
             nps_start = c3.slider("받기 시작할 나이", 60, 70, p["nps_start"])
+            c1, c2 = st.columns(2)
+            ny = c1.number_input("본인 지금까지 가입 기간 (년, 자동 계산 시)", 0, 45, int(p.get("nps_years", 10)))
+            sny = c2.number_input("배우자 가입 기간 (년, 자동 계산 시)", 0, 45, int(p.get("s_nps_years", 10)), disabled=not p["spouse"])
+            if p.get("nps_auto"):
+                a1, a2 = nps_values(p)
+                st.caption(f"현재 입력 기준 자동 추정: 본인 월 {a1:.0f}만 원" + (f", 배우자 월 {a2:.0f}만 원" if p["spouse"] else "") + " (오늘 가치, 정상수령 기준)")
             c1, c2, c3 = st.columns(3)
             priv = c1.number_input("사적연금 연 수령액 (만 원)", 0, 10000, p["priv"], help="연금저축·IRP·연금보험")
             priv_start = c2.number_input("사적연금 시작 나이", 40, 90, p["priv_start"])
             priv_years = c3.number_input("받는 기간 (년)", 0, 50, p["priv_years"])
             back, nxt = nav(i, "s4")
             if nxt or back:
-                p.update(nps=int(nps), s_nps=int(s_nps), nps_start=int(nps_start), priv=int(priv),
+                p.update(nps=int(nps), s_nps=int(s_nps), nps_start=int(nps_start), nps_auto=bool(auto), nps_years=int(ny), s_nps_years=int(sny), priv=int(priv),
                          priv_start=int(priv_start), priv_years=int(priv_years)); go(1 if nxt else -1)
         elif i == 5:
             c1, c2 = st.columns(2)
@@ -318,12 +391,15 @@ if ss.step < len(STEPS) and not ss.get("done"):
             c1.markdown(f'<div class="card"><h4>은퇴</h4><p>현재 {p["age"]}세 · {p["retire_age"]}세 은퇴'
                         + (f'<br>배우자 {p["s_age"]}세' if p["spouse"] else '') + '</p></div>', unsafe_allow_html=True)
             c2.markdown(f'<div class="card"><h4>자산</h4><p>금융자산 {total_assets(p):.1f}억 원'
-                        + (f'<br>은퇴 전 월 {p["saving"]}만 원 저축' if p["age"] < p["retire_age"] else '')
+                        + (f'<br>은퇴 전 월 {monthly_saving(p):.0f}만 원 저축' if p["age"] < p["retire_age"] else '')
+                        + ('<br>퇴직연금 적립 중' if p.get("ret_contrib") and p["age"] < p["retire_age"] else '')
                         + (f'<br>주택 시세 {p["h_market"]:.1f}억 원' if p["h_market"] > 0 else '') + '</p></div>', unsafe_allow_html=True)
             c1.markdown(f'<div class="card"><h4>목표</h4><p>기본생활: 월 {p["essential"]}만 원<br>여행·취미: 연 {p["lifestyle"]:,}만 원'
                         f'<br>남길 자산: {p["legacy"]:.1f}억 원</p></div>', unsafe_allow_html=True)
-            c2.markdown(f'<div class="card"><h4>소득 · 성향</h4><p>연금: 월 {pension:.0f}만 원 ({p["nps_start"]}세부터)'
-                        f'<br>투자 성향: {p["profile"]}</p></div>', unsafe_allow_html=True)
+            c2.markdown(f'<div class="card"><h4>소득 · 성향</h4><p>연금: 월 {pension:.0f}만 원 ({p["nps_start"]}세부터'
+                        + (', 국민연금 자동 추정' if p.get("nps_auto") else '') + ')'
+                        + (f'<br>근로소득: 연 {(p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)):,.0f}만 원' if p["age"] < p["retire_age"] and (p.get("salary", 0) or p.get("s_salary", 0)) else '')
+                        + f'<br>투자 성향: {p["profile"]}</p></div>', unsafe_allow_html=True)
             st.markdown(f"**이 조건으로 계산해 볼까요?** 투자자산이 매달 메워야 할 금액은 약 **{max(gap, 0):.0f}만 원**입니다.")
             c1, c2 = st.columns(2)
             back = c1.form_submit_button("이전", width="stretch")
@@ -378,6 +454,18 @@ with tab1:
         st.markdown(f"기본생활을 **10번 중 9번** 지키려면 금융자산 약 **{req:.1f}억 원**이 필요합니다 (지금 {total_assets(p):.1f}억 원).")
     else:
         st.markdown(f"금융자산을 {over:.0f}억 원까지 늘려도 기본생활을 10번 중 9번 지키기 어렵습니다. 생활비나 은퇴 시점을 먼저 조정해 보세요.")
+    if p["age"] < p["retire_age"]:
+        with st.spinner("필요 저축액 계산 중"):
+            rs_, over_ = required_saving(json.dumps(p, sort_keys=True))
+        cur = monthly_saving(p); inc = (p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)) / 12
+        if rs_ is None:
+            st.markdown(f"은퇴 전 저축을 월 {over_:.0f}만 원까지 늘려도 기본생활을 10번 중 9번 지키기 어렵습니다. 은퇴 시점이나 생활비를 함께 조정해 보세요.")
+        elif rs_ == 0:
+            st.markdown("지금 자산과 연금만으로도 기본생활을 **10번 중 9번 이상** 지킬 수 있습니다.")
+        else:
+            share = f" (세전 소득의 {rs_ / inc * 100:.0f}%)" if inc > 0 else ""
+            grow = " — 소득과 함께 늘어나는 금액의 첫해 기준" if p.get("save_mode") == "소득의 %" else ""
+            st.markdown(f"은퇴 전까지 매달 약 **{rs_:.0f}만 원**{share}을 모으면 기본생활을 **10번 중 9번** 지킬 수 있습니다 (지금 월 {cur:.0f}만 원{grow}).")
     st.caption("권장 금액이 아니라, 지금 가정에서 '10번 중 9번'에 해당하는 참고 수치입니다.")
 
     fan = pd.DataFrame(base["fan"], columns=["나이", "p5", "p25", "p50", "p75", "p95"])
@@ -552,6 +640,7 @@ with tab5:
 - 목표는 **기본생활 → 여행·취미 → 남길 자산** 순으로 지킵니다. 매년 남은 금융자산이 "앞으로 기본생활비 부족분의 기대 현재가치"(생존확률 가중, 연금 개시 반영, 실질 2% 할인, 사망률 80%로 보수적 계산)보다 많을 때만 여행·취미 예산을 씁니다.
 - 국민연금, 사적연금 분리과세, 금융소득종합과세, 건강보험료, 재산세·종부세, 상속·증여세를 반영합니다.
 - 주택연금(한국주택금융공사 2026 월지급금표)과 집 줄이기(매도 비용·양도세·취득세)를 선택지로 비교할 수 있습니다.
+- 20~40대는 소득·저축률·퇴직연금으로 은퇴 전 적립을 계산하고, 국민연금은 2026 개혁(소득대체율 43%) 기준으로 추정할 수 있습니다(근사치, 정확한 값은 국민연금공단 조회).
 
 **알아두실 점**
 - 사망률은 통계청 2024 완전생명표(미래 수명 연장 미반영), 금리·물가는 한국은행 ECOS 2000~2026년 데이터로 추정했습니다. 간병은 건강보험공단 장기요양 통계와 2026 본인부담·간병비 시세로, 주식은 KOSPI 2000~2026년 데이터로 추정했습니다. 다만 **주식 위험프리미엄은 추정 오차가 커서**(5.2% ± 1.4%p) 결과의 절대값이 크게 움직일 수 있습니다. 결과의 절대값보다 **선택지 사이의 차이**를 보세요.

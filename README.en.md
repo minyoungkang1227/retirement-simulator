@@ -16,11 +16,11 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 ## How it works
 
 ```
-① Step-by-step input: retirement timing → assets → essential spending → lifestyle budget → pensions → legacy → risk profile → final check
+① Step-by-step input (from age 20): retirement timing → assets, income and savings → essential spending → lifestyle budget → pensions → legacy → risk profile → final check
 ② 10,000 scenarios: rates, inflation and equities (linked stochastic processes) × each spouse's lifespan and long-term care (multi-state model)
 ③ Cash flow: savings before retirement; after retirement, essential spending first and lifestyle only when affordable
 ④ Taxes, health premiums, property taxes and inheritance tax
-⑤ Output: income gap, goal-by-goal success, required assets, what-if comparisons (including reverse mortgage and downsizing), add-on products (stocks, deposits, annuities, insurance)
+⑤ Output: income gap, goal-by-goal success, required assets and required savings, what-if comparisons (including reverse mortgage and downsizing), add-on products (stocks, deposits, annuities, insurance)
 ```
 
 ## What makes it different
@@ -55,6 +55,12 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 - For this household **retirement timing is the strongest lever**, and the same crash hurts most right after retirement (sequence-of-returns risk).
 - Splitting spending into essential + flexible lowers the depletion probability versus fixed spending of the same total (53.9% → 47.6%).
 - The largest uncertainty is the **equity risk premium**: within its estimated range (5.2% ± 1.4pp) essential success moves between 36% and 59%, which is why differences between choices matter more than levels.
+
+**Young savers (dual-income couple aged 30 and 29, KRW 90M gross income, 15% saving rate, workplace pension, National Pension estimated automatically at KRW 2.43M/month)**
+
+- Essential success **82%**, lifestyle funding **91%**
+- To keep essentials 9 times out of 10: save **23%** of gross income (about KRW 1.71M/month in year one)
+- What if: save KRW 0.5M more per month +8.1pp, retire 2 years later +6.7pp, spend 10% less +6.1pp · without the workplace pension −23.0pp
 
 **House-rich, cash-poor household (couple aged 65 and 63, KRW 300M financial assets, home worth KRW 700M)**
 
@@ -120,6 +126,7 @@ python scripts/validate_v11.py      # validation
 | Web app (Streamlit) | Done |
 | v12 goal-based rebuild (three goals, income gap, accumulation phase, model portfolios, step-by-step input) | Done |
 | Statistics Korea 2024 complete life table (v13) | Done |
+| Accumulation phase for ages 20–40s v20: income, saving rate and wage growth, workplace pension, automatic National Pension estimate (2026 reform), required-saving solver | Done |
 | Housing v19: reverse mortgage (HF 2026 payment table, loan balance, non-recourse, property-tax relief) and downsizing (capital-gains and acquisition taxes) | Done |
 | Equity returns from real data v18: KOSPI volatility, crash jumps, rate correlation, Bayesian risk premium | Done |
 | Long-term-care model from real data v17: two severity levels calibrated to national LTC recognition rates and grade mix, 2026 out-of-pocket and caregiver costs | Done |

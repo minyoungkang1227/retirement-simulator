@@ -271,3 +271,10 @@ KOSPI 월말 지수(2000-02~2026-08, 319개월). 연 로그수익 $=\int r+\text
 
 - **주택연금:** 월지급금 $M=\min\big(r(a)\cdot\min(V,12억)/1억,\ C(a)\big)$ ($a$: 연소자 나이, $r,C$: 공사 2026 표 선형 보간). 연 $12M$ 명목 정액, 부부 생존 동안. 대출잔액 $B_{t+1}=(B_t+12M)(1+r_t+1.1\%+0.75\%)$, $B_0=1\%\cdot V$. 상속 주택가치 $\max(V_T-B_T,0)$. 보호선에서 $12M\cdot\ddot a_{\overline{xy}}/(1+\bar\pi)$ 차감.
 - **집 줄이기:** 현금 $=V(1-0.006)-\text{CGT}-\rho V(1+\tau(\rho V))$, CGT $=\max(V-B,0)\frac{V-12억}{V}(1-\min(0.08n,0.8))\times38.5\%$ ($V>12억$일 때).
+
+
+## 22. v20 적립기
+
+- 은퇴 전 연 저축 $S_t=\big(\sum_i \text{salary}_i(1+g)^t\mathbb 1_{\text{생존}}\big)\cdot s\cdot CPI_t$ (또는 고정 금액), 퇴직연금 $\sum_i\text{salary}_i(1+g)^t/12\cdot CPI_t$ → 연금계좌
+- 국민연금 월액 $\approx 1.29(A+B)(1+0.05(Y-20))/12$, $A\approx319$만, $B=\text{clip}(\text{월소득},41,659)$, $Y$ = 과거 + 60세(또는 은퇴)까지 가입연수, $Y<10$이면 0
+- 필요 저축: $\min\{S: P(\text{기본생활 유지}\mid S)\ge 0.9\}$ 이분법, 공통 난수
