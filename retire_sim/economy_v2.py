@@ -59,11 +59,13 @@ class EconomyV2:
     @classmethod
     def enhanced(cls, calibrated: bool = True, **kw):
         """권장 설정: 피셔 연결 + 운용보수 0.5% + 파라미터 불확실성 + 폭락 점프 + 반대 난수 + 적분 금리 + 기간 프리미엄.
-        calibrated=True(v14 기본): 물가·실질금리 파라미터를 ECOS 실데이터 추정치(CALIBRATED_2026_08)로 사용."""
+        calibrated=True(기본): 물가·실질금리(v14, ECOS)와 주식(v18, KOSPI) 파라미터를 실데이터 추정치로 사용.
+        calibrated=False: v13 이전 임시값."""
         base = dict(fisher=True, rho_rp=0.0, fee=0.005, erp_sd=0.01, pi_theta_sd=0.005,
                     jump_lambda=0.1, antithetic=True, integrated_rate=True, term_premium=0.005)
         if calibrated:
             base.update(CALIBRATED_2026_08)
+            base.update(CALIBRATED_EQUITY_2026_08)
         base.update(kw)
         return cls(**base)
 
@@ -252,3 +254,15 @@ def _generate_integrated(e: EconomyV2, T: int, n: int, rng) -> dict:
     cpi = np.concatenate([np.ones((n, 1)), np.cumprod(1 + infl, axis=1)], axis=1)
     return {"stock": stock, "bond": bond, "infl": infl, "cpi": cpi, "rate": r,
             "antithetic": e.antithetic, "erp_path": erp}
+
+
+# KOSPI 실데이터 추정 (v18, 2000-02~2026-08 월별 319개월, FinanceDataReader 'KS11' + ECOS 국고채 3년)
+# - 변동성·폭락 점프: 월 수익률 연환산 변동성 23.9%, 초과첨도 2.43, 12개월 수익률 −20% 이하 9.4%·−30% 이하 2.6%에
+#   맞춰 확산 21% + 점프(연 0.05회, 로그 −20%±10%)로 보정 → 연 로그수익 표준편차 21.6%, 꼬리 빈도 9.6%·2.9%
+# - 위험프리미엄: 데이터(가격 초과수익 3.92%±9.09%p + 배당 1.8% 가정 + ½σ²) 8.6%±4.6%p를
+#   사전분포(성숙시장 ERP 4.2%[Damodaran 2026] + 한국 국가위험 약 0.7%p = 4.9%±1.5%p)와 결합한 사후값
+# - 금리 상관: 월 수익률과 국고채 3년 변화의 상관 +0.09
+CALIBRATED_EQUITY_2026_08 = dict(
+    s_sigma=0.21, jump_lambda=0.05, jump_mu=-0.20, jump_sigma=0.10,
+    erp=0.052, erp_sd=0.014, rho_rs=0.09, rho_ps=0.0,
+)
