@@ -45,7 +45,7 @@ if "p" not in ss:
                 essential=300, lifestyle=1200, nps=110, s_nps=50, nps_start=65,
                 priv=0, priv_start=60, priv_years=20, legacy=1.0, children=2, profile="균형형",
                 h_official=0.0, h_market=0.0, h_n=1, h_joint=False, h_years=10, h_hi=0.0, rent=0,
-                biz=0, biz_until=65, biz_work=False, rm_age=0, ds_age=0, ds_ratio=50, overseas=20, own_equal=True, survivor=70,
+                biz=0, biz_until=65, biz_work=False, rm_age=0, ds_age=0, ds_ratio=50, events=[], ev_ltv=60, ev_loan_years=30, ev_jeonse=0.0, overseas=20, own_equal=True, survivor=70,
                 enhanced=True, paths=10000)
     ss.step = 0
 p = ss.p
@@ -86,7 +86,15 @@ def build(p: dict, v: dict):
     m = v.get("spend_mult", 1.0)
     liquid = max(v.get("assets", total_assets(p)) - p["ret_acct"], 0)
     use_rate = p.get("save_mode") == "소득의 %" and "saving_monthly" not in v
-    hh = Household(members=members, liquid_assets=liquid * 10000, pension_balance=p["ret_acct"] * 10000,
+    events = []
+    for ev in p.get("events", []):
+        if ev["kind"] == "주택 구입":
+            events.append(dict(label=ev["kind"], age=int(ev["age"]), amount=float(ev["amount"]), kind="house",
+                               ltv=p.get("ev_ltv", 60) / 100, loan_years=int(p.get("ev_loan_years", 30)),
+                               deposit_back=float(p.get("ev_jeonse", 0)) * 10000))
+        else:
+            events.append(dict(label=ev["kind"], age=int(ev["age"]), amount=float(ev["amount"]), years=int(ev["years"]), kind="cost"))
+    hh = Household(members=members, liquid_assets=liquid * 10000, pension_balance=p["ret_acct"] * 10000, events=events,
                    saving_rate=(v.get("save_rate_override", p.get("save_rate", 0) / 100) + v.get("saving_delta", 0) * 12 / max((p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)), 1)) if use_rate else 0.0, wage_growth=p.get("wage_g", 1.0) / 100,
                    retirement_contrib=bool(p.get("ret_contrib")) and p["age"] < p["retire_age"],
                    stock_weight=v.get("stock_weight", PROFILES[p["profile"]]),
@@ -146,7 +154,8 @@ def simulate(p_json: str, v_json: str) -> dict:
             "dep_age": float(np.median(d[d >= 0] + y)) if (d >= 0).any() else None, "fan": fan, "curve": curve,
             "p50_85": float(np.percentile(w85, 50)) if w85.size else 0.0, "annuity_pay": res.get("annuity_pay", 0.0),
             "care_premium": res.get("care_premium", 0.0), "stock_corr": corr,
-            "rm_monthly": res.get("rm_monthly", 0.0), "ds_cash": res.get("ds_cash", 0.0)}
+            "rm_monthly": res.get("rm_monthly", 0.0), "ds_cash": res.get("ds_cash", 0.0),
+            "debt_share": float(np.mean(np.nan_to_num(res.get("debt_retire", np.zeros(1))) > 1))}
 
 
 @st.cache_data(ttl=86400, max_entries=64, show_spinner=False)
@@ -364,6 +373,27 @@ if ss.step < len(STEPS) and not ss.get("done"):
                                          help="부부 중 나이 적은 사람 기준, 55세 이상·공시가격 12억 이하 1주택")
                 ds_age = c2.number_input("집 줄이기 나이 (0 = 안 함)", 0, 90, p.get("ds_age", 0), help="본인 나이 기준, 팔고 작은 집으로 이사")
                 ds_ratio = c3.slider("새 집 가격 (기존 대비 %)", 20, 90, p.get("ds_ratio", 50), step=10)
+            with st.expander("큰 지출 계획 (자녀 교육비·결혼 자금·주택 구입 등)", expanded=bool(p.get("events"))):
+                st.caption("나이는 본인 기준, 금액은 오늘 가치(만 원). 주택 구입은 집값 전체, 나머지는 1년 금액 × 기간(년).")
+                kinds = ["없음", "자녀 교육비", "결혼·독립 지원", "주택 구입", "기타"]
+                old_ev = p.get("events", []) + [{}] * 3
+                new_ev = []
+                for j in range(3):
+                    e0 = old_ev[j] or {}
+                    c1, c2, c3, c4 = st.columns([1.3, 0.8, 1, 0.8])
+                    kd = c1.selectbox(f"지출 {j + 1}", kinds, index=kinds.index(e0.get("kind", "없음")), key=f"evk{j}")
+                    ea = c2.number_input("나이", 20, 90, int(e0.get("age", max(p["age"] + 5, 30))), key=f"eva{j}")
+                    em = c3.number_input("금액 (만 원)", 0, 500000, int(e0.get("amount", 0)), step=100, key=f"evm{j}")
+                    ey = c4.number_input("기간 (년)", 1, 30, int(e0.get("years", 1)), key=f"evy{j}")
+                    if kd != "없음" and em > 0:
+                        new_ev.append(dict(kind=kd, age=int(ea), amount=float(em), years=int(ey)))
+                st.markdown("주택 구입 시 대출 조건")
+                c1, c2, c3 = st.columns(3)
+                ltv = c1.slider("대출 비율 (%)", 0, 80, int(p.get("ev_ltv", 60)), step=5)
+                lyr = c2.number_input("대출 기간 (년)", 5, 40, int(p.get("ev_loan_years", 30)))
+                jb = c3.number_input("전세 보증금 회수 (억 원)", 0.0, 50.0, float(p.get("ev_jeonse", 0.0)), step=0.5)
+                st.caption("대출 원리금은 은퇴 전에는 근로소득(생활비)에서 낸다고 보고, 은퇴 후 남은 원리금만 노후자금에서 나갑니다. "
+                           "은퇴 전 자산이 부족한 지출은 대출(금리 + 1.5%p)로 처리하고, 남은 빚은 은퇴 시점에 자산으로 갚습니다.")
             with st.expander("사업", expanded=p["biz"] > 0):
                 c1, c2, c3 = st.columns(3)
                 biz = c1.number_input("연 사업소득 (만 원)", 0, 100000, p["biz"])
@@ -381,7 +411,7 @@ if ss.step < len(STEPS) and not ss.get("done"):
             back, nxt = nav(i, "s7")
             if nxt or back:
                 p.update(h_official=h_off, h_market=h_mkt, h_n=int(h_n), h_joint=bool(h_joint), h_years=int(h_years),
-                         h_hi=float(h_hi), rent=int(rent), rm_age=int(rm_age), ds_age=int(ds_age), ds_ratio=int(ds_ratio), biz=int(biz), biz_until=int(biz_until), biz_work=bool(biz_work),
+                         h_hi=float(h_hi), rent=int(rent), rm_age=int(rm_age), ds_age=int(ds_age), ds_ratio=int(ds_ratio), events=new_ev, ev_ltv=int(ltv), ev_loan_years=int(lyr), ev_jeonse=float(jb), biz=int(biz), biz_until=int(biz_until), biz_work=bool(biz_work),
                          overseas=int(overseas), own_equal=bool(own_equal), survivor=int(survivor), floor=floor,
                          enhanced=bool(enhanced), paths=int(paths)); go(1 if nxt else -1)
         else:
@@ -394,8 +424,9 @@ if ss.step < len(STEPS) and not ss.get("done"):
                         + (f'<br>은퇴 전 월 {monthly_saving(p):.0f}만 원 저축' if p["age"] < p["retire_age"] else '')
                         + ('<br>퇴직연금 적립 중' if p.get("ret_contrib") and p["age"] < p["retire_age"] else '')
                         + (f'<br>주택 시세 {p["h_market"]:.1f}억 원' if p["h_market"] > 0 else '') + '</p></div>', unsafe_allow_html=True)
+            ev_txt = "".join(f'<br>{e_["age"]}세 {e_["kind"]} {e_["amount"]:,.0f}만 원' + ("" if e_["kind"] == "주택 구입" else f' × {e_["years"]}년') for e_ in p.get("events", []))
             c1.markdown(f'<div class="card"><h4>목표</h4><p>기본생활: 월 {p["essential"]}만 원<br>여행·취미: 연 {p["lifestyle"]:,}만 원'
-                        f'<br>남길 자산: {p["legacy"]:.1f}억 원</p></div>', unsafe_allow_html=True)
+                        f'<br>남길 자산: {p["legacy"]:.1f}억 원' + (f'<br><b>큰 지출</b>{ev_txt}' if ev_txt else '') + '</p></div>', unsafe_allow_html=True)
             c2.markdown(f'<div class="card"><h4>소득 · 성향</h4><p>연금: 월 {pension:.0f}만 원 ({p["nps_start"]}세부터'
                         + (', 국민연금 자동 추정' if p.get("nps_auto") else '') + ')'
                         + (f'<br>근로소득: 연 {(p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)):,.0f}만 원' if p["age"] < p["retire_age"] and (p.get("salary", 0) or p.get("s_salary", 0)) else '')
@@ -466,6 +497,10 @@ with tab1:
             share = f" (세전 소득의 {rs_ / inc * 100:.0f}%)" if inc > 0 else ""
             grow = " — 소득과 함께 늘어나는 금액의 첫해 기준" if p.get("save_mode") == "소득의 %" else ""
             st.markdown(f"은퇴 전까지 매달 약 **{rs_:.0f}만 원**{share}을 모으면 기본생활을 **10번 중 9번** 지킬 수 있습니다 (지금 월 {cur:.0f}만 원{grow}).")
+    if p.get("events"):
+        ds_ = base.get("debt_share", 0)
+        st.caption("큰 지출 반영: " + ", ".join(f'{e_["age"]}세 {e_["kind"]}' for e_ in p["events"])
+                   + (f" · 은퇴 시점에 갚을 빚이 남는 경우 {ds_ * 100:.0f}%" if ds_ > 0.005 else ""))
     st.caption("권장 금액이 아니라, 지금 가정에서 '10번 중 9번'에 해당하는 참고 수치입니다.")
 
     fan = pd.DataFrame(base["fan"], columns=["나이", "p5", "p25", "p50", "p75", "p95"])

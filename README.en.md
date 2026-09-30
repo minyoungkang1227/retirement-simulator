@@ -61,6 +61,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 - Essential success **82%**, lifestyle funding **91%**
 - To keep essentials 9 times out of 10: save **23%** of gross income (about KRW 1.71M/month in year one)
 - What if: save KRW 0.5M more per month +8.1pp, retire 2 years later +6.7pp, spend 10% less +6.1pp · without the workplace pension −23.0pp
+- Big expenses: college for two children from age 48 (KRW 10M × 8 years) −4.7pp · buying a KRW 600M home at 35 (60% loan, 30 years, KRW 200M deposit returned) −10.7pp (−6.7pp with a 25-year loan) · both plus a KRW 100M wedding gift at 58 −25.8pp
 
 **House-rich, cash-poor household (couple aged 65 and 63, KRW 300M financial assets, home worth KRW 700M)**
 
@@ -126,6 +127,7 @@ python scripts/validate_v11.py      # validation
 | Web app (Streamlit) | Done |
 | v12 goal-based rebuild (three goals, income gap, accumulation phase, model portfolios, step-by-step input) | Done |
 | Statistics Korea 2024 complete life table (v13) | Done |
+| Big-expense planning v21: education, wedding support, home purchase (amortizing mortgage, jeonse deposit, acquisition tax), pre-retirement shortfalls as loans | Done |
 | Accumulation phase for ages 20–40s v20: income, saving rate and wage growth, workplace pension, automatic National Pension estimate (2026 reform), required-saving solver | Done |
 | Housing v19: reverse mortgage (HF 2026 payment table, loan balance, non-recourse, property-tax relief) and downsizing (capital-gains and acquisition taxes) | Done |
 | Equity returns from real data v18: KOSPI volatility, crash jumps, rate correlation, Bayesian risk premium | Done |

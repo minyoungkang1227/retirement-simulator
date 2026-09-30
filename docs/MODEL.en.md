@@ -234,3 +234,8 @@ Reverse mortgage: fixed nominal monthly payment from the Korea Housing Finance C
 ## 22. v20 accumulation phase
 
 Pre-retirement savings = household gross salary growing at a real wage rate × saving rate (or a fixed amount); workplace pension adds one-twelfth of salary per year to the tax-deferred pension account, withdrawable after 55 and retirement. National Pension is estimated with the 2026 reform formula (43% replacement, constant 1.29, A ≈ KRW 3.19M, income cap/floor KRW 6.59M/0.41M). A bisection solver finds the saving (amount or rate) that keeps essential success at 90%.
+
+
+## 23. v21 big expenses
+
+Expense events (education, wedding support, other) are added to required spending over their years. A home purchase pays the down payment and acquisition tax from assets (a returned jeonse deposit counts as equity) and takes a fixed-rate amortizing mortgage at the prevailing rate + 1.5pp; payments before retirement come from earned income, remaining payments after retirement from savings. Pre-retirement shortfalls become debt at rate + 1.5pp, repaid first from later savings and settled from assets at retirement.

@@ -278,3 +278,10 @@ KOSPI 월말 지수(2000-02~2026-08, 319개월). 연 로그수익 $=\int r+\text
 - 은퇴 전 연 저축 $S_t=\big(\sum_i \text{salary}_i(1+g)^t\mathbb 1_{\text{생존}}\big)\cdot s\cdot CPI_t$ (또는 고정 금액), 퇴직연금 $\sum_i\text{salary}_i(1+g)^t/12\cdot CPI_t$ → 연금계좌
 - 국민연금 월액 $\approx 1.29(A+B)(1+0.05(Y-20))/12$, $A\approx319$만, $B=\text{clip}(\text{월소득},41,659)$, $Y$ = 과거 + 60세(또는 은퇴)까지 가입연수, $Y<10$이면 0
 - 필요 저축: $\min\{S: P(\text{기본생활 유지}\mid S)\ge 0.9\}$ 이분법, 공통 난수
+
+
+## 23. v21 큰 지출
+
+- 이벤트 비용 $E_t=\sum_e a_e\,CPI_t\,\mathbb 1[x_t\in[x_e,x_e+n_e)]$ → 필요 지출에 가산
+- 주택 구입(가격 $P$, 대출비율 $\ell$, 기간 $N$): 자기부담 $P(1-\ell)+\tau(P)P-\text{전세금}$, 원리금 $L\,i/(1-(1+i)^{-N})$, $i=r_t+1.5\%$ 고정. 은퇴 전 원리금은 근로소득에서(저축률과 별개), 은퇴 후는 노후자금에서.
+- 은퇴 전 부족분 → 부채 $B_{t+1}=(B_t+\text{short}_t-\text{repay}_t)(1+r_t+1.5\%)$, 은퇴 첫해 $B$를 필요 지출에 가산.
