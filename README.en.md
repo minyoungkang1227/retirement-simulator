@@ -20,7 +20,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 ② 10,000 scenarios: rates, inflation and equities (linked stochastic processes) × each spouse's lifespan and long-term care (multi-state model)
 ③ Cash flow: savings before retirement; after retirement, essential spending first and lifestyle only when affordable
 ④ Taxes, health premiums, property taxes and inheritance tax
-⑤ Output: income gap, goal-by-goal success, required assets, what-if comparisons, add-on products (stocks, deposits, annuities, insurance)
+⑤ Output: income gap, goal-by-goal success, required assets, what-if comparisons (including reverse mortgage and downsizing), add-on products (stocks, deposits, annuities, insurance)
 ```
 
 ## What makes it different
@@ -55,6 +55,15 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 - For this household **retirement timing is the strongest lever**, and the same crash hurts most right after retirement (sequence-of-returns risk).
 - Splitting spending into essential + flexible lowers the depletion probability versus fixed spending of the same total (53.9% → 47.6%).
 - The largest uncertainty is the **equity risk premium**: within its estimated range (5.2% ± 1.4pp) essential success moves between 36% and 59%, which is why differences between choices matter more than levels.
+
+**House-rich, cash-poor household (couple aged 65 and 63, KRW 300M financial assets, home worth KRW 700M)**
+
+| Housing strategy | Essential success | Lifestyle funding | KRW 300M legacy | Note |
+|---|---|---|---|---|
+| Keep as is | 13% | 33% | 100% | — |
+| Reverse mortgage now (63) | 70% (+56.5pp) | 94% | 43% | KRW 1.65M/month |
+| Reverse mortgage at 70 | 77% (+63.7pp) | 91% | 47% | KRW 2.15M/month (today's value) |
+| Downsize to half price at 70 | 71% (+57.9pp) | 88% | 99% | KRW 340M released |
 
 ![goals](docs/images/goals_whatif.png)
 ![tax strategies](docs/images/tax_strategies.png)
@@ -111,13 +120,13 @@ python scripts/validate_v11.py      # validation
 | Web app (Streamlit) | Done |
 | v12 goal-based rebuild (three goals, income gap, accumulation phase, model portfolios, step-by-step input) | Done |
 | Statistics Korea 2024 complete life table (v13) | Done |
+| Housing v19: reverse mortgage (HF 2026 payment table, loan balance, non-recourse, property-tax relief) and downsizing (capital-gains and acquisition taxes) | Done |
 | Equity returns from real data v18: KOSPI volatility, crash jumps, rate correlation, Bayesian risk premium | Done |
 | Long-term-care model from real data v17: two severity levels calibrated to national LTC recognition rates and grade mix, 2026 out-of-pocket and caregiver costs | Done |
 | Actuarial essential floor v16: survival-weighted present value reflecting pension start and couple survival states | Done |
 | Add-on products v15: stocks by ticker (beta, correlation, rate sensitivity), deposits, life annuities, long-term-care insurance, pension contributions | Done |
 | ECOS rate/inflation estimation (v14) | Done |
 | Cohort mortality improvement | Planned |
-| Home sale and reverse mortgage | Planned |
 | Account/budget-app import, periodic re-measurement | Planned |
 
 See [CHANGELOG.md](CHANGELOG.md) and [docs/MODEL.en.md](docs/MODEL.en.md) for details.

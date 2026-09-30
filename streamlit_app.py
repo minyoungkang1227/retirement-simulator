@@ -44,7 +44,7 @@ if "p" not in ss:
                 essential=300, lifestyle=1200, nps=110, s_nps=50, nps_start=65,
                 priv=0, priv_start=60, priv_years=20, legacy=1.0, children=2, profile="균형형",
                 h_official=0.0, h_market=0.0, h_n=1, h_joint=False, h_years=10, h_hi=0.0, rent=0,
-                biz=0, biz_until=65, biz_work=False, overseas=20, own_equal=True, survivor=70,
+                biz=0, biz_until=65, biz_work=False, rm_age=0, ds_age=0, ds_ratio=50, overseas=20, own_equal=True, survivor=70,
                 enhanced=True, paths=10000)
     ss.step = 0
 p = ss.p
@@ -86,9 +86,13 @@ def build(p: dict, v: dict):
                ownership=None if (p["own_equal"] or not p["spouse"]) else (1, 0))
     tkw.update(v.get("tax", {}))
     k = len(members)
+    hv = v.get("house", {})
+    rm_age = hv.get("rm_age", p.get("rm_age", 0)); ds_age = hv.get("ds_age", p.get("ds_age", 0))
     house = HouseConfig(official=p["h_official"] * 10000, market=p["h_market"] * 10000, n_houses=p["h_n"],
                         owner_share=(tuple([1 / k] * k) if p["h_joint"] else None), years_held=p["h_years"],
-                        hi_property_monthly=p["h_hi"] or None, rent_annual=p["rent"])
+                        hi_property_monthly=p["h_hi"] or None, rent_annual=p["rent"],
+                        reverse_mortgage_age=rm_age or None, downsize_age=ds_age or None,
+                        downsize_ratio=hv.get("ds_ratio", p.get("ds_ratio", 50)) / 100)
     biz = [dict(income=p["biz"], until_age=p["biz_until"], workplace=p["biz_work"])] if p["biz"] > 0 else [None]
     biz += [None] * (k - 1)
     q = None
@@ -118,7 +122,8 @@ def simulate(p_json: str, v_json: str) -> dict:
     return {"s": s, "dep": (d >= 0), "anti": bool(res.get("antithetic")),
             "dep_age": float(np.median(d[d >= 0] + y)) if (d >= 0).any() else None, "fan": fan, "curve": curve,
             "p50_85": float(np.percentile(w85, 50)) if w85.size else 0.0, "annuity_pay": res.get("annuity_pay", 0.0),
-            "care_premium": res.get("care_premium", 0.0), "stock_corr": corr}
+            "care_premium": res.get("care_premium", 0.0), "stock_corr": corr,
+            "rm_monthly": res.get("rm_monthly", 0.0), "ds_cash": res.get("ds_cash", 0.0)}
 
 
 @st.cache_data(ttl=86400, max_entries=64, show_spinner=False)
@@ -280,6 +285,12 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 h_years = c2.number_input("보유 기간 (년)", 0, 60, p["h_years"])
                 h_hi = c3.number_input("건보료 재산분 (월, 만 원)", 0.0, 500.0, p["h_hi"], help="공단 '지역보험료 모의계산'에서 소득 0, 재산만 넣은 값")
                 rent = st.number_input("연 임대수입 (만 원)", 0, 100000, p["rent"])
+                st.markdown("주택 활용 계획 (선택)")
+                c1, c2, c3 = st.columns(3)
+                rm_age = c1.number_input("주택연금 가입 나이 (0 = 안 함)", 0, 90, p.get("rm_age", 0),
+                                         help="부부 중 나이 적은 사람 기준, 55세 이상·공시가격 12억 이하 1주택")
+                ds_age = c2.number_input("집 줄이기 나이 (0 = 안 함)", 0, 90, p.get("ds_age", 0), help="본인 나이 기준, 팔고 작은 집으로 이사")
+                ds_ratio = c3.slider("새 집 가격 (기존 대비 %)", 20, 90, p.get("ds_ratio", 50), step=10)
             with st.expander("사업", expanded=p["biz"] > 0):
                 c1, c2, c3 = st.columns(3)
                 biz = c1.number_input("연 사업소득 (만 원)", 0, 100000, p["biz"])
@@ -297,7 +308,7 @@ if ss.step < len(STEPS) and not ss.get("done"):
             back, nxt = nav(i, "s7")
             if nxt or back:
                 p.update(h_official=h_off, h_market=h_mkt, h_n=int(h_n), h_joint=bool(h_joint), h_years=int(h_years),
-                         h_hi=float(h_hi), rent=int(rent), biz=int(biz), biz_until=int(biz_until), biz_work=bool(biz_work),
+                         h_hi=float(h_hi), rent=int(rent), rm_age=int(rm_age), ds_age=int(ds_age), ds_ratio=int(ds_ratio), biz=int(biz), biz_until=int(biz_until), biz_work=bool(biz_work),
                          overseas=int(overseas), own_equal=bool(own_equal), survivor=int(survivor), floor=floor,
                          enhanced=bool(enhanced), paths=int(paths)); go(1 if nxt else -1)
         else:
@@ -387,6 +398,10 @@ def whatif(rows):
                "변화": "—" if not v else f"{-dlt * 100:+.1f}%p (±{ci * 100:.1f})", "판단": verdict}
         if p["lifestyle"] > 0: row["여행·취미 충족"] = pct(rs.get("여행·취미 평균 충족률", 0))
         if p["legacy"] > 0: row["남길 자산 달성"] = pct(rs.get("유산 목표 달성 확률", 0))
+        note = []
+        if r.get("rm_monthly"): note.append(f"주택연금 월 {r['rm_monthly']:.0f}만 원")
+        if r.get("ds_cash"): note.append(f"확보 현금 {r['ds_cash'] / 10000:.1f}억")
+        if p["h_market"] > 0: row["비고"] = ", ".join(note) or "—"
         out.append(row)
     st.dataframe(pd.DataFrame(out), hide_index=True, width="stretch")
 
@@ -399,7 +414,17 @@ with tab2:
     rows += [(f"투자 성향 {k}", {"stock_weight": w}) for k, w in PROFILES.items() if k != p["profile"]]
     for a in (p["nps_start"] - 5, p["nps_start"] + 3):
         if 60 <= a <= 70 and a >= min(p["age"], 70): rows.append((f"국민연금 {a}세부터", {"nps_start": a}))
+    if p["h_market"] > 0 and not p.get("rm_age") and not p.get("ds_age"):
+        young = min(p["age"], p["s_age"]) if p["spouse"] else p["age"]
+        if p["h_n"] == 1 and p["h_official"] <= 12:
+            for ra in sorted({max(young, 55, p["retire_age"] - (p["age"] - young)), max(young, 70)}):
+                rows.append((f"주택연금 {ra}세 가입 (연소자 기준)", {"house": {"rm_age": int(ra)}}))
+        da = max(p["age"], 70)
+        rows.append((f"{da}세에 절반 가격 집으로 이사", {"house": {"ds_age": int(da), "ds_ratio": 50}}))
     whatif(rows)
+    if p["h_market"] > 0:
+        st.caption("주택연금: 한국주택금융공사 2026-03 종신지급 정액형 월지급금 기준(명목 정액), 대출이자(금리+1.1%p)·보증료 0.75%가 쌓여 사망 시 집값에서 상환(집값 초과분은 청구 안 함), 재산세 25% 감면. "
+                   "집 줄이기: 매도 비용 0.6%, 1주택 양도세(12억 초과분), 새 집 취득세 반영.")
 
 with tab6:
     st.markdown("주식·예금·연금·보험을 **더했을 때** 목표 달성과 위험이 어떻게 바뀌는지 봅니다. "
@@ -526,6 +551,7 @@ with tab5:
 - 금리·물가·주가가 서로 연결되어 움직이는 1만 가지 미래와, 통계청 생명표 기반 부부 각자의 수명·간병을 계산합니다.
 - 목표는 **기본생활 → 여행·취미 → 남길 자산** 순으로 지킵니다. 매년 남은 금융자산이 "앞으로 기본생활비 부족분의 기대 현재가치"(생존확률 가중, 연금 개시 반영, 실질 2% 할인, 사망률 80%로 보수적 계산)보다 많을 때만 여행·취미 예산을 씁니다.
 - 국민연금, 사적연금 분리과세, 금융소득종합과세, 건강보험료, 재산세·종부세, 상속·증여세를 반영합니다.
+- 주택연금(한국주택금융공사 2026 월지급금표)과 집 줄이기(매도 비용·양도세·취득세)를 선택지로 비교할 수 있습니다.
 
 **알아두실 점**
 - 사망률은 통계청 2024 완전생명표(미래 수명 연장 미반영), 금리·물가는 한국은행 ECOS 2000~2026년 데이터로 추정했습니다. 간병은 건강보험공단 장기요양 통계와 2026 본인부담·간병비 시세로, 주식은 KOSPI 2000~2026년 데이터로 추정했습니다. 다만 **주식 위험프리미엄은 추정 오차가 커서**(5.2% ± 1.4%p) 결과의 절대값이 크게 움직일 수 있습니다. 결과의 절대값보다 **선택지 사이의 차이**를 보세요.

@@ -110,6 +110,40 @@ class HouseConfig:
     rent_annual: float = 0       # 연 임대수입(만원)
     fmv_ratio_prop: float = .60  # 재산세 공정시장가액비율(1주택 특례는 43~45%) — 근사
     fmv_ratio_cjs: float = .60   # 종부세 공정시장가액비율
+    # ── v19 주택 활용 전략 ──
+    reverse_mortgage_age: int = None   # 주택연금 가입 나이(부부 중 나이 적은 사람 기준). None이면 안 함
+    downsize_age: int = None           # 집 줄이기(매도 후 작은 집 매수) 나이(본인 기준). None이면 안 함
+    downsize_ratio: float = 0.5        # 새 집 가격 / 기존 집 가격
+    cost_basis: float = None           # 기존 집 취득가(만원). None이면 현재 시세의 50%로 가정
+    sell_cost: float = 0.006           # 매도 중개수수료 등
+
+
+# 주택연금 월지급금 (한국주택금융공사, 2026-03-01, 종신지급방식 정액형, 만원/월)
+# 나이: (주택가격 1억원당 월지급금, 12억원 주택 월지급금 = 연령별 상한)
+RM_TABLE = {55: (15.6, 187.2), 60: (21.0, 252.8), 65: (25.2, 303.5), 70: (30.7, 341.4), 75: (38.1, 366.6), 80: (48.3, 406.0)}
+
+
+def reverse_mortgage_monthly(age: float, house_value: float) -> float:
+    """연소자 나이·주택가격(만원, 시세)으로 월지급금(만원) — 표 사이는 선형 보간, 12억 초과는 12억으로 계산."""
+    ages = sorted(RM_TABLE); age = min(max(age, ages[0]), ages[-1])
+    lo = max(a for a in ages if a <= age); hi = min(a for a in ages if a >= age)
+    w = 0 if hi == lo else (age - lo) / (hi - lo)
+    rate = RM_TABLE[lo][0] * (1 - w) + RM_TABLE[hi][0] * w
+    cap = RM_TABLE[lo][1] * (1 - w) + RM_TABLE[hi][1] * w
+    return min(rate * min(house_value, 120000) / 10000, cap)
+
+
+def acquisition_tax_rate(price: float) -> float:
+    """1주택 취득세(지방교육세 포함) 근사: 6억 이하 1.1%, 9억 이하 2.2%, 초과 3.3%."""
+    return 0.011 if price <= 60000 else (0.022 if price <= 90000 else 0.033)
+
+
+def one_house_cgt(price: float, basis: float, years: int) -> float:
+    """1세대 1주택 양도세 근사: 12억 초과분 비율만 과세, 장기보유특별공제 최대 80%, 실효세율 38.5%(지방세 포함)."""
+    if price <= 120000:
+        return 0.0
+    gain = max(price - basis, 0) * (price - 120000) / price
+    return gain * (1 - min(0.08 * years, 0.8)) * 0.385
 
 
 def property_tax(official, n_houses, fmv):

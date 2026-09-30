@@ -224,3 +224,8 @@ States healthy / mild (grades 3–5, cognitive support) / severe (grades 1–2) 
 ## 20. v18 equity calibration
 
 KOSPI monthly data 2000-02 to 2026-08: diffusion volatility 21% plus Merton jumps (0.05 per year, −20% ± 10%) match the observed tail frequencies of 12-month returns (≤ −20%: 9.4%, ≤ −30%: 2.6%); correlation with 3-year yield changes +0.09. The equity risk premium is a normal-normal Bayesian posterior combining the sample estimate (8.6% ± 4.6pp s.e., including an assumed 1.8% dividend yield) with a prior of 4.9% ± 1.5pp (Damodaran mature-market ERP 4.2% plus a Korea country premium), giving 5.2% ± 1.4pp, used as per-path parameter uncertainty.
+
+
+## 21. v19 housing strategies
+
+Reverse mortgage: fixed nominal monthly payment from the Korea Housing Finance Corporation 2026 table (interpolated by the younger spouse's age and home value, capped at KRW 1.2B), paid while either spouse lives; the loan balance accrues at the model short rate + 1.1pp plus a 0.75% annual guarantee fee (1% upfront) and is repaid from the house at death without recourse; 25% property-tax relief. Downsizing: sale at a chosen age with 0.6% costs, one-home capital-gains tax above KRW 1.2B, and acquisition tax on the new home; released cash joins financial assets.
