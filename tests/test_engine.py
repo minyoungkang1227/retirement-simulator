@@ -130,3 +130,22 @@ def test_house_strategies_help_cash_poor():
     base = engine_tax.summarize(_run(hh, house=H))["기본생활 유지 확률"]
     rm = engine_tax.summarize(_run(hh, house=HouseConfig(**{**H.__dict__, "reverse_mortgage_age": 70})))["기본생활 유지 확률"]
     assert rm > base + 0.2
+
+
+# ── 6. 집값 위험 (v26) ──
+def test_house_index_distribution():
+    from retire_sim.economy_v2 import generate
+    d = generate(EconomyV2.enhanced(), 30, 20_000, np.random.default_rng(0))
+    H = d["house"]
+    assert H.shape[1] == 31 and np.allclose(H[:, 0], 1.0)
+    lr = np.diff(np.log(H), axis=1)
+    assert 0.08 < lr.std() < 0.12                                   # 연 변동성 ≈ 10%
+    assert 0.0 < np.log(np.median(H[:, 30])) / 30 < 0.03            # 실질 상승률 ≈ 1.25%
+    assert np.percentile(H[:, 30], 5) < 0.8 < 1.3 < np.percentile(H[:, 30], 95)
+
+
+def test_house_risk_off_reproduces_v25():
+    """집값 파라미터를 끄면 v25와 같아야 한다(집값 = 물가만큼)."""
+    flat = EconomyV2.enhanced(house_sigma=0, house_real_growth=0, house_real_sd=0)
+    d = generate(flat, 20, 5000, np.random.default_rng(0))
+    assert np.allclose(d["house"], 1.0)

@@ -120,7 +120,10 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     short_real = np.zeros(n)                                   # 생존 중 부족했던 기본생활비 누계(실질)
 
     # ── v19 주택 활용: 주택연금 / 집 줄이기 ──
-    hscale = np.ones(n)                                        # 현재 집 가치 / 처음 집 가치
+    hscale = np.ones(n)                                        # 현재 집 가치 / 처음 집 가치 (다운사이징 등)
+    hidx = eco.get("house")                                    # (v26) 실질 집값 지수 — 명목 = hidx × cpi
+    if hidx is None: hidx = np.ones((n, T + 1))
+    hp = lambda tt: hscale * hidx[:, tt] * cpi[:, tt]          # 집값 배율(처음 시세 기준, 명목)
     rm_t = None if house.reverse_mortgage_age is None else max(0, house.reverse_mortgage_age - youngest)
     ds_t = None if house.downsize_age is None else max(0, house.downsize_age - hh.members[0].age)
     if rm_t is not None and ds_t is not None and rm_t <= ds_t:
@@ -174,7 +177,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 work[i] = a[i] & bool(b.get("workplace", False))
         rent = house.rent_annual * cpi[:, t] * live
         if ds_t is not None and t == ds_t and house.market > 0:  # 집 줄이기: 팔고 작은 집 사기
-            sell = house.market * hscale * cpi[:, t]
+            sell = house.market * hp(t)
             cgt = one_house_cgt(sell, rm_basis, house.years_held + t) if house.n_houses == 1 else 0.3 * np.maximum(sell - rm_basis, 0)
             newp = sell * house.downsize_ratio
             acq = acquisition_tax_rate(newp) * newp
@@ -182,8 +185,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             Wt += cash; Bt += cash; hscale = hscale * house.downsize_ratio
             ds_cash_real = float(np.median(cash[live] / cpi[live, t])) if live.any() else 0.0
         if rm_t is not None and t == rm_t and house.market > 0:  # 주택연금 가입 (공시 12억 이하 1주택)
-            V = house.market * hscale * cpi[:, t]
-            elig = live & (house.n_houses == 1) & (house.official * hscale * cpi[:, t] <= 120000)
+            V = house.market * hp(t)
+            elig = live & (house.n_houses == 1) & (house.official * hp(t) <= 120000)
             m_pay = reverse_mortgage_monthly(youngest + t, V)
             rm_pay = np.where(elig, 12 * m_pay, 0.0); rm_on = elig; rm_bal = np.where(elig, 0.01 * V, 0.0)
             rm_monthly_real = float(np.median(m_pay[elig] / cpi[elig, t])) if elig.any() else 0.0
@@ -193,7 +196,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             age0 = hh.members[0].age + t
             if ev.get("kind") == "house":
                 if age0 == ev["age"]:
-                    price = ev["amount"] * cpi[:, t]; ltv = ev.get("ltv", 0.6); N = ev.get("loan_years", 30)
+                    price = ev["amount"] * hp(t); ltv = ev.get("ltv", 0.6); N = ev.get("loan_years", 30)
                     loan = price * ltv * live
                     i_m = np.maximum(eco["rate"][:, t], 0) + 0.015                  # 고정금리 = 당시 금리 + 1.5%p
                     mort_bal = mort_bal + loan; mort_rate = np.where(loan > 0, i_m, mort_rate)
@@ -210,7 +213,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         if not (pre_ret and mort_from_income):                                # 은퇴 전 원리금은 근로소득(생활비)에서, 은퇴 후엔 노후자금에서
             ev_cost += m_now
         mort_bal = np.maximum(mort_bal * (1 + mort_rate) - m_now, 0)
-        official = (house.official * hscale + extra_house * 0.69) * cpi[:, t]     # 새 집 공시가격 ≈ 시세의 69%
+        official = (house.official * hscale + extra_house * 0.69) * hidx[:, t] * cpi[:, t]     # 새 집 공시가격 ≈ 시세의 69%
 
         # 2) 증여 전략 (10년마다)
         realized = np.zeros(n); gift_tax_now = np.zeros(n)
@@ -338,7 +341,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 else:
                     cjs = per_person
                 prop = (prop + cjs) * live
-            pm = (house.hi_property_monthly or 0) * hscale * cpi[:, t]
+            pm = (house.hi_property_monthly or 0) * hscale * hidx[:, t] * cpi[:, t]
             rate = tc.hi_rate * (1 + tc.ltc_ratio)
             any_work = work.any(0)
             # 직장가입자(사업장 대표): 사업소득 전액(대표자 전액 부담) + 보수 외 소득 2,000만원 초과분
@@ -398,7 +401,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         died_all = live & (alive[:, :, t + 1].sum(0) == 0)
         if died_all.any():
             fin_est = np.maximum(Wt + Wi + Wp + S + D - debt, 0) * (dep_at < 0)
-            est = fin_est + np.maximum(house.market * hscale * cpi[:, t + 1] - rm_bal, 0) + np.maximum(extra_house * cpi[:, t + 1] - mort_bal, 0)   # 주택연금·주담대 상환 후
+            est = fin_est + np.maximum(house.market * hp(t + 1) - rm_bal, 0) + np.maximum(extra_house * hidx[:, t + 1] * cpi[:, t + 1] - mort_bal, 0)   # 주택연금·주담대 상환 후
             recent = sum(g for (tg, g, _) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
             recent_gt = sum(gt for (tg, _, gt) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
             fin_ded = np.where(fin_est <= 2000, fin_est, np.where(fin_est <= 10000, 2000, np.minimum(fin_est * .2, 20000)))

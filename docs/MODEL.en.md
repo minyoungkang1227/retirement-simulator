@@ -239,3 +239,8 @@ Pre-retirement savings = household gross salary growing at a real wage rate × s
 ## 23. v21 big expenses
 
 Expense events (education, wedding support, other) are added to required spending over their years. A home purchase pays the down payment and acquisition tax from assets (a returned jeonse deposit counts as equity) and takes a fixed-rate amortizing mortgage at the prevailing rate + 1.5pp; payments before retirement come from earned income, remaining payments after retirement from savings. Pre-retirement shortfalls become debt at rate + 1.5pp, repaid first from later savings and settled from assets at retirement.
+
+
+## 25. v26 house price model
+
+Real house price index follows $\ln(H_{t+1}/H_t)=\ln(1+g)-\sigma_H^2/2+\sigma_H(\rho Z^S+\sqrt{1-\rho^2}Z^H)$ with $g\sim N(1.25\%,1.18\%^2)$, $\sigma_H=10\%$, $\rho=0.1$; nominal price = real index × CPI. Estimated from the Korea Real Estate Board national house price index via ECOS, 2013 onwards only (the series provider changed in 2013). Monthly volatility is smoothed (lag-1 autocorrelation 0.82), so volatility is re-estimated from annual returns (6.6%) and combined with idiosyncratic single-home risk (7%). The real growth rate is a Bayesian posterior of the sample estimate (3.25% ± 1.89pp) and a prior of N(0%, 1.5%).

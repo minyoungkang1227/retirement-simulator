@@ -55,6 +55,11 @@ class EconomyV2:
     # ── v11 수리적 보완 ──
     integrated_rate: bool = False  # 주식 수익률에 연초 금리 대신 1년 금리 적분 ∫r 사용 (채권과 일관)
     term_premium: float = 0.0      # 위험의 시장가격: 가격용(Q) 장기평균 = θ + term_premium → 채권 기간 프리미엄
+    # ── v26 집값 ──
+    house_real_growth: float = 0.0   # 물가 대비 실질 상승률(연). 0이면 집값 = 물가만큼만 상승(v25까지)
+    house_real_sd: float = 0.0       # 실질 상승률 추정 불확실성(경로별)
+    house_sigma: float = 0.0         # 집값 로그수익 변동성(연, 개별 주택)
+    rho_hs: float = 0.1              # 집값-주식 충격 상관
 
     @classmethod
     def enhanced(cls, calibrated: bool = True, **kw):
@@ -66,6 +71,7 @@ class EconomyV2:
         if calibrated:
             base.update(CALIBRATED_2026_08)
             base.update(CALIBRATED_EQUITY_2026_08)
+            base.update(CALIBRATED_HOUSE_2026_08)
         base.update(kw)
         return cls(**base)
 
@@ -193,7 +199,31 @@ def generate(e: EconomyV2, T: int, n: int, rng) -> dict:
         if t < T: infl[:, t] = v
     cpi = np.concatenate([np.ones((n, 1)), np.cumprod(1 + infl, axis=1)], axis=1)
     return {"stock": stock, "bond": bond, "infl": infl, "cpi": cpi, "rate": r,
+            "house": _house_index(e, stock, T, n, rng, U[:, 0]),
             "antithetic": e.antithetic, "erp_path": erp}
+
+
+def _house_index(e: EconomyV2, stock, T, n, rng, u0):
+    """집값 실질 지수(오늘 대비). 명목 집값 = 이 지수 × CPI.
+
+    로그 실질수익 = g + σ_h(ρ Z_s + √(1−ρ²) Z_h) − σ_h²/2,  Z_s는 주식의 표준화 충격.
+    물가 연동은 "명목 = 실질 × CPI" 구조로 반영되므로 물가와의 상관을 따로 넣지 않는다.
+    g는 경로별로 N(house_real_growth, house_real_sd²)에서 추출(추정 불확실성).
+    """
+    if e.house_sigma <= 0 and e.house_real_growth == 0 and e.house_real_sd == 0:
+        return np.ones((n, T + 1))                       # v25까지와 동일: 집값 = 물가만큼
+    g = e.house_real_growth + (e.house_real_sd * u0 if e.house_real_sd > 0 else 0.0)
+    ls = np.log1p(stock)
+    zs = (ls - ls.mean(0, keepdims=True)) / np.maximum(ls.std(0, keepdims=True), 1e-9)
+    if e.antithetic:
+        h = (n + 1) // 2
+        zh_half = rng.standard_normal((h, T)); zh = np.concatenate([zh_half, -zh_half])[:n]
+    else:
+        zh = rng.standard_normal((n, T))
+    rho = e.rho_hs
+    shock = rho * zs + np.sqrt(max(1 - rho ** 2, 0)) * zh
+    lr = np.log1p(g)[:, None] - 0.5 * e.house_sigma ** 2 + e.house_sigma * shock
+    return np.concatenate([np.ones((n, 1)), np.cumprod(np.exp(lr), axis=1)], axis=1)
 
 
 def _generate_integrated(e: EconomyV2, T: int, n: int, rng) -> dict:
@@ -253,6 +283,7 @@ def _generate_integrated(e: EconomyV2, T: int, n: int, rng) -> dict:
         if t < T: infl[:, t] = v
     cpi = np.concatenate([np.ones((n, 1)), np.cumprod(1 + infl, axis=1)], axis=1)
     return {"stock": stock, "bond": bond, "infl": infl, "cpi": cpi, "rate": r,
+            "house": _house_index(e, stock, T, n, rng, U[:, 0]),
             "antithetic": e.antithetic, "erp_path": erp}
 
 
@@ -266,3 +297,13 @@ CALIBRATED_EQUITY_2026_08 = dict(
     s_sigma=0.21, jump_lambda=0.05, jump_mu=-0.20, jump_sigma=0.10,
     erp=0.052, erp_sd=0.014, rho_rs=0.09, rho_ps=0.0,
 )
+
+# 주택가격 실데이터 추정 (v26, ECOS 한국부동산원 전국주택가격동향조사 월간, 2013-01~ — 작성기관 변경 이후만 사용)
+# - 변동성: 월별 지수는 평활되어(1개월 자기상관 0.82) 변동성을 2.5%로 과소평가 → 연도별 수익률로 재추정 6.6%.
+#   전국 지수보다 개별 주택 한 채가 더 흔들리므로 고유 위험 7%를 더해 총 ≈ 10% 사용
+# - 실질 상승률: 데이터 3.25%(표준오차 1.89%p)와 사전분포 N(0%, 1.5%)의 베이즈 결합 → 1.25% ± 1.18%p.
+#   2013~2026 표본은 상승기가 길어 그대로 쓰면 과대평가되고, 장기적으로 실질 집값이 소득보다 빨리
+#   오르기 어렵다는 점(인구 감소 포함)을 사전분포로 반영
+# - 상관: 월별 주식 0.05·물가 0.07·금리변화 0.18 (평활로 0 쪽 편의) → 주식 상관 0.1 사용.
+#   물가 연동은 "명목 집값 = 실질 지수 × CPI" 구조로 반영
+CALIBRATED_HOUSE_2026_08 = dict(house_real_growth=0.0125, house_real_sd=0.0118, house_sigma=0.10, rho_hs=0.1)
