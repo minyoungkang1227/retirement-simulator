@@ -125,6 +125,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     # ── v21 큰 지출 이벤트: 부족하면 은퇴 전에는 대출(금리 + 1.5%p), 은퇴 시점에 남은 빚은 자산으로 상환 ──
     debt = np.zeros(n); extra_house = np.zeros(n)             # extra_house: 이벤트로 산 집(오늘 가치)
     mort_bal = np.zeros(n); mort_pay = np.zeros(n); mort_rate = np.zeros(n)   # 주택담보대출(원리금균등, 명목)
+    rent_save = np.zeros(n)                                    # (v24) 집을 사서 더 안 내게 된 월세·전세대출 이자(연, 오늘 가치)
     debt_retire_real = np.full(n, np.nan); debt_settled = False
     def joint_factor(t0):                                      # 부부 중 한 명이라도 생존하는 동안의 연금현가 (실질 할인)
         v = 1 / (1 + hh.floor_real_rate); surv = []
@@ -194,6 +195,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                     down = price - loan + np.array([acquisition_tax_rate(x) for x in price]) * price
                     ev_cost += (down - ev.get("deposit_back", 0) * cpi[:, t]) * live   # 전세 보증금 회수분은 자기자본으로
                     extra_house = extra_house + ev["amount"] * live
+                    rent_save = rent_save + ev.get("rent_saving", 0) * live
             elif ev["age"] <= age0 < ev["age"] + ev.get("years", 1):
                 ev_cost += ev["amount"] * cpi[:, t] * live
         m_now = np.where(mort_bal > 1e-6, np.minimum(mort_pay, mort_bal * (1 + mort_rate)), 0.0) * live
@@ -268,12 +270,15 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                     floor = np.maximum(floor - ann_inc * annuity_factor(t) / (1 + e.pi_theta), 0)
                 if rm_on.any():                                        # 주택연금(명목 정액)도 보장소득으로 차감
                     floor = np.maximum(floor - rm_inc * joint_factor(t) / (1 + e.pi_theta), 0)
+                if rent_save.any():                                    # 자가 전환으로 줄어든 주거비만큼 보호선도 낮춤
+                    floor = np.maximum(floor - rent_save * cpi[:, t] * live * joint_factor(t), 0)
             else:
                 yrs_left = max(5, hh.planning_age - (youngest + t))
                 ann = (1 - 1.02 ** -yrs_left) / 0.02            # (v12) 실질 2%로 할인한 확정 연금현가계수
                 floor = np.maximum(ess - income_all, 0) * ann
             life_paid = np.clip(Wt + Wi + Wp + S + D - floor, 0, life_want)
-            spend = ess + life_paid
+            ess_eff = np.maximum(ess - rent_save * cpi[:, t] * live, 0)            # 자가 전환: 은퇴 후 주거비(월세 등) 절감
+            spend = ess_eff + life_paid
             if hh.lifestyle > 0:
                 life_ratio[:, t] = np.where(live, life_paid / np.maximum(life_want, 1e-9), np.nan)
             saving = 0.0
@@ -281,6 +286,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             spend = np.zeros(n)
             sal = sum(a[i] * m.salary * (1 + hh.wage_growth) ** t for i, m in enumerate(hh.members)) * cpi[:, t]
             saving = (sal * hh.saving_rate if hh.saving_rate > 0 else hh.annual_saving * cpi[:, t]) * live
+            if rent_save.any():                                   # 은퇴 전: 안 내게 된 월세가 대출 원리금보다 많으면 그 차이만큼 추가 저축
+                saving = saving + np.maximum(rent_save * cpi[:, t] - m_now, 0) * live
             if hh.retirement_contrib:                             # 퇴직연금: 매년 연봉의 1/12 적립(회사 부담, 과세이연)
                 Wp += sal / 12 * live
             if ad.pension_contrib_annual > 0:                     # 저축 일부를 연금계좌로, 세액공제 환급은 과세계좌로

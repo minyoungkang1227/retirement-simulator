@@ -61,7 +61,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 - Essential success **82%**, lifestyle funding **91%**
 - To keep essentials 9 times out of 10: save **23%** of gross income (about KRW 1.71M/month in year one)
 - What if: save KRW 0.5M more per month +8.1pp, retire 2 years later +6.7pp, spend 10% less +6.1pp · without the workplace pension −23.0pp
-- Big expenses: college for two children from age 48 (KRW 10M × 8 years) −4.7pp · buying a KRW 600M home at 35 (60% loan, 30 years, KRW 200M deposit returned) −10.7pp (−6.7pp with a 25-year loan) · both plus a KRW 100M wedding gift at 58 −25.8pp
+- Big expenses: college for two children from age 48 (KRW 10M × 8 years) −4.7pp · buying a KRW 600M home at 35 (60% loan, 30 years, KRW 200M deposit returned) −10.7pp (−6.7pp with a 25-year loan, +8.1pp if it also saves KRW 0.8M/month in rent) · both plus a KRW 100M wedding gift at 58 −25.8pp
 
 **House-rich, cash-poor household (couple aged 65 and 63, KRW 300M financial assets, home worth KRW 700M)**
 

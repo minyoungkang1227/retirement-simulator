@@ -42,6 +42,19 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
 .goal .v .hl {{ color: {TEAL}; }}
 .tip {{ background: #F1F6F7; border-left: 4px solid {TEAL}; border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; line-height: 1.7; }}
 .key {{ display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin: 0 4px -1px 0; }}
+.stMarkdown p, .stMarkdown li, .hero, .gap, .goal, .tip, .legend {{ word-break: keep-all; overflow-wrap: anywhere; }}
+@media (max-width: 640px) {{
+  .hero {{ font-size: 1.45rem; }}
+  .gap .big {{ font-size: 1.3rem; }}
+  .goal .v {{ font-size: 1.2rem; }}
+  .dots {{ gap: 6px; flex-wrap: nowrap; }}
+  .dot {{ width: 24px; height: 24px; }}
+  .card, .goal {{ padding: .7rem .8rem; }}
+  .goal {{ margin-bottom: .5rem; }}
+  .tip, .gap {{ padding: .7rem .8rem; }}
+  .legend, .note {{ font-size: .82rem; }}
+  [data-testid="stTabs"] button p {{ font-size: .9rem; }}
+}}
 </style>""", unsafe_allow_html=True)
 
 ss = st.session_state
@@ -51,7 +64,7 @@ if "p" not in ss:
                 essential=300, lifestyle=1200, nps=110, s_nps=50, nps_start=65,
                 priv=0, priv_start=60, priv_years=20, legacy=1.0, children=2, profile="균형형",
                 h_official=0.0, h_market=0.0, h_n=1, h_joint=False, h_years=10, h_hi=0.0, rent=0,
-                biz=0, biz_until=65, biz_work=False, rm_age=0, ds_age=0, ds_ratio=50, events=[], ev_ltv=60, ev_loan_years=30, ev_jeonse=0.0, overseas=20, own_equal=True, survivor=70,
+                biz=0, biz_until=65, biz_work=False, rm_age=0, ds_age=0, ds_ratio=50, events=[], ev_ltv=60, ev_loan_years=30, ev_jeonse=0.0, ev_rent=0, overseas=20, own_equal=True, survivor=70,
                 enhanced=True, paths=10000)
     ss.step = 0
 p = ss.p
@@ -97,7 +110,7 @@ def build(p: dict, v: dict):
         if ev["kind"] == "주택 구입":
             events.append(dict(label=ev["kind"], age=int(ev["age"]), amount=float(ev["amount"]), kind="house",
                                ltv=p.get("ev_ltv", 60) / 100, loan_years=int(p.get("ev_loan_years", 30)),
-                               deposit_back=float(p.get("ev_jeonse", 0)) * 10000))
+                               deposit_back=float(p.get("ev_jeonse", 0)) * 10000, rent_saving=float(p.get("ev_rent", 0)) * 12))
         else:
             events.append(dict(label=ev["kind"], age=int(ev["age"]), amount=float(ev["amount"]), years=int(ev["years"]), kind="cost"))
     hh = Household(members=members, liquid_assets=liquid * 10000, pension_balance=p["ret_acct"] * 10000, events=events,
@@ -398,6 +411,8 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 ltv = c1.slider("대출 비율 (%)", 0, 80, int(p.get("ev_ltv", 60)), step=5)
                 lyr = c2.number_input("대출 기간 (년)", 5, 40, int(p.get("ev_loan_years", 30)))
                 jb = c3.number_input("전세 보증금 회수 (억 원)", 0.0, 50.0, float(p.get("ev_jeonse", 0.0)), step=0.5)
+                er = st.number_input("집을 사면 더 이상 안 내도 되는 월세·전세대출 이자 (월, 만 원)", 0, 1000, int(p.get("ev_rent", 0)), step=10,
+                                     help="집을 사기 전에 매달 내던 주거비입니다. 은퇴 전에는 대출 상환에 보태고 남는 만큼 더 저축하고, 은퇴 후에는 생활비에서 빠집니다.")
                 st.caption("대출 원리금은 은퇴 전에는 근로소득(생활비)에서 낸다고 보고, 은퇴 후 남은 원리금만 노후자금에서 나갑니다. "
                            "은퇴 전 자산이 부족한 지출은 대출(금리 + 1.5%p)로 처리하고, 남은 빚은 은퇴 시점에 자산으로 갚습니다.")
             with st.expander("사업", expanded=p["biz"] > 0):
@@ -431,7 +446,7 @@ if ss.step < len(STEPS) and not ss.get("done"):
             back, nxt = nav(i, "s7")
             if nxt or back:
                 p.update(h_official=h_off, h_market=h_mkt, h_n=int(h_n), h_joint=bool(h_joint), h_years=int(h_years),
-                         h_hi=float(h_hi), rent=int(rent), rm_age=int(rm_age), ds_age=int(ds_age), ds_ratio=int(ds_ratio), events=new_ev, ev_ltv=int(ltv), ev_loan_years=int(lyr), ev_jeonse=float(jb), biz=int(biz), biz_until=int(biz_until), biz_work=bool(biz_work),
+                         h_hi=float(h_hi), rent=int(rent), rm_age=int(rm_age), ds_age=int(ds_age), ds_ratio=int(ds_ratio), events=new_ev, ev_ltv=int(ltv), ev_loan_years=int(lyr), ev_jeonse=float(jb), ev_rent=int(er), biz=int(biz), biz_until=int(biz_until), biz_work=bool(biz_work),
                          overseas=int(overseas), own_equal=bool(own_equal), survivor=int(survivor), floor=floor,
                          enhanced=bool(enhanced), paths=int(paths)); go(1 if nxt else -1)
         else:
@@ -468,7 +483,7 @@ s = base["s"]
 if st.button("입력 수정하기"):
     ss.done = False; ss.step = len(STEPS) - 1; st.rerun()
 
-tab1, tab2, tab6, tab3, tab4, tab5, tab7 = st.tabs(["결과", "직접 바꿔보기", "상품 추가해 보기", "위기 상황", "세금·절세", "가정과 한계", "자세한 설명"])
+tab1, tab2, tab6, tab3, tab4, tab5, tab7 = st.tabs(["결과", "바꿔보기", "상품 추가", "위기 상황", "세금", "가정과 한계", "자세한 설명"])
 
 with tab1:
     need, pension, gap = income_gap(p)
@@ -517,7 +532,7 @@ with tab1:
                 lines.append("저축만 늘려서는 어려워요. 은퇴 시기나 생활비도 함께 바꿔 보세요.")
         if req is None and p["age"] >= p["retire_age"]:
             lines.append("모아둔 돈만 늘려서는 어려워요. 생활비나 연금 받는 시기를 함께 바꿔 보세요.")
-        lines.append("👉 <b>'직접 바꿔보기'</b> 탭에서 은퇴 시기·저축·생활비를 바꿔 보면 결과가 어떻게 달라지는지 바로 볼 수 있어요.")
+        lines.append("👉 <b>'바꿔보기'</b> 탭에서 은퇴 시기·저축·생활비를 바꿔 보면 결과가 어떻게 달라지는지 바로 볼 수 있어요.")
     st.markdown('<div class="tip"><b>10번 중 9번 지키려면</b><br>' + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
     if p.get("events"):
         ds_ = base.get("debt_share", 0)
@@ -530,9 +545,11 @@ with tab1:
                           for c, lab in (("p75", "운이 좋을 때"), ("p50", "보통일 때"), ("p25", "운이 나쁠 때"))])
     st.markdown("**나이별로 남는 돈** (오늘 돈 가치)")
     st.altair_chart(alt.Chart(lines_df).mark_line(strokeWidth=3).encode(
-        x=alt.X("나이:Q", title="나이"), y=alt.Y("억 원:Q", title="억 원"),
+        x=alt.X("나이:Q", title="나이"),
+        y=alt.Y("억 원:Q", title="억 원", axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=-5)),
         color=alt.Color("경우:N", sort=["운이 좋을 때", "보통일 때", "운이 나쁠 때"],
-                        scale=alt.Scale(range=["#7FB8BE", TEAL, CORAL]), legend=alt.Legend(title=None, orient="top")),
+                        scale=alt.Scale(range=["#7FB8BE", TEAL, CORAL]),
+                        legend=alt.Legend(title=None, orient="bottom", direction="horizontal", labelLimit=0, columns=3)),
         tooltip=["경우", "나이", alt.Tooltip("억 원:Q", format=".1f")]).properties(height=280), width="stretch")
     st.markdown('<div class="legend">선이 0에 닿는 때가 모아둔 돈을 다 쓰는 때예요. 운이 나쁘면(주가 하락·물가 상승 등) 더 빨리, '
                 '운이 좋으면 더 늦게 닿습니다. 집은 포함하지 않았어요.</div>', unsafe_allow_html=True)
@@ -565,14 +582,15 @@ with tab2:
     with st.form("tweak_form"):
         st.markdown("**바꿔 볼 조건**")
         c1, c2 = st.columns(2)
-        rd = c1.slider(f"은퇴 시기 조정 (지금 계획 {p['retire_age']}세)", -5, 10, int(ss.get("tweak", {}).get("rd", 0)),
-                       format="%+d년", disabled=not pre, help="+3이면 3년 늦게 은퇴")
-        sd = c2.slider(f"월 저축 조정 (지금 월 {monthly_saving(p):.0f}만 원)", -100, 300, int(ss.get("tweak", {}).get("sd", 0)),
-                       step=10, format="%+d만 원", disabled=not pre)
+        rd = c1.slider("은퇴 시기", -5, 10, int(ss.get("tweak", {}).get("rd", 0)),
+                       format="%+d년", disabled=not pre, help=f"지금 계획 {p['retire_age']}세. +3이면 3년 늦게 은퇴")
+        sd = c2.slider("월 저축", -100, 300, int(ss.get("tweak", {}).get("sd", 0)),
+                       step=10, format="%+d만 원", disabled=not pre, help=f"지금 월 {monthly_saving(p):.0f}만 원")
         c1, c2 = st.columns(2)
-        sm = c1.slider(f"생활비 조정 (지금 기본 월 {p['essential']}만 원 + 여행 연 {p['lifestyle']:,}만 원)", -30, 20,
-                       int(ss.get("tweak", {}).get("sm", 0)), step=5, format="%+d%%")
-        ns = c2.slider("국민연금 받기 시작할 나이", 60, 70, int(ss.get("tweak", {}).get("ns", p["nps_start"])))
+        sm = c1.slider("생활비", -30, 20,
+                       int(ss.get("tweak", {}).get("sm", 0)), step=5, format="%+d%%",
+                       help=f"지금 기본 월 {p['essential']}만 원 + 여행 연 {p['lifestyle']:,}만 원")
+        ns = c2.slider("국민연금 시작 나이", 60, 70, int(ss.get("tweak", {}).get("ns", p["nps_start"])))
         prof_list = list(PROFILES)
         pf = st.radio("투자 성향", prof_list, index=prof_list.index(ss.get("tweak", {}).get("pf", p["profile"])), horizontal=True)
         go_tw = st.form_submit_button("이 조건으로 다시 계산", type="primary", width="stretch")
@@ -795,7 +813,7 @@ with tab7:
 - **매달 꺼내 써야 하는 돈:** (기본생활비 + 여행 예산 ÷ 12) − (국민연금 + 사적연금 ÷ 12). 세금·건강보험료는 따로 계산해 결과에 반영합니다.
 
 **계산 오차 (±)**
-- 1만 가지 미래도 한정된 표본이라 약 ±1%p의 계산 오차가 있습니다. '직접 바꿔보기'의 변화는 같은 1만 가지 미래를 공유해 비교하므로 오차가 ±0.5%p 안팎으로 더 작고, 변화가 이보다 작으면 '차이 없음'으로 판정합니다.
+- 1만 가지 미래도 한정된 표본이라 약 ±1%p의 계산 오차가 있습니다. '바꿔보기'의 변화는 같은 1만 가지 미래를 공유해 비교하므로 오차가 ±0.5%p 안팎으로 더 작고, 변화가 이보다 작으면 '차이 없음'으로 판정합니다.
 
 **10번 중 9번 지키려면**
 - 모아둔 돈(또는 월 저축액)을 바꿔 가며 기본생활 지킬 확률이 90%가 되는 값을 찾은 것입니다(같은 미래 위에서 반복 계산). 권장 금액이 아니라 참고 수치입니다.

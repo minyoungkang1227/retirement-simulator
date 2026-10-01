@@ -38,7 +38,7 @@ class Household:
     # ── v21 큰 지출 이벤트 ──
     # [{"label": "자녀 대학", "age": 48, "amount": 1000, "years": 4, "kind": "cost"},        (연 금액)
     #  {"label": "주택 구입", "age": 35, "amount": 60000, "kind": "house", "ltv": 0.6,       (집값)
-    #   "loan_years": 30, "deposit_back": 30000}]                                           (전세 보증금 회수)
+    #   "loan_years": 30, "deposit_back": 30000, "rent_saving": 1200}]                      (전세 보증금 회수, 절감 주거비 연)
     # 본인 나이 기준, 금액은 만원·오늘 가치
     events: list = field(default_factory=list)
     floor_method: str = "actuarial"       # "actuarial"(v16): 생존확률 가중 현가 / "fixed95"(v12): 95세까지 확정
