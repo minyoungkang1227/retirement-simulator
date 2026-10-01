@@ -35,8 +35,8 @@ def couple_30():
 
 # ── 1. 대표 가구 결과 (범위로 고정: 분산 감소·리팩터링은 허용, 로직 변화는 잡아냄) ──
 @pytest.mark.parametrize("hh_fn,key,lo,hi", [
-    (couple_60, "기본생활 유지 확률", 0.46, 0.56),
-    (couple_30, "기본생활 유지 확률", 0.77, 0.87),
+    (couple_60, "기본생활 유지 확률", 0.38, 0.48),
+    (couple_30, "기본생활 유지 확률", 0.70, 0.80),
     (couple_30, "여행·취미 평균 충족률", 0.85, 0.97),
 ])
 def test_headline(hh_fn, key, lo, hi):
@@ -149,3 +149,40 @@ def test_house_risk_off_reproduces_v25():
     flat = EconomyV2.enhanced(house_sigma=0, house_real_growth=0, house_real_sd=0)
     d = generate(flat, 20, 5000, np.random.default_rng(0))
     assert np.allclose(d["house"], 1.0)
+
+
+# ── 7. 사망률 개선·지표·연금 상품 (v27) ──
+def test_mortality_improvement():
+    q = mortality.default_qx()
+    assert mortality.life_expectancy(q["M"], 60, improve=True) > mortality.life_expectancy(q["M"], 60) + 1.0
+    p1 = mortality.project_qx(q["M"], 10)
+    assert (p1[30:100] < q["M"][30:100]).all() and p1[-1] == 1.0
+
+
+def test_cte_monotone_and_definition():
+    from retire_sim.engine_tax import cte
+    x = np.arange(100.0)
+    assert cte(x, 0.9) == pytest.approx(x[90:].mean())
+    s = engine_tax.summarize(_run(couple_60()))
+    assert s["평균 부족액(실질)"] <= s["CTE70 부족액(실질)"] <= s["CTE90 부족액(실질)"]
+
+
+def test_certainty_equivalent_positive_and_responsive():
+    rich = Household(**{**couple_60().__dict__, "liquid_assets": 200_000})
+    a = engine_tax.summarize(_run(couple_60()))["확실성등가 소비(연, 1인)"]
+    b = engine_tax.summarize(_run(rich))["확실성등가 소비(연, 1인)"]
+    assert 0 < a < b
+
+
+def test_annuity_variants_pricing_order():
+    """같은 보험료라면: 보증기간·체증·부부형이 붙을수록 처음 받는 금액이 작아야 한다."""
+    hh = couple_60()
+    def pay(**kw):
+        kw.setdefault("annuity_start_age", 65)
+        return _run(hh, addons=AddOns(annuity_premium=10_000, **kw))["annuity_pay"]
+    plain = pay()
+    assert pay(annuity_guarantee_years=20) < plain
+    assert pay(annuity_escalation=0.02) < plain
+    assert pay(annuity_joint=True) < plain
+    assert plain < pay(annuity_start_age=80)                       # 늦게 받을수록 금액은 커진다
+    assert pay(annuity_joint=True) < pay(annuity_joint=True, annuity_survivor_ratio=0.7)

@@ -26,6 +26,38 @@ def gompertz_qx(max_age: int = 110) -> dict:
 _DEFAULT_TABLE = os.path.join(os.path.dirname(__file__), "data", "life_table_2024.csv")
 
 
+# ── v27 사망률 개선(코호트) ──
+# 연령별 연간 개선율: q(x, 연도) = q_2024(x) × (1 − k_x)^(연도 − 2024)
+# 미국 SOA Scale MP와 같은 역할. 통계청 생명표 추이(2013→2024 기대수명 남 +2.3년, 여 +1.5년,
+# 연 +0.21·+0.14년)와 맞도록 연령대별로 설정한 근사값. 실제 다년도 생명표로 재추정하려면
+# scripts/calibrate_mortality.py 참고.
+IMPROVEMENT = ((65, 0.025), (80, 0.020), (90, 0.013), (100, 0.007), (999, 0.003))
+BASE_YEAR = 2024
+
+
+def improvement_rate(age: int) -> float:
+    for lim, v in IMPROVEMENT:
+        if age < lim:
+            return v
+    return IMPROVEMENT[-1][1]
+
+
+def project_qx(qx: np.ndarray, years_ahead: float, scale=None) -> np.ndarray:
+    """기준연도 사망률을 years_ahead년 뒤 수준으로 투영(연령별 개선율 적용)."""
+    if years_ahead <= 0:
+        return qx
+    k = np.array([improvement_rate(x) for x in range(len(qx))])
+    out = qx * (1 - k) ** years_ahead
+    out[-1] = 1.0
+    return np.clip(out, 0, 1)
+
+
+def cohort_qx(qx: np.ndarray, start_age: int, T: int, calendar_offset: float = 0.0) -> np.ndarray:
+    """코호트 사망률 행렬 (T+1, len(qx)): t년 뒤에 적용할 사망률 벡터.
+    start_age에서 t년 뒤면 달력연도도 t년 흐르므로 개선율을 t+offset년치 적용."""
+    return np.stack([project_qx(qx, t + calendar_offset) for t in range(T + 1)])
+
+
 def default_qx(max_age: int = 110) -> dict:
     """기본 사망률: 통계청 2024 완전생명표(0~99세) + 100~109세 Gompertz 외삽. 파일이 없으면 임시 Gompertz."""
     if os.path.exists(_DEFAULT_TABLE):
@@ -43,12 +75,27 @@ def load_life_table(path: str, max_age: int = 110) -> dict:
     return {"M": qM, "F": qF}
 
 
-def life_expectancy(qx: np.ndarray, age: int) -> float:
+def life_expectancy(qx: np.ndarray, age: int, improve: bool = False) -> float:
+    if improve:
+        p = 1.0; tot = 0.0
+        for t in range(len(qx) - age):
+            q = project_qx(qx, t)[min(age + t, len(qx) - 1)]
+            p *= (1 - q); tot += p
+        return tot + 0.5
+    return _life_expectancy_period(qx, age)
+
+
+def _life_expectancy_period(qx: np.ndarray, age: int) -> float:
     surv = np.cumprod(1 - qx[age:])
     return float(surv.sum() + 0.5)
 
 
-def simulate_alive(qx: np.ndarray, start_age: int, T: int, n: int, rng) -> np.ndarray:
+def _qx_at(qx, t, improve: bool, offset: float = 0.0):
+    """t년 뒤에 쓸 사망률 벡터 (개선 반영 여부)."""
+    return project_qx(qx, t + offset) if improve else qx
+
+
+def simulate_alive(qx: np.ndarray, start_age: int, T: int, n: int, rng, improve: bool = False, offset: float = 0.0) -> np.ndarray:
     """alive[p, t] : t년 시작 시점 생존 여부 (t=0은 현재)."""
     ages = np.minimum(start_age + np.arange(T), len(qx) - 1)
     die = rng.random((n, T)) < qx[ages]
@@ -57,7 +104,8 @@ def simulate_alive(qx: np.ndarray, start_age: int, T: int, n: int, rng) -> np.nd
     return alive
 
 
-def simulate_life(qx: np.ndarray, start_age: int, T: int, n: int, rng, care, return_severe: bool = False) -> tuple:
+def simulate_life(qx: np.ndarray, start_age: int, T: int, n: int, rng, care, return_severe: bool = False,
+                  improve: bool = False, offset: float = 0.0) -> tuple:
     """다중상태 경로. 반환: alive (n, T+1), in_care (n, T+1) [, severe (n, T+1)].
 
     단일 상태(legacy): q_H = q_x / (1 + (m−1)·p), p ≈ i·D, D = 1/(m·q + rec)
@@ -67,8 +115,9 @@ def simulate_life(qx: np.ndarray, start_age: int, T: int, n: int, rng, care, ret
     two = getattr(care, "two_level", False)
     m, rec = care.mort_mult, care.recovery
     for t in range(T):
+        q_t = _qx_at(qx, t, improve, offset)
         x = min(start_age + t, len(qx) - 1)
-        q = qx[x]; i = care.inc(x)
+        q = q_t[x]; i = care.inc(x)
         if two:
             p = care.prev(x); sh = care.severe_share; mS = care.mort_mult_severe
             qH = min(q / (1 + (m - 1) * p * (1 - sh) + (mS - 1) * p * sh), 1.0)

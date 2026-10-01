@@ -752,11 +752,19 @@ with tab6:
             manual = st.checkbox("직접 입력값 사용")
         st.markdown("**예금**")
         d_amt = st.number_input("예금으로 옮길 금액 (억 원)", 0.0, 100.0, 0.0, step=0.1)
-        st.markdown("**종신연금 (일시납)**")
+        st.markdown("**연금보험 (일시납)**")
         c1, c2, c3 = st.columns(3)
         a_amt = c1.number_input("일시납 보험료 (억 원, 오늘 가치)", 0.0, 50.0, 0.0, step=0.1)
-        a_age = c2.number_input("가입·개시 나이", max(p["age"], 45), 90, max(p["age"], 65))
-        a_joint = c3.checkbox("부부형 (한 명이라도 살아있으면 지급)")
+        a_age = c2.number_input("받기 시작할 나이", max(p["age"], 45), 95, max(p["age"], 65),
+                                help="늦게 받을수록 같은 돈으로 받는 금액이 커집니다. 80세부터 받는 '거치형'은 오래 사는 위험만 막는 방식입니다.")
+        a_joint = c3.checkbox("부부형 (한 명이라도 살아있으면 지급)", disabled=not p["spouse"])
+        c1, c2, c3 = st.columns(3)
+        a_sr = c1.slider("한 명 사망 후 지급 비율 (%)", 50, 100, 100, step=10, disabled=not a_joint,
+                         help="부부형에서 한 분이 돌아가신 뒤 받는 비율. 낮출수록 평소 받는 금액이 커집니다.")
+        a_gt = c2.number_input("보증기간 (년, 0 = 없음)", 0, 30, 0, step=5,
+                               help="일찍 돌아가셔도 이 기간까지는 유족에게 지급됩니다. 길수록 받는 금액이 줄어듭니다.")
+        a_esc = c3.selectbox("체증형", ["없음 (정액)", "연 2% 증액", "연 3% 증액"],
+                             help="물가를 따라가도록 매년 늘어나는 방식. 처음 받는 금액은 적습니다.")
         st.markdown("**간병보험**")
         c1, c2 = st.columns(2)
         c_ben = c1.number_input("간병 시 연 보장액 (만 원)", 0, 10000, 0, step=100)
@@ -787,8 +795,12 @@ with tab6:
                 items.append((f"주식 {stt['name']} {s_amt:.1f}억", {"stock_amount": s_amt * 10000, "stock_beta": stt["beta"],
                               "stock_idio_sigma": stt["idio_sigma"], "stock_rate_beta": stt["rate_beta"]}))
         if d_amt > 0: items.append((f"예금 {d_amt:.1f}억", {"deposit_amount": d_amt * 10000}))
-        if a_amt > 0: items.append((f"종신연금 {a_amt:.1f}억 ({a_age}세{', 부부형' if a_joint else ''})",
-                                   {"annuity_premium": a_amt * 10000, "annuity_start_age": int(a_age), "annuity_joint": bool(a_joint)}))
+        if a_amt > 0:
+            esc = {"없음 (정액)": 0.0, "연 2% 증액": 0.02, "연 3% 증액": 0.03}[a_esc]
+            tag = f"{a_age}세" + (f", 부부형{a_sr}%" if a_joint else "") + (f", 보증 {a_gt}년" if a_gt else "") + ("" if esc == 0 else f", 체증 {esc:.0%}")
+            items.append((f"연금보험 {a_amt:.1f}억 ({tag})",
+                          {"annuity_premium": a_amt * 10000, "annuity_start_age": int(a_age), "annuity_joint": bool(a_joint),
+                           "annuity_survivor_ratio": a_sr / 100, "annuity_guarantee_years": int(a_gt), "annuity_escalation": esc}))
         if c_ben > 0: items.append((f"간병보험 연 {c_ben:,}만 원 ({c_who})", {"care_benefit": float(c_ben), "care_member": 0 if c_who == "본인" else 1,
                                                                     "care_trigger": "severe" if c_trig.startswith("중증") else "any"}))
         if pc > 0: items.append((f"연금저축 월 {pc}만 원", {"pension_contrib_annual": float(pc * 12)}))
@@ -806,13 +818,15 @@ with tab6:
                     dlt, ci = paired(r, base) if v else (0.0, 0.0)
                     rows.append({"구성": label, "기본생활 유지": pct(rs["기본생활 유지 확률"]),
                                  "변화": "—" if not v else f"{-dlt * 100:+.1f}%p (±{ci * 100:.1f})",
-                                 "부족할 때 평균 부족액": f"{rs.get('부족 시 평균 부족액(실질)', 0) / 10000:.2f}억",
+                                 "가장 나쁜 30%의 부족액": f"{rs.get('CTE70 부족액(실질)', 0) / 10000:.2f}억",
+                                 "안정적 생활 수준(1인 월)": f"{rs.get('확실성등가 소비(연, 1인)', 0) / 12:,.0f}만",
                                  "85세 금융자산 (중간값)": f"{r['p50_85'] / 10000:.2f}억",
                                  "여행·취미 충족": pct(rs.get("여행·취미 평균 충족률", 0)) if p["lifestyle"] > 0 else "—",
                                  "남길 자산 달성": pct(rs.get("유산 목표 달성 확률", 0)) if p["legacy"] > 0 else "—"})
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-            st.caption("변화: 같은 1만 가지 미래에서의 기본생활 유지 확률 차이(95% 신뢰구간). "
-                       "부족할 때 평균 부족액: 돈이 모자란 경우 평생 모자란 기본생활비 합계(오늘 가치) — 작을수록 덜 심각합니다.")
+            st.caption("가장 나쁜 30%의 부족액: 결과가 나쁜 쪽 30% 경우만 모아 평균 낸 부족액(오늘 가치) — 작을수록 최악의 경우가 덜 심각합니다. "
+                       "안정적 생활 수준: 들쭉날쭉한 미래를 '매달 똑같이 이만큼 쓰는 것과 같다'로 환산한 금액 — 클수록 좋습니다. "
+                       "연금·보험은 확률보다 이 두 지표에서 가치가 드러납니다.")
             if "stock" in info:
                 stt = info["stock"]; r = next(v for k, v in results.items() if k.startswith("주식"))
                 st.markdown(f"**종목 {stt['name']} 통계**" + (f" ({stt.get('start','')} ~ {stt.get('end','')}, {stt.get('months','')}개월)" if "months" in stt else ""))
@@ -824,8 +838,8 @@ with tab6:
                 st.caption("기대수익은 과거 수익률이 아니라 '금리 + 베타 × 위험프리미엄'으로 계산합니다. "
                            "금리 민감도는 ECOS 키가 설정된 경우에만 추정됩니다.")
             for k, r in results.items():
-                if k.startswith("종신연금") and r["annuity_pay"] > 0:
-                    st.caption(f"{k}: 예상 연금액 연 약 {r['annuity_pay']:,.0f}만 원 (가입 시점 명목 금액, 물가연동 아님, 사업비 5% 가정)")
+                if k.startswith("연금보험") and r["annuity_pay"] > 0:
+                    st.caption(f"{k}: 예상 연금액 연 약 {r['annuity_pay']:,.0f}만 원 (처음 받는 금액, 사업비 5% 가정)")
                 if k.startswith("간병보험") and r["care_premium"] > 0:
                     st.caption(f"{k}: 모델로 산출한 보험료 연 약 {r['care_premium']:,.0f}만 원 (80세까지 납입, 부가보험료 30% 가정, 지급 조건: {c_trig})")
 
@@ -866,7 +880,7 @@ with tab5:
 - 20~40대는 소득·저축률·퇴직연금으로 은퇴 전 적립을 계산하고, 국민연금은 2026 개혁(소득대체율 43%) 기준으로 추정할 수 있습니다(근사치, 정확한 값은 국민연금공단 조회).
 
 **알아두실 점**
-- 사망률은 통계청 2024 완전생명표(미래 수명 연장 미반영), 금리·물가는 한국은행 ECOS 2000~2026년 데이터로 추정했습니다. 간병은 건강보험공단 장기요양 통계와 2026 본인부담·간병비 시세로, 주식은 KOSPI 2000~2026년 데이터로, 집값은 한국부동산원 주택가격지수(2013~2026)로 추정했습니다. 다만 **주식 위험프리미엄은 추정 오차가 커서**(5.2% ± 1.4%p) 결과의 절대값이 크게 움직일 수 있습니다. 결과의 절대값보다 **선택지 사이의 차이**를 보세요.
+- 사망률은 통계청 2024 완전생명표에 **앞으로의 수명 연장(코호트 개선)**을 반영, 금리·물가는 한국은행 ECOS 2000~2026년 데이터로 추정했습니다. 간병은 건강보험공단 장기요양 통계와 2026 본인부담·간병비 시세로, 주식은 KOSPI 2000~2026년 데이터로, 집값은 한국부동산원 주택가격지수(2013~2026)로 추정했습니다. 다만 **주식 위험프리미엄은 추정 오차가 커서**(5.2% ± 1.4%p) 결과의 절대값이 크게 움직일 수 있습니다. 결과의 절대값보다 **선택지 사이의 차이**를 보세요.
 - 세법은 2026년 9월 기준으로 단순화했습니다. **투자 추천이나 세무 자문이 아니며**, 실제 결정 전 전문가와 상의하세요.
 - 입력하신 정보는 계산에만 쓰이고 서버에 저장하지 않습니다.
 """)
@@ -881,11 +895,20 @@ with tab7:
 - **남길 돈:** 마지막 분이 돌아가신 뒤 상속세를 빼고 남는 재산(집 포함, 주택연금·대출 상환 후)이 목표 이상일 확률입니다.
 - **매달 꺼내 써야 하는 돈:** (기본생활비 + 여행 예산 ÷ 12) − (국민연금 + 사적연금 ÷ 12). 세금·건강보험료는 따로 계산해 결과에 반영합니다.
 
+**가장 나쁜 30%의 부족액 (CTE70)**
+- 1만 가지 미래를 결과가 나쁜 순서로 줄 세워, 나쁜 쪽 30%만 모아 평균 낸 부족액입니다. 미국 보험사 자본규제에서 쓰는 CTE와 같은 방식으로, '평균'보다 최악의 경우를 잘 보여줍니다.
+
+**안정적 생활 수준 (확실성등가 소비)**
+- 해마다 들쭉날쭉한 소비를 '매년 똑같이 이만큼 쓰는 것과 같다'로 바꾼 금액입니다. 경제학의 CRRA 효용(위험회피계수 3, 할인율 2%)으로 계산합니다. 소비가 불안정할수록 이 값이 낮아져서, 연금처럼 평생 일정하게 들어오는 돈의 가치가 드러납니다.
+
 **계산 오차 (±)**
 - 1만 가지 미래도 한정된 표본이라 약 ±1%p의 계산 오차가 있습니다. '바꿔보기'의 변화는 같은 1만 가지 미래를 공유해 비교하므로 오차가 ±0.5%p 안팎으로 더 작고, 변화가 이보다 작으면 '차이 없음'으로 판정합니다.
 
 **10번 중 9번 지키려면**
 - 모아둔 돈(또는 월 저축액)을 바꿔 가며 기본생활 지킬 확률이 90%가 되는 값을 찾은 것입니다(같은 미래 위에서 반복 계산). 권장 금액이 아니라 참고 수치입니다.
+
+**사망률 개선**
+- 의학 발달로 사망률은 해마다 낮아집니다. 연령대별로 연 0.3~2.5%씩 낮아지는 것으로 보고(통계청 생명표의 2013~2024 추이에 맞춤), 지금 60세가 80세가 될 때는 오늘의 80세보다 오래 사는 것으로 계산합니다. 이 때문에 기대여명이 60세 남성 23.7년 → 25.7년으로 늘어납니다.
 
 **집값**
 - 명목 집값 = 실질 집값 지수 × 물가. 실질 지수는 연 1.25%(추정 오차 ±1.18%p) 상승에 변동성 10%, 주식과 상관 0.1인 확률 과정입니다. 전국 지수의 연간 변동성 6.6%에 개별 주택의 고유 위험을 더한 값입니다.

@@ -27,7 +27,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 
 1. **Goal-based structure** — essential (protected), lifestyle (flexible) and legacy goals, with a guardrail that cuts flexible spending first in bad scenarios (floor = survival-weighted present value of expected essential shortfalls)
 2. **Korean institutions** — National Pension early/deferred claiming, KRW 15M private-pension threshold, comprehensive financial-income taxation, health premiums (regional/workplace, dependents), property taxes, inheritance and gift taxes
-3. **Actuarial modeling** — joint-life survival from the Statistics Korea 2024 complete life table, multi-state long-term-care Markov model (healthy → mild → severe → dead, calibrated to national long-term-care statistics) calibrated to preserve life-table mortality
+3. **Actuarial modeling** — Statistics Korea 2024 complete life table with cohort mortality improvement (0.3–2.5% per year by age, validated against the 2013–2024 trend), joint-life survival, multi-state long-term-care Markov model, and annuity pricing by the equivalence principle (single/joint, guarantee periods, escalation, deferred) calibrated to preserve life-table mortality
 4. **Stochastic economy** — OU real rate and inflation estimated from Bank of Korea (ECOS) data, with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
 5. **Statistically honest comparisons** — paired-difference confidence intervals on common random numbers decide "different / not different"
 
@@ -134,6 +134,7 @@ pytest -q                           # regression tests
 | Interactive what-if v22: combine slider changes, before/after comparison, change curves, reading guide | Done |
 | Big-expense planning v21: education, wedding support, home purchase (amortizing mortgage, jeonse deposit, acquisition tax), pre-retirement shortfalls as loans | Done |
 | Accumulation phase for ages 20–40s v20: income, saving rate and wage growth, workplace pension, automatic National Pension estimate (2026 reform), required-saving solver | Done |
+| Actuarial refinements v27: cohort mortality improvement, CTE70/90 and CRRA certainty equivalent, annuity product variants | Done |
 | House price risk v26: stochastic house prices estimated from the national index (smoothing correction, Bayesian real growth), reflected in property taxes, reverse mortgage and inheritance | Done |
 | Housing v19: reverse mortgage (HF 2026 payment table, loan balance, non-recourse, property-tax relief) and downsizing (capital-gains and acquisition taxes) | Done |
 | Equity returns from real data v18: KOSPI volatility, crash jumps, rate correlation, Bayesian risk premium | Done |
@@ -141,7 +142,6 @@ pytest -q                           # regression tests
 | Actuarial essential floor v16: survival-weighted present value reflecting pension start and couple survival states | Done |
 | Add-on products v15: stocks by ticker (beta, correlation, rate sensitivity), deposits, life annuities, long-term-care insurance, pension contributions | Done |
 | ECOS rate/inflation estimation (v14) | Done |
-| Cohort mortality improvement | Planned |
 | Account/budget-app import, periodic re-measurement | Planned |
 
 See [CHANGELOG.md](CHANGELOG.md) and [docs/MODEL.en.md](docs/MODEL.en.md) for details.

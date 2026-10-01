@@ -96,6 +96,9 @@ class AddOns:
     annuity_premium: float = 0.0
     annuity_start_age: int = 65      # 본인 나이 기준 가입·개시 시점
     annuity_joint: bool = False      # 부부 중 한 명이라도 살아있으면 지급
+    annuity_survivor_ratio: float = 1.0   # (v27) 부부형에서 한 명 사망 후 지급 비율 (0.7 = 70%)
+    annuity_guarantee_years: int = 0      # (v27) 보증기간(년): 사망해도 이 기간까지는 지급
+    annuity_escalation: float = 0.0       # (v27) 체증형: 매년 명목 증액률 (0.02 = 연 2%)
     annuity_loading: float = 0.05    # 사업비
     annuity_rate: float = 0.03       # 가격 산출 할인율(공시이율 가정)
     annuity_mort_mult: float = 0.8   # 가입자 선택효과: 사망률 80%로 가격 산출
@@ -168,3 +171,5 @@ class SimConfig:
     economy: EconomyAssumptions = field(default_factory=EconomyAssumptions)
     nps: NPSRules = field(default_factory=NPSRules)
     care: object = field(default_factory=CareShock)   # CareShock(v2) 또는 CareMarkov(v11)
+    mortality_improvement: bool = True    # (v27) 코호트 사망률 개선 반영 (False면 2024 기간생명표 그대로)
+    risk_aversion: float = 3.0            # (v27) CRRA 위험회피계수 — 확실성등가 계산용

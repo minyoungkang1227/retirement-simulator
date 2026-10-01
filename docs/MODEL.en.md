@@ -244,3 +244,14 @@ Expense events (education, wedding support, other) are added to required spendin
 ## 25. v26 house price model
 
 Real house price index follows $\ln(H_{t+1}/H_t)=\ln(1+g)-\sigma_H^2/2+\sigma_H(\rho Z^S+\sqrt{1-\rho^2}Z^H)$ with $g\sim N(1.25\%,1.18\%^2)$, $\sigma_H=10\%$, $\rho=0.1$; nominal price = real index × CPI. Estimated from the Korea Real Estate Board national house price index via ECOS, 2013 onwards only (the series provider changed in 2013). Monthly volatility is smoothed (lag-1 autocorrelation 0.82), so volatility is re-estimated from annual returns (6.6%) and combined with idiosyncratic single-home risk (7%). The real growth rate is a Bayesian posterior of the sample estimate (3.25% ± 1.89pp) and a prior of N(0%, 1.5%).
+
+
+## 26. v27 actuarial refinements
+
+**Mortality improvement (cohort):** $q(x,t)=q_{2024}(x)(1-k_x)^t$ with age-graded $k_x$ (2.5% below 65 down to 0.3% above 100), calibrated so that period life expectancy at birth rises +0.19/+0.14 years per calendar year, matching the 2013–2024 Statistics Korea trend. Life expectancy at 60 rises from 23.7 to 25.7 years (male).
+
+**CTE:** conditional tail expectation of the real lifetime shortfall at the 70% and 90% levels, the same definition used in US statutory capital requirements.
+
+**Certainty-equivalent consumption:** CRRA utility ($\gamma=3$, $\beta=1/1.02$) over per-person real consumption, reported as the constant annual consumption of equal utility.
+
+**Annuity variants:** single/joint life with a survivor percentage, guarantee periods, escalating payments and deferred (longevity-insurance) start ages, all priced by the equivalence principle with a 0.8 mortality multiplier and 5% loading.

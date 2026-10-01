@@ -25,12 +25,13 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     from .config import CareMarkov
     markov = isinstance(cfg.care, CareMarkov) and cfg.care.enabled
     if markov:
-        lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care, return_severe=True) for m in hh.members]
+        lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care, return_severe=True,
+                                         improve=cfg.mortality_improvement) for m in hh.members]
         alive = np.stack([l[0] for l in lives]); incare = np.stack([l[1] for l in lives]); severe = np.stack([l[2] for l in lives])
         care_level = cfg.care.cost_median * np.exp(cfg.care.cost_log_sigma * rng.standard_normal((k, n)))
         sev_level = getattr(cfg.care, 'cost_severe_median', cfg.care.cost_median) * np.exp(getattr(cfg.care, 'cost_severe_sigma', cfg.care.cost_log_sigma) * rng.standard_normal((k, n)))
     else:
-        alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng) for m in hh.members])
+        alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng, improve=cfg.mortality_improvement) for m in hh.members])
     hh_alive = alive.sum(0) > 0
     own = np.array(tc.ownership if tc.ownership else [1 / k] * k, float)
     hown = np.array(house.owner_share if house.owner_share else [1.0] + [0.0] * (k - 1), float)
@@ -59,14 +60,26 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     ann_pay = np.zeros(n); ann_t = max(0, ad.annuity_start_age - hh.members[0].age)
     ann_members = list(range(k)) if (ad.annuity_joint and k > 1) else [0]
     def annuity_factor(t0):
-        v = 1 / (1 + ad.annuity_rate); surv = []
+        """연금 1원(첫해)의 현가. 부부형 생존자 비율·보증기간·체증형 반영.
+        지급비율 = max(보증기간 중이면 1, 둘 다 생존 1 / 한 명 생존 r / 아무도 없으면 0)"""
+        v = 1 / (1 + ad.annuity_rate); g = ad.annuity_escalation; r = ad.annuity_survivor_ratio
+        surv = []
         for i in ann_members:
-            m = hh.members[i]; q = np.minimum(qx_table[m.sex] * ad.annuity_mort_mult, 1.0)
+            m = hh.members[i]
+            q = np.minimum(mortality.project_qx(qx_table[m.sex], t0) * ad.annuity_mort_mult, 1.0) \
+                if cfg.mortality_improvement else np.minimum(qx_table[m.sex] * ad.annuity_mort_mult, 1.0)
             x = min(m.age + t0, len(q) - 1)
             surv.append(np.concatenate([[1.0], np.cumprod(1 - q[x:-1])]))
-        L = min(len(x) for x in surv); p = surv[0][:L]
-        if len(surv) > 1: p = surv[0][:L] + surv[1][:L] - surv[0][:L] * surv[1][:L]
-        return float(np.sum(v ** np.arange(L) * p))
+        L = min(len(z) for z in surv)
+        if len(surv) > 1:
+            p0, p1 = surv[0][:L], surv[1][:L]
+            pay = p0 * p1 + r * (p0 * (1 - p1) + (1 - p0) * p1)
+        else:
+            pay = surv[0][:L]
+        s_ = np.arange(L)
+        if ad.annuity_guarantee_years > 0:
+            pay = np.where(s_ < ad.annuity_guarantee_years, 1.0, pay)
+        return float(np.sum((v ** s_) * ((1 + g) ** s_) * pay))
     ci_prem = 0.0; ci_on = ad.care_benefit > 0 and markov and ad.care_member < k
     if ci_on:                                                  # 수지상등: 모델 자체의 간병·사망 경로로 보험료 산출
         i0 = ad.care_member; v = (1 + ad.care_rate) ** -np.arange(T + 1)
@@ -118,6 +131,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             floor_tab[t0, 1] = np.sum(vs * p0 * g0)
             floor_tab[t0, 2] = np.sum(vs * p1 * g1)
     short_real = np.zeros(n)                                   # 생존 중 부족했던 기본생활비 누계(실질)
+    cons_u = np.zeros(n); cons_a = np.zeros(n)                 # (v27) CRRA 효용 누적, 할인·생존 가중 합
+    gamma = getattr(cfg, 'risk_aversion', 3.0); beta = 1 / 1.02
 
     # ── v19 주택 활용: 주택연금 / 집 줄이기 ──
     hscale = np.ones(n)                                        # 현재 집 가치 / 처음 집 가치 (다운사이징 등)
@@ -261,9 +276,18 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         if ad.annuity_premium > 0 and t == ann_t:                  # 종신연금 일시납 가입
             prem = np.minimum(ad.annuity_premium * cpi[:, t] * live, Wt); Wt -= prem; Bt = np.maximum(Bt - prem, 0)
             ann_pay = prem / (annuity_factor(t) * (1 + ad.annuity_loading))
-        ann_alive = np.zeros(n, bool)
-        for i in ann_members: ann_alive |= a[i]
-        ann_inc = ann_pay * ann_alive if t >= ann_t else np.zeros(n)
+        if t >= ann_t:
+            if len(ann_members) > 1:
+                both = a[ann_members[0]] & a[ann_members[1]]
+                one = (a[ann_members[0]] | a[ann_members[1]]) & ~both
+                ratio = np.where(both, 1.0, np.where(one, ad.annuity_survivor_ratio, 0.0))
+            else:
+                ratio = a[ann_members[0]].astype(float)
+            if t - ann_t < ad.annuity_guarantee_years:
+                ratio = np.maximum(ratio, 1.0)                 # 보증기간: 사망해도 지급(상속인)
+            ann_inc = ann_pay * ratio * (1 + ad.annuity_escalation) ** (t - ann_t)
+        else:
+            ann_inc = np.zeros(n)
         ci_ben = np.zeros(n); ci_cost = np.zeros(n)
         if ci_on:
             i0 = ad.care_member
@@ -380,6 +404,13 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             debt += short * live; short = np.zeros(n)
         newly = (short > 1e-6) & (dep_at < 0) & live; dep_at[newly] = t
         short_real += np.where(live, short, 0) / cpi[:, t]
+        if retired:                                            # (v27) 실제 소비(실질)로 CRRA 효용 적립
+            na_ = np.maximum(na, 1)
+            floor_c = 0.15 * ess_base / np.maximum(na_, 1)            # 소비 0 근처에서 효용이 발산하지 않도록
+            c_real = np.maximum((spend - short) / cpi[:, t] / na_, floor_c)   # 1인당 연 실질 소비(만원)
+            w_ = beta ** t * live * na_
+            cons_u += w_ * c_real ** (1 - gamma) / (1 - gamma)
+            cons_a += w_
         cg_due = realized
 
         # 9) 수익률
@@ -412,7 +443,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             transfer_real = np.where(died_all, (est - et + gift_val) / cpi[:, t + 1], transfer_real)
 
     return {"depleted_at": dep_at, "youngest_age": youngest, "T": T, "antithetic": eco.get("antithetic", False), "tax_y": tax_y, "hi_y": hi_y, "prop_y": prop_y,
-            "estate_real": estate_real, "life_ratio": life_ratio, "stock_ret": stock_ret, "port_ret": port_ret, "short_real": short_real,
+            "estate_real": estate_real, "life_ratio": life_ratio, "stock_ret": stock_ret, "port_ret": port_ret, "short_real": short_real, "cons_u": cons_u, "cons_a": cons_a, "risk_aversion": gamma,
             "floor_tab": floor_tab, "debt_retire": debt_retire_real, "rm_monthly": rm_monthly_real, "ds_cash": ds_cash_real, "annuity_pay": float(np.median(ann_pay[ann_pay > 0])) if (ann_pay > 0).any() else 0.0, "care_premium": ci_prem, "legacy_target": hh.legacy_target, "estate_tax_real": etax_real, "transfer_real": transfer_real,
             "W_nominal": W_hist, "W_real": W_hist / cpi, "hh_alive": hh_alive,
             "last_alive_t": hh_alive.sum(1) - 1, "cpi": cpi}
@@ -437,6 +468,13 @@ def summarize(res):
             **goal_summary(res)}
 
 
+def cte(x, q: float) -> float:
+    """조건부 꼬리기대값: 나쁜 쪽 (1−q) 비율의 평균. 미국 보험 자본규제의 CTE와 같은 정의."""
+    x = np.sort(np.asarray(x, float))
+    k = int(np.floor(q * len(x)))
+    return float(x[k:].mean()) if k < len(x) else float(x[-1])
+
+
 def goal_summary(res):
     """목표별 달성 지표: 기본생활 유지 확률, 여행·취미 충족률, 유산 달성 확률."""
     d = res["depleted_at"]
@@ -445,6 +483,13 @@ def goal_summary(res):
     if sr is not None:
         out["평균 부족액(실질)"] = float(sr.mean())
         out["부족 시 평균 부족액(실질)"] = float(sr[sr > 0].mean()) if (sr > 0).any() else 0.0
+        out["CTE70 부족액(실질)"] = cte(sr, 0.70)          # 나쁜 30% 경우의 평균 부족액
+        out["CTE90 부족액(실질)"] = cte(sr, 0.90)          # 나쁜 10% 경우의 평균 부족액
+    cu, ca = res.get("cons_u"), res.get("cons_a")
+    if cu is not None and ca is not None and ca.mean() > 0:
+        g = res.get("risk_aversion", 3.0)
+        u = cu.mean() / ca.mean()                                     # 할인·생존 가중 평균 효용
+        out["확실성등가 소비(연, 1인)"] = float(((1 - g) * u) ** (1 / (1 - g)))
     lr = res.get("life_ratio")
     if lr is not None and np.any(~np.isnan(lr)):
         cnt = (~np.isnan(lr)).sum(1)
