@@ -89,6 +89,7 @@
 - 주식: KOSPI 2000-02~2026-08 월별 데이터로 변동성·폭락 빈도·금리 상관 추정, 위험프리미엄은 데이터와 해외 연구치(Damodaran)를 베이즈 결합
 - 금리·물가: ECOS 2000-01~2026-08 월별 데이터로 추정 (물가 장기평균 2.47%±1.02%p, 실질금리 0.73%±0.74%p)
 - 선택지 비교는 경로별 차이로 신뢰구간 계산 (독립 가정 ±1.38%p → ±0.44%p)
+- 회귀 테스트 15개를 커밋마다 자동 실행 (대표 가구 결과 범위, 방향성, 이론값, 생명표·간병·주택연금 수치)
 
 ## 구조
 
@@ -104,7 +105,8 @@ retire_sim/        모델 패키지
   market_data.py   종목코드 → 베타·상관·금리 민감도 추정
   metrics.py       고갈확률, 신뢰구간, 짝지은 비교
 notebooks/         Colab 분석 노트북
-scripts/           검증·민감도 스크립트 (validate.py, validate_v10.py, validate_v11.py)
+scripts/           검증·민감도 스크립트 (validate.py, validate_v10.py, validate_v11.py, calibrate_care.py)
+tests/             회귀 테스트 (pytest, GitHub Actions 자동 실행)
 docs/              수식·설계 문서 (MODEL.md / MODEL.en.md), 결과 그래프
 CHANGELOG.md       버전별 변경 내역 (무엇을 / 어떻게 / 전과 무엇이 달라졌나)
 ```
@@ -117,7 +119,8 @@ CHANGELOG.md       버전별 변경 내역 (무엇을 / 어떻게 / 전과 무�
   ```bash
   pip install -r requirements.txt
   streamlit run streamlit_app.py      # 웹 앱
-  python scripts/validate_v11.py      # 검증
+  python scripts/validate_v11.py      # 이론값 검증
+  pytest -q                           # 회귀 테스트
   ```
 
 ## 진행 상황

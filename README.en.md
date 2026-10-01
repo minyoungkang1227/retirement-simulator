@@ -87,6 +87,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 - Equities: volatility, crash frequency and rate correlation estimated from KOSPI monthly data 2000-02 to 2026-08; the risk premium combines the data with an external prior (Damodaran) in a Bayesian way
 - Rates and inflation estimated from ECOS monthly data 2000-01 to 2026-08 (inflation long-run mean 2.47% ±1.02pp, real rate 0.73% ±0.74pp)
 - Paired-difference CIs for comparisons (±1.38pp under independence → ±0.44pp)
+- 15 regression tests run on every commit (headline ranges, directional checks, theoretical values, life table, care model, reverse-mortgage table)
 
 ## Structure
 
@@ -103,6 +104,7 @@ retire_sim/        model package
   metrics.py       depletion probability, confidence intervals, paired comparisons
 notebooks/         Colab analysis notebook
 scripts/           validation and sensitivity scripts
+tests/             regression tests (pytest, run automatically by GitHub Actions)
 docs/              equations and design notes (MODEL.md / MODEL.en.md), figures
 CHANGELOG.md       version history (what / how / what changed)
 ```
@@ -112,7 +114,8 @@ CHANGELOG.md       version history (what / how / what changed)
 ```bash
 pip install -r requirements.txt
 streamlit run streamlit_app.py      # web app
-python scripts/validate_v11.py      # validation
+python scripts/validate_v11.py      # theory checks
+pytest -q                           # regression tests
 ```
 
 ## Status

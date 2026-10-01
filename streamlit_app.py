@@ -19,6 +19,19 @@ from retire_sim.pension import estimate_nps_monthly
 st.set_page_config(page_title="노후나침반 · 은퇴 목표 진단", page_icon="🧭", layout="centered")
 TEAL, CORAL, INK, MUTED = "#1F6F78", "#C8553D", "#1C2B33", "#5B6B73"
 PROFILES = {"보수형": 0.3, "균형형": 0.5, "성장형": 0.7}
+# 국민연금연구원 「2024년 국민노후보장패널조사(10차 부가조사)」 50세 이상이 생각하는 노후 생활비 (월, 만원)
+AVG_SPEND = {"부부_최소": 217, "부부_적정": 298, "개인_최소": 139, "개인_적정": 198}
+
+
+def avg_essential(spouse: bool) -> int:
+    """모르는 사람을 위한 기본생활비 기본값: 최소생활비 기준(여행·취미는 따로 입력)."""
+    return AVG_SPEND["부부_최소"] if spouse else AVG_SPEND["개인_최소"]
+
+
+def avg_lifestyle(spouse: bool) -> int:
+    """여행·취미 기본값: (적정 − 최소) × 12개월."""
+    d = AVG_SPEND["부부_적정"] - AVG_SPEND["부부_최소"] if spouse else AVG_SPEND["개인_적정"] - AVG_SPEND["개인_최소"]
+    return int(round(d * 12 / 100) * 100)
 st.markdown(f"""
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
 <style>
@@ -41,6 +54,9 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
 .goal .v {{ font-size: 1.45rem; font-weight: 700; color: {INK}; line-height: 1.3; }}
 .goal .v .hl {{ color: {TEAL}; }}
 .tip {{ background: #F1F6F7; border-left: 4px solid {TEAL}; border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; line-height: 1.7; }}
+.act {{ display: flex; gap: .7rem; align-items: flex-start; border: 1px solid #CBD7DB; border-radius: 10px; padding: .6rem .8rem; margin-bottom: .4rem; background: white; }}
+.act .r {{ flex: 0 0 26px; height: 26px; border-radius: 50%; background: {TEAL}; color: white; text-align: center; font-weight: 700; line-height: 26px; }}
+.act .s {{ color: {MUTED}; font-size: .9rem; margin-top: .15rem; }}
 .key {{ display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin: 0 4px -1px 0; }}
 .stMarkdown p, .stMarkdown li, .hero, .gap, .goal, .tip, .legend {{ word-break: keep-all; overflow-wrap: anywhere; }}
 @media (max-width: 640px) {{
@@ -61,7 +77,7 @@ ss = st.session_state
 if "p" not in ss:
     ss.p = dict(age=52, sex="M", retire_age=60, spouse=True, s_age=50, s_sex="F",
                 deposit=1.5, invest=2.0, ret_acct=1.5, other=0.0, saving=150, salary=0, s_salary=0, save_mode="월 금액", save_rate=15, wage_g=1.0, ret_contrib=False, nps_auto=False, nps_years=10, s_nps_years=10,
-                essential=300, lifestyle=1200, nps=110, s_nps=50, nps_start=65,
+                essential=217, lifestyle=1000, nps=110, s_nps=50, nps_start=65,
                 priv=0, priv_start=60, priv_years=20, legacy=1.0, children=2, profile="균형형",
                 h_official=0.0, h_market=0.0, h_n=1, h_joint=False, h_years=10, h_hi=0.0, rent=0,
                 biz=0, biz_until=65, biz_work=False, rm_age=0, ds_age=0, ds_ratio=50, events=[], ev_ltv=60, ev_loan_years=30, ev_jeonse=0.0, ev_rent=0, overseas=20, own_equal=True, survivor=70,
@@ -191,17 +207,28 @@ def run(p, v=None):
     return simulate(json.dumps(p, sort_keys=True), json.dumps(v or {}, sort_keys=True))
 
 
+def solve_for(f, lo: float, hi: float, target: float, tol: float = 0.004, max_iter: int = 6):
+    """f(x)(증가 함수)가 target이 되는 x를 찾음. 선형 보간(가성법) + 구간 보정 → 이분법보다 호출 수가 적다.
+    반환: (해, None) / (0.0, None) 이미 충분 / (None, hi) 최대값으로도 미달."""
+    y_lo, y_hi = f(lo), f(hi)
+    if y_lo >= target: return lo, None
+    if y_hi < target: return None, hi
+    for _ in range(max_iter):
+        w = (target - y_lo) / max(y_hi - y_lo, 1e-9)
+        x = lo + (hi - lo) * min(max(w, 0.15), 0.85)        # 끝점 쏠림 방지
+        y = f(x)
+        if y >= target: hi, y_hi = x, y
+        else: lo, y_lo = x, y
+        if y_hi - y_lo < tol or hi - lo < (hi + lo) * 0.02: break
+    return hi, None
+
+
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def required_assets(p_json: str, target: float = 0.9):
-    """기본생활 유지 확률이 target이 되는 금융자산(억 원) — 이분법, 같은 시나리오 사용."""
+    """기본생활 유지 확률이 target이 되는 금융자산(억 원) — 같은 시나리오 위에서 보간 탐색."""
     p = json.loads(p_json); paths = min(p["paths"], 5000)
-    ok = lambda a: run(p, {"assets": a, "paths": paths})["s"]["기본생활 유지 확률"] >= target
-    lo, hi = 0.0, max(total_assets(p) * 3, 20.0)
-    if not ok(hi): return None, hi
-    for _ in range(10):
-        mid = (lo + hi) / 2
-        lo, hi = (lo, mid) if ok(mid) else (mid, hi)
-    return hi, None
+    f = lambda a: run(p, {"assets": a, "paths": paths})["s"]["기본생활 유지 확률"]
+    return solve_for(f, 0.0, max(total_assets(p) * 3, 20.0), target)
 
 
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
@@ -210,23 +237,45 @@ def required_saving(p_json: str, target: float = 0.9):
     p = json.loads(p_json); paths = min(p["paths"], 5000)
     inc = (p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)) / 12
     if p.get("save_mode") == "소득의 %" and inc > 0:        # 저축률 방식: 소득과 함께 늘어나는 저축률을 역산 → 첫해 월액으로 표시
-        okr = lambda r: run(p, {"save_rate_override": r, "paths": paths})["s"]["기본생활 유지 확률"] >= target
-        if okr(0.0): return 0.0, None
-        if not okr(0.9): return None, 0.9 * inc
-        lo, hi = 0.0, 0.9
-        for _ in range(10):
-            mid = (lo + hi) / 2
-            lo, hi = (lo, mid) if okr(mid) else (mid, hi)
-        return hi * inc, None
-    ok = lambda m: run(p, {"saving_monthly": m, "paths": paths})["s"]["기본생활 유지 확률"] >= target
-    hi = max(monthly_saving(p) * 3, 500.0)
-    if ok(0): return 0.0, None
-    if not ok(hi): return None, hi
-    lo = 0.0
-    for _ in range(10):
-        mid = (lo + hi) / 2
-        lo, hi = (lo, mid) if ok(mid) else (mid, hi)
-    return hi, None
+        f = lambda r: run(p, {"save_rate_override": r, "paths": paths})["s"]["기본생활 유지 확률"]
+        r_, over_ = solve_for(f, 0.0, 0.9, target)
+        return (None, 0.9 * inc) if r_ is None else (r_ * inc, None)
+    f = lambda m: run(p, {"saving_monthly": m, "paths": paths})["s"]["기본생활 유지 확률"]
+    hi, lo = max(monthly_saving(p) * 3, 500.0), 0.0
+    return solve_for(f, lo, hi, target)
+
+
+@st.cache_data(ttl=600, max_entries=16, show_spinner=False)
+def action_ranking(p_json: str):
+    """바꿀 수 있는 선택지들을 같은 시나리오로 돌려 효과(기본생활 지킬 확률 상승) 순으로 정렬."""
+    p = json.loads(p_json); paths = min(p["paths"], 3000)   # 후보가 많아 가볍게 (순위만 보면 충분)
+    b0 = run(p, {"paths": paths})
+    cands = []
+    pre = p["age"] < p["retire_age"]
+    if pre:
+        cands += [("은퇴를 2년 늦추기", f"{p['retire_age']}세 → {p['retire_age'] + 2}세", {"retire_delta": 2}),
+                  ("매달 저축 30만 원 늘리기", f"월 {monthly_saving(p):.0f}만 원 → {monthly_saving(p) + 30:.0f}만 원", {"saving_delta": 30})]
+    cands += [("생활비를 10% 줄이기", f"기본 월 {p['essential']}만 원 → {p['essential'] * 0.9:.0f}만 원", {"spend_mult": 0.9})]
+    for k, w in PROFILES.items():
+        if k != p["profile"]:
+            cands.append((f"투자 성향을 {k}으로", f"{p['profile']} → {k} (주식 비중 {w * 100:.0f}%)", {"stock_weight": w}))
+    for a in (60, 65, 68, 70):
+        if a != p["nps_start"] and a >= min(p["age"], 70):
+            cands.append((f"국민연금을 {a}세부터 받기", f"{p['nps_start']}세 → {a}세", {"nps_start": a}))
+    if p["h_market"] > 0 and p["h_n"] == 1 and p["h_official"] <= 12 and not p.get("rm_age"):
+        young = min(p["age"], p["s_age"]) if p["spouse"] else p["age"]
+        for ra in sorted({max(young, 55, p["retire_age"] - (p["age"] - young)), max(young, 70)}):
+            cands.append((f"{ra}세에 주택연금 가입", "집에 살면서 매달 연금 받기", {"house": {"rm_age": int(ra)}}))
+    if p["h_market"] > 0 and not p.get("ds_age"):
+        da = max(p["age"], 70)
+        cands.append((f"{da}세에 집을 줄여 이사", f"시세 {p['h_market']:.1f}억 → 절반 가격 집", {"house": {"ds_age": int(da), "ds_ratio": 50}}))
+    out = []
+    for lab, how, v in cands:
+        v = dict(v); v["paths"] = paths
+        r = run(p, v); dlt, ci = paired(r, b0)
+        gain = -dlt
+        if gain > ci: out.append((lab, how, gain, ci))
+    return sorted(out, key=lambda x: -x[2])
 
 
 def paired(a, b):
@@ -324,15 +373,21 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 go(1 if nxt else -1)
         elif i == 2:
             st.markdown("**꼭 필요한 기본생활비**는 얼마인가요? 식비·주거·의료·보험료 등 줄이기 어려운 지출입니다.")
+            a_ess = avg_essential(p["spouse"])
             ess = st.number_input("월 기본생활비 (만 원, 오늘 가치)", 0, 5000, p["essential"], step=10,
                                   help="재산세·건강보험료는 빼고 입력하세요 (따로 계산)")
+            st.caption(f"잘 모르시면 평균값을 쓰셔도 됩니다 — {'부부' if p['spouse'] else '혼자'} 기준 월 **{a_ess}만 원** "
+                       f"(50세 이상이 생각하는 최소 생활비, 국민연금연구원 2024년 조사). 지금 쓰는 생활비를 떠올려 넣으면 더 정확합니다.")
             st.caption("이 금액은 가장 먼저 지키는 목표입니다. 자산이 부족해지면 다른 지출부터 줄입니다.")
             back, nxt = nav(i, "s2")
             if nxt or back:
                 p.update(essential=int(ess)); go(1 if nxt else -1)
         elif i == 3:
             st.markdown("**여행·취미·외식** 등 원하는 은퇴생활에 1년에 얼마를 쓰고 싶으신가요?")
+            a_life = avg_lifestyle(p["spouse"])
             life = st.number_input("연 여행·취미 예산 (만 원, 오늘 가치)", 0, 50000, p["lifestyle"], step=100)
+            st.caption(f"잘 모르시면 평균값을 쓰셔도 됩니다 — 연 **{a_life:,}만 원** "
+                       f"(같은 조사에서 '적정 생활비 − 최소 생활비'에 해당하는 금액). 여행 계획이 없으면 0으로 두셔도 됩니다.")
             st.caption("자산이 충분하면 모두 쓰고, 부족해지면 기본생활비를 지키기 위해 이 예산을 먼저 줄입니다.")
             back, nxt = nav(i, "s3")
             if nxt or back:
@@ -534,6 +589,19 @@ with tab1:
             lines.append("모아둔 돈만 늘려서는 어려워요. 생활비나 연금 받는 시기를 함께 바꿔 보세요.")
         lines.append("👉 <b>'바꿔보기'</b> 탭에서 은퇴 시기·저축·생활비를 바꿔 보면 결과가 어떻게 달라지는지 바로 볼 수 있어요.")
     st.markdown('<div class="tip"><b>10번 중 9번 지키려면</b><br>' + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
+    # 4-2) 무엇부터 하면 되나 — 효과 순위
+    if n_ok < 9:
+        with st.spinner("효과가 큰 방법을 찾는 중"):
+            acts = action_ranking(json.dumps(p, sort_keys=True))
+        if acts:
+            st.markdown("**효과가 큰 순서대로 세 가지**")
+            for rank, (lab, how, gain, ci_) in enumerate(acts[:3], 1):
+                n_new = int(round((ok + gain) * 10))
+                st.markdown(f'<div class="act"><div class="r">{rank}</div><div><b>{lab}</b>'
+                            f'<div class="s">{how} → 10번 중 {n_ok}번에서 <b>{n_new}번</b>으로 '
+                            f'({gain * 100:+.1f}%p)</div></div></div>', unsafe_allow_html=True)
+            st.caption("권유가 아니라 '이 가구에서 어떤 선택이 얼마나 효과가 큰지' 계산한 결과입니다. "
+                       "각자의 사정에 맞는 방법을 '바꿔보기' 탭에서 직접 조정해 보세요.")
     if p.get("events"):
         ds_ = base.get("debt_share", 0)
         st.caption("큰 지출 반영: " + ", ".join(f'{e_["age"]}세 {e_["kind"]}' for e_ in p["events"])

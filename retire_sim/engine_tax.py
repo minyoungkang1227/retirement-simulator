@@ -85,6 +85,12 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     if hh.floor_method == "actuarial":
         v_r = 1 / (1 + hh.floor_real_rate); pibar = e.pi_theta
         qf = [np.minimum(qx_table[m.sex] * hh.floor_mort_mult, 1.0) for m in hh.members]
+        def inc_vec(i, yrs):                               # 구성원 i의 보장소득(실질) 벡터
+            m = hh.members[i]; ages = m.age + yrs
+            x = np.where(ages >= m.nps_start_age, pension.nps_annual_amount(m, cfg.nps), 0.0)
+            mask = (m.private_pension_start <= ages) & (ages < m.private_pension_start + m.private_pension_years)
+            return x + np.where(mask, m.private_pension_annual / (1 + pibar) ** yrs, 0.0)
+
         def inc_real(i, yr):                               # 구성원 i의 yr년차 보장소득(실질): 국민연금(물가연동) + 사적연금(명목 정액)
             m = hh.members[i]; age = m.age + yr; x = 0.0
             if age >= m.nps_start_age: x += pension.nps_annual_amount(m, cfg.nps)
@@ -102,7 +108,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 surv.append(np.concatenate([[1.0], np.cumprod(1 - q)[:-1]]))   # s년 뒤 생존확률
             vs = v_r ** np.arange(horizon)
             yrs = np.arange(t0, t0 + horizon)
-            gap = lambda members, ratio: np.array([max(ess_base * ratio - sum(inc_real(i, y) for i in members) - rent_real, 0.0) for y in yrs])
+            gap = lambda members, ratio: np.maximum(ess_base * ratio - sum(inc_vec(i, yrs) for i in members) - rent_real, 0.0)
             g0 = gap([0], 1.0 if k == 1 else hh.survivor_spending_ratio)
             if k == 1:
                 floor_tab[t0, :] = np.sum(vs * surv[0] * g0); continue
@@ -169,16 +175,16 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         rent = house.rent_annual * cpi[:, t] * live
         if ds_t is not None and t == ds_t and house.market > 0:  # 집 줄이기: 팔고 작은 집 사기
             sell = house.market * hscale * cpi[:, t]
-            cgt = np.array([one_house_cgt(p_, rm_basis, house.years_held + t) for p_ in sell]) if house.n_houses == 1 else 0.3 * np.maximum(sell - rm_basis, 0)
+            cgt = one_house_cgt(sell, rm_basis, house.years_held + t) if house.n_houses == 1 else 0.3 * np.maximum(sell - rm_basis, 0)
             newp = sell * house.downsize_ratio
-            acq = np.array([acquisition_tax_rate(x) for x in newp]) * newp
+            acq = acquisition_tax_rate(newp) * newp
             cash = np.maximum(sell * (1 - house.sell_cost) - cgt - newp - acq, 0) * live
             Wt += cash; Bt += cash; hscale = hscale * house.downsize_ratio
             ds_cash_real = float(np.median(cash[live] / cpi[live, t])) if live.any() else 0.0
         if rm_t is not None and t == rm_t and house.market > 0:  # 주택연금 가입 (공시 12억 이하 1주택)
             V = house.market * hscale * cpi[:, t]
             elig = live & (house.n_houses == 1) & (house.official * hscale * cpi[:, t] <= 120000)
-            m_pay = np.array([reverse_mortgage_monthly(youngest + t, x) for x in V])
+            m_pay = reverse_mortgage_monthly(youngest + t, V)
             rm_pay = np.where(elig, 12 * m_pay, 0.0); rm_on = elig; rm_bal = np.where(elig, 0.01 * V, 0.0)
             rm_monthly_real = float(np.median(m_pay[elig] / cpi[elig, t])) if elig.any() else 0.0
         rm_inc = rm_pay * live
@@ -192,7 +198,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                     i_m = np.maximum(eco["rate"][:, t], 0) + 0.015                  # 고정금리 = 당시 금리 + 1.5%p
                     mort_bal = mort_bal + loan; mort_rate = np.where(loan > 0, i_m, mort_rate)
                     mort_pay = mort_pay + loan * i_m / (1 - (1 + i_m) ** -N)
-                    down = price - loan + np.array([acquisition_tax_rate(x) for x in price]) * price
+                    down = price - loan + acquisition_tax_rate(price) * price
                     ev_cost += (down - ev.get("deposit_back", 0) * cpi[:, t]) * live   # 전세 보증금 회수분은 자기자본으로
                     extra_house = extra_house + ev["amount"] * live
                     rent_save = rent_save + ev.get("rent_saving", 0) * live

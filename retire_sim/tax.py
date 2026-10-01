@@ -123,26 +123,26 @@ class HouseConfig:
 RM_TABLE = {55: (15.6, 187.2), 60: (21.0, 252.8), 65: (25.2, 303.5), 70: (30.7, 341.4), 75: (38.1, 366.6), 80: (48.3, 406.0)}
 
 
-def reverse_mortgage_monthly(age: float, house_value: float) -> float:
-    """연소자 나이·주택가격(만원, 시세)으로 월지급금(만원) — 표 사이는 선형 보간, 12억 초과는 12억으로 계산."""
+def reverse_mortgage_monthly(age: float, house_value):
+    """연소자 나이·주택가격(만원, 시세)으로 월지급금(만원). house_value는 스칼라/배열 모두 가능.
+    표 사이 나이는 선형 보간, 12억 초과는 12억으로 계산."""
     ages = sorted(RM_TABLE); age = min(max(age, ages[0]), ages[-1])
     lo = max(a for a in ages if a <= age); hi = min(a for a in ages if a >= age)
     w = 0 if hi == lo else (age - lo) / (hi - lo)
     rate = RM_TABLE[lo][0] * (1 - w) + RM_TABLE[hi][0] * w
     cap = RM_TABLE[lo][1] * (1 - w) + RM_TABLE[hi][1] * w
-    return min(rate * min(house_value, 120000) / 10000, cap)
+    return np.minimum(rate * np.minimum(house_value, 120000) / 10000, cap)
 
 
-def acquisition_tax_rate(price: float) -> float:
-    """1주택 취득세(지방교육세 포함) 근사: 6억 이하 1.1%, 9억 이하 2.2%, 초과 3.3%."""
-    return 0.011 if price <= 60000 else (0.022 if price <= 90000 else 0.033)
+def acquisition_tax_rate(price):
+    """1주택 취득세율(지방교육세 포함) 근사: 6억 이하 1.1%, 9억 이하 2.2%, 초과 3.3%. 배열 지원."""
+    return np.where(np.asarray(price) <= 60000, 0.011, np.where(np.asarray(price) <= 90000, 0.022, 0.033))
 
 
-def one_house_cgt(price: float, basis: float, years: int) -> float:
-    """1세대 1주택 양도세 근사: 12억 초과분 비율만 과세, 장기보유특별공제 최대 80%, 실효세율 38.5%(지방세 포함)."""
-    if price <= 120000:
-        return 0.0
-    gain = max(price - basis, 0) * (price - 120000) / price
+def one_house_cgt(price, basis: float, years: int):
+    """1세대 1주택 양도세 근사: 12억 초과분 비율만 과세, 장기보유특별공제 최대 80%, 실효세율 38.5%. 배열 지원."""
+    price = np.asarray(price, float)
+    gain = np.maximum(price - basis, 0) * np.maximum(price - 120000, 0) / np.maximum(price, 1e-9)
     return gain * (1 - min(0.08 * years, 0.8)) * 0.385
 
 
