@@ -1,5 +1,11 @@
 # Nohu Compass — Probabilistic Retirement Simulator (Korea)
 
+> ### 👉 [**Try it now — retire-compass.streamlit.app**](https://retire-compass.streamlit.app)
+> No input needed: press an **example household** button to see results first. Scan the QR code on your phone to open it. (If nobody has used the app for a while, the first visit may show a "wake up" button — press it and the app opens within ~30 seconds. The app is in Korean.)
+>
+> <img src="docs/images/qr_retire_compass.png" width="140" alt="QR code">
+
+
 [한국어](README.md) | **English**
 
 **An actuarial, probability-based retirement simulator built around Korea's pension, tax and health-insurance rules — asking not "how much have I saved?" but "can I sustain the retirement I want?"**

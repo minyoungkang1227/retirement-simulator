@@ -334,6 +334,21 @@ if ss.step < len(STEPS) and not ss.get("done"):
         if ss.step > 5: st.caption(f"남길 자산: {p['legacy']:.1f}억 원")
         if ss.step > 6: st.caption(f"투자 성향: {p['profile']}")
 
+    if ss.step == 0:
+        st.markdown("**입력이 번거로우시면, 예시 가구로 먼저 결과를 보세요.** 나중에 '입력 수정하기'로 내 정보로 바꿀 수 있어요.")
+        e1, e2 = st.columns(2)
+        if e1.button("60대 초반 부부 예시 보기", key="ex_60", width="stretch"):
+            ss.p.update(age=60, sex="M", retire_age=60, spouse=True, s_age=58, s_sex="F", deposit=1.5, invest=2.5, ret_acct=1.0, other=0.0,
+                        essential=250, lifestyle=1000, nps_auto=False, nps=110, s_nps=50, nps_start=65, priv=600, priv_start=60, priv_years=20,
+                        legacy=1.0, profile="균형형", salary=0, s_salary=0, saving=0)
+            ss.done = True; st.rerun()
+        if e2.button("30대 맞벌이 부부 예시 보기", key="ex_30", width="stretch"):
+            ss.p.update(age=34, sex="M", retire_age=60, spouse=True, s_age=32, s_sex="F", deposit=0.4, invest=0.4, ret_acct=0.2, other=0.0,
+                        essential=300, lifestyle=1200, nps_auto=True, nps_years=5, s_nps_years=4, nps_start=65, priv=0, legacy=1.0, profile="균형형",
+                        salary=5000, s_salary=4000, save_mode="소득의 %", save_rate=15, wage_g=1.0, ret_contrib=True)
+            ss.done = True; st.rerun()
+        st.divider()
+
     i = ss.step
     with st.form(f"step{i}"):
         if i == 0:

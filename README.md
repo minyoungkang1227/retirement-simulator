@@ -1,5 +1,11 @@
 # 노후나침반 — 확률 기반 은퇴 시뮬레이터
 
+> ### 👉 [**지금 바로 써보기 — retire-compass.streamlit.app**](https://retire-compass.streamlit.app)
+> 입력 없이 **'예시 가구 보기'** 버튼으로 먼저 결과를 확인할 수 있습니다. 휴대폰으로 아래 QR을 찍어도 열립니다. (한동안 접속이 없으면 처음 열릴 때 "깨우기" 버튼이 나올 수 있어요 — 누르면 30초 안에 열립니다.)
+>
+> <img src="docs/images/qr_retire_compass.png" width="140" alt="노후나침반 QR 코드">
+
+
 **한국어** | [English](README.en.md)
 
 **"얼마를 모았나"가 아니라 "원하는 은퇴생활을 지킬 수 있나"를 묻는, 한국 제도를 반영한 계리 기반 확률 은퇴 시뮬레이터**
