@@ -50,7 +50,8 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
 .card h4 {{ margin: 0 0 .3rem; font-size: 1rem; color: {TEAL}; }}
 .card p {{ margin: 0; line-height: 1.6; }}
 .goal {{ border: 1px solid #CBD7DB; border-radius: 14px; padding: .9rem 1rem; background: white; height: 100%; }}
-.goal .t {{ color: {MUTED}; font-size: .92rem; margin-bottom: .25rem; }}
+.goal .h {{ font-size: 1.15rem; font-weight: 800; color: {TEAL}; margin-bottom: .1rem; }}
+.goal .t {{ color: {MUTED}; font-size: .92rem; margin-bottom: .35rem; }}
 .goal .v {{ font-size: 1.45rem; font-weight: 700; color: {INK}; line-height: 1.3; }}
 .goal .v .hl {{ color: {TEAL}; }}
 .tip {{ background: #F1F6F7; border-left: 4px solid {TEAL}; border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; line-height: 1.7; }}
@@ -578,40 +579,26 @@ with tab1:
                 f'<span class="key" style="background:{TEAL}"></span>끝까지 괜찮은 경우 &nbsp;·&nbsp; 앞으로 있을 수 있는 여러 미래를 10번으로 줄여 표시했어요</div>',
                 unsafe_allow_html=True)
 
-    # 2) 매달 꺼내 써야 하는 돈
-    before = f"<br>국민연금을 받기 전({p['nps_start']}세 전)에는 {need:.0f}만 원 전부를 모아둔 돈에서 씁니다." if pension > 0 else ""
-    st.markdown(f'<div class="gap"><div class="big">매달 모아둔 돈에서 {max(gap, 0):.0f}만 원을 꺼내 써야 해요</div>'
-                f'<div class="eq">필요한 생활비 월 {need:.0f}만 원 − 받는 연금 월 {pension:.0f}만 원 (오늘 돈 가치 기준){before}</div></div>',
-                unsafe_allow_html=True)
-
-    # 3) 목표별 결과 (문장 카드)
-    cards = [("기본생활비를 끝까지 낼 수 있을까?", f'10번 중 <span class="hl">{n_ok}번</span> 가능해요')]
-    if p["lifestyle"] > 0:
-        cards.append(("여행·취미는 얼마나 즐길 수 있을까?", f'원하는 예산의 <span class="hl">{s.get("여행·취미 평균 충족률", 0) * 100:.0f}%</span> 정도'))
-    if p["legacy"] > 0:
-        cards.append((f"자녀에게 {p['legacy']:.1f}억 원을 남길 수 있을까?", f'10번 중 <span class="hl">{int(round(s.get("유산 목표 달성 확률", 0) * 10))}번</span> 가능해요'))
-    for col, (t_, v_) in zip(st.columns(len(cards)), cards):
-        col.markdown(f'<div class="goal"><div class="t">{t_}</div><div class="v">{v_}</div></div>', unsafe_allow_html=True)
-
-    # 4) 10번 중 9번 지키려면
-    with st.spinner("계산 중"):
-        req, over = required_assets(json.dumps(p, sort_keys=True))
-        rs_, over_ = required_saving(json.dumps(p, sort_keys=True)) if p["age"] < p["retire_age"] else (None, None)
-    lines = []
-    if n_ok >= 9:
-        lines.append("지금 계획으로도 기본생활비를 <b>10번 중 9번 이상</b> 지킬 수 있어요.")
+    # 2) 매달 부족한 돈: 생활비 − 연금 = 부족분, 그리고 채우는 방법
+    short = max(gap, 0)
+    if short > 0:
+        fill = "이 부족분은 <b>모아둔 돈에서 꺼내 채워요.</b>" + (f" 국민연금을 받기 전({p['nps_start']}세 전)에는 생활비 {need:.0f}만 원 전부를 모아둔 돈에서 씁니다." if pension > 0 else "")
+        big = f'매달 <span class="n">{short:.0f}만 원</span>이 부족해요'
     else:
-        if req is not None:
-            lines.append(f"모아둔 돈이 지금 {total_assets(p):.1f}억 원에서 <b>약 {req:.1f}억 원</b>이면 됩니다.")
-        if p["age"] < p["retire_age"]:
-            if rs_ is not None and rs_ > 0:
-                lines.append(f"또는 은퇴 전까지 매달 <b>약 {rs_:.0f}만 원</b>씩 모으면 됩니다 (지금 월 {monthly_saving(p):.0f}만 원).")
-            elif rs_ is None:
-                lines.append("저축만 늘려서는 어려워요. 은퇴 시기나 생활비도 함께 바꿔 보세요.")
-        if req is None and p["age"] >= p["retire_age"]:
-            lines.append("모아둔 돈만 늘려서는 어려워요. 생활비나 연금 받는 시기를 함께 바꿔 보세요.")
-        lines.append("👉 <b>'바꿔보기'</b> 탭에서 은퇴 시기·저축·생활비를 바꿔 보면 결과가 어떻게 달라지는지 바로 볼 수 있어요.")
-    st.markdown('<div class="tip"><b>10번 중 9번 지키려면</b><br>' + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
+        fill = "연금만으로 생활비가 충분해요. 모아둔 돈은 여행·취미와 남길 돈에 쓸 수 있어요."
+        big = "매달 연금으로 생활비가 충분해요"
+    st.markdown(f'<div class="gap"><div class="eq">필요한 생활비 <b>월 {need:.0f}만 원</b><br>받는 연금 <b>월 {pension:.0f}만 원</b> (오늘 돈 가치 기준)</div>'
+                f'<div class="big">{big}</div><div class="eq">{fill}</div></div>', unsafe_allow_html=True)
+
+    # 3) 목표별 결과: 기본 / 여행·취미 / 자녀
+    cards = [("🏠 기본 생활", "먹고 사는 데 꼭 필요한 돈", f'10번 중 <span class="hl">{n_ok}번</span> 끝까지 가능해요')]
+    if p["lifestyle"] > 0:
+        cards.append(("✈️ 여행·취미", "원하는 예산 중 쓸 수 있는 정도", f'<span class="hl">{s.get("여행·취미 평균 충족률", 0) * 100:.0f}%</span> 정도'))
+    if p["legacy"] > 0:
+        cards.append(("👨‍👩‍👧 자녀", f"{p['legacy']:.1f}억 원 남기기", f'10번 중 <span class="hl">{int(round(s.get("유산 목표 달성 확률", 0) * 10))}번</span> 가능해요'))
+    for col, (h_, t_, v_) in zip(st.columns(len(cards)), cards):
+        col.markdown(f'<div class="goal"><div class="h">{h_}</div><div class="t">{t_}</div><div class="v">{v_}</div></div>', unsafe_allow_html=True)
+
     # 4-2) 무엇부터 하면 되나 — 효과 순위
     if n_ok < 9:
         with st.spinner("효과가 큰 방법을 찾는 중"):
@@ -619,12 +606,10 @@ with tab1:
         if acts:
             st.markdown("**효과가 큰 순서대로 세 가지**")
             for rank, (lab, how, gain, ci_) in enumerate(acts[:3], 1):
-                n_new = int(round((ok + gain) * 10))
                 st.markdown(f'<div class="act"><div class="r">{rank}</div><div><b>{lab}</b>'
-                            f'<div class="s">{how} → 10번 중 {n_ok}번에서 <b>{n_new}번</b>으로 '
-                            f'({gain * 100:+.1f}%p)</div></div></div>', unsafe_allow_html=True)
-            st.caption("권유가 아니라 '이 가구에서 어떤 선택이 얼마나 효과가 큰지' 계산한 결과입니다. "
-                       "각자의 사정에 맞는 방법을 '바꿔보기' 탭에서 직접 조정해 보세요.")
+                            f'<div class="s">{how}<br>기본 생활을 지킬 가능성 {ok * 100:.0f}% → <b>{min(ok + gain, 1) * 100:.0f}%</b> '
+                            f'({gain * 100:+.0f}%p)</div></div></div>', unsafe_allow_html=True)
+            st.caption("권유가 아니라 '어떤 선택이 얼마나 효과가 큰지' 계산한 결과입니다. 자세한 조정은 '바꿔보기' 탭에서 하세요.")
     if p.get("events"):
         ds_ = base.get("debt_share", 0)
         st.caption("큰 지출 반영: " + ", ".join(f'{e_["age"]}세 {e_["kind"]}' for e_ in p["events"])
@@ -664,6 +649,25 @@ def whatif(rows):
 with tab2:
     pre = p["age"] < p["retire_age"]
     st.markdown("조건을 **직접 바꿔 보고** 결과가 어떻게 달라지는지 확인하세요. 같은 1만 가지 미래 위에서 비교하므로, 달라진 만큼이 순수하게 그 선택의 효과입니다.")
+    # 기본 생활을 10번 중 9번 지키려면 (첫 화면에서 옮겨 옴)
+    with st.spinner("계산 중"):
+        req, over = required_assets(json.dumps(p, sort_keys=True))
+        rs_, over_ = required_saving(json.dumps(p, sort_keys=True)) if p["age"] < p["retire_age"] else (None, None)
+    lines = []
+    if n_ok >= 9:
+        lines.append("지금 계획으로도 기본생활비를 <b>10번 중 9번 이상</b> 지킬 수 있어요.")
+    else:
+        if req is not None:
+            lines.append(f"모아둔 돈이 지금 {total_assets(p):.1f}억 원에서 <b>약 {req:.1f}억 원</b>이면 됩니다.")
+        if p["age"] < p["retire_age"]:
+            if rs_ is not None and rs_ > 0:
+                lines.append(f"또는 은퇴 전까지 매달 <b>약 {rs_:.0f}만 원</b>씩 모으면 됩니다 (지금 월 {monthly_saving(p):.0f}만 원).")
+            elif rs_ is None:
+                lines.append("저축만 늘려서는 어려워요. 은퇴 시기나 생활비도 함께 바꿔 보세요.")
+        if req is None and p["age"] >= p["retire_age"]:
+            lines.append("모아둔 돈만 늘려서는 어려워요. 생활비나 연금 받는 시기를 함께 바꿔 보세요.")
+        lines.append("👉 <b>'바꿔보기'</b> 탭에서 은퇴 시기·저축·생활비를 바꿔 보면 결과가 어떻게 달라지는지 바로 볼 수 있어요.")
+    st.markdown('<div class="tip"><b>기본 생활을 10번 중 9번 지키려면</b><br>' + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
     with st.expander("숫자 읽는 법", expanded=not ss.get("tweak")):
         st.markdown(f"""
 - **기본생활 지킬 확률 {pct(s["기본생활 유지 확률"])}** = 10번 중 약 {s["기본생활 유지 확률"] * 10:.0f}번은 생활비를 끝까지 낼 수 있다는 뜻이에요.
