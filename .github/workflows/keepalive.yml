@@ -1,0 +1,31 @@
+# Streamlit 무료 앱은 오래 접속이 없으면 잠듭니다. 하루 두 번 실제 브라우저로 접속해 깨워 둡니다.
+# (잠든 상태의 "Yes, get this app back up!" 버튼이 보이면 눌러 줍니다.)
+name: keepalive
+on:
+  schedule:
+    - cron: "17 21 * * *"   # 매일 06:17 KST
+    - cron: "17 9 * * *"    # 매일 18:17 KST
+  workflow_dispatch:
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install playwright && playwright install --with-deps chromium
+      - name: open app
+        run: |
+          python - <<'PY'
+          from playwright.sync_api import sync_playwright
+          URL = "https://retire-compass.streamlit.app"
+          with sync_playwright() as p:
+              b = p.chromium.launch(); pg = b.new_page()
+              pg.goto(URL, timeout=90000)
+              try:
+                  pg.get_by_role("button", name="Yes, get this app back up!").click(timeout=8000)
+                  print("앱을 깨웠습니다")
+              except Exception:
+                  print("이미 켜져 있습니다")
+              pg.wait_for_timeout(25000)
+              print("제목:", pg.title()); b.close()
+          PY
