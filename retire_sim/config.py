@@ -10,6 +10,7 @@ class Person:
     nps_monthly: float = 0.0      # 국민연금 예상 월액(정상수령 기준, 만원)
     nps_normal_age: int = 65      # 정상 수령 개시 나이
     nps_start_age: int = 65       # 실제 수령 개시 나이(조기/연기 반영)
+    nps_years: float = 20.0       # (v28) 국민연금 가입기간(년). 유족연금 지급률(40/50/60%) 결정
     private_pension_annual: float = 0.0   # 사적연금 연액(명목 고정, 만원)
     private_pension_start: int = 60
     private_pension_years: int = 20
@@ -21,6 +22,9 @@ class Household:
     members: List[Person]
     liquid_assets: float          # 금융자산 합계(만원)
     stock_weight: float = 0.5     # 주식 비중(연 1회 리밸런싱)
+    glide_end: float = None       # (v29) 글라이드 경로: 종료 나이의 주식 비중 (None이면 고정 비중)
+    glide_ages: tuple = (60, 85)  # (v29) 본인 나이 기준 (시작, 종료): 시작 이전엔 stock_weight, 종료 이후엔 glide_end
+    draw_order: str = "taxable_first"  # (v29) 인출 순서: "taxable_first"(과세계좌→ISA) | "isa_first"(ISA→과세계좌)
     annual_spending: float = 3600 # 부부 기준 연 생활비(만원, 현재가치)
     survivor_spending_ratio: float = 0.7  # 한 명 사망 시 생활비 비율
     # ── v12 목표 기반(Goal-Based) 설정 ──
@@ -67,6 +71,18 @@ class NPSRules:
     defer_add_per_year: float = 0.072
     max_early_years: int = 5
     max_defer_years: int = 5
+    # (v28) 유족연금: 가입 10년 미만 40%, 10~20년 50%, 20년 이상 60% (기본연금액 기준)
+    survivor_on: bool = True
+    survivor_overlap: float = 0.30      # 본인 노령연금과 함께 받을 때 유족연금의 지급 비율(중복지급률)
+    # (v28) 기초연금 (2026): 기준연금액 월 34.97만원, 선정기준액 단독 247만·부부 395.2만원(소득인정액)
+    basic_on: bool = True
+    basic_amount: float = 34.97         # 월, 만원 (오늘 가치, 물가연동)
+    basic_limit_single: float = 247.0
+    basic_limit_couple: float = 395.2
+    basic_base_asset: float = 13500.0   # 대도시 기본재산액(만원)
+    basic_fin_deduct: float = 2000.0    # 금융재산 공제(만원)
+    basic_conv_rate: float = 0.04       # 재산의 소득환산율(연)
+    basic_couple_cut: float = 0.20      # 부부 모두 수급 시 각 20% 감액
 
 
 @dataclass
@@ -173,3 +189,7 @@ class SimConfig:
     care: object = field(default_factory=CareShock)   # CareShock(v2) 또는 CareMarkov(v11)
     mortality_improvement: bool = True    # (v27) 코호트 사망률 개선 반영 (False면 2024 기간생명표 그대로)
     risk_aversion: float = 3.0            # (v27) CRRA 위험회피계수 — 확실성등가 계산용
+    longevity_sigma_level: float = 0.05   # (v30) 사망률 수준 불확실성 (로그 표준편차)
+    longevity_sigma_trend: float = 0.005  # (v30) 사망률 개선 속도 불확실성 (연, 표준편차)
+    widow_excess: tuple = (0.30, 0.15)    # (v30) 사별 직후 생존 배우자 초과 사망 위험 (남, 여). (0,0)이면 끔
+    widow_tau: float = 3.0                # (v30) 사별 효과 감쇠 시간(년)

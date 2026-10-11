@@ -35,8 +35,8 @@ def couple_30():
 
 # ── 1. 대표 가구 결과 (범위로 고정: 분산 감소·리팩터링은 허용, 로직 변화는 잡아냄) ──
 @pytest.mark.parametrize("hh_fn,key,lo,hi", [
-    (couple_60, "기본생활 유지 확률", 0.38, 0.48),
-    (couple_30, "기본생활 유지 확률", 0.70, 0.80),
+    (couple_60, "기본생활 유지 확률", 0.66, 0.77),
+    (couple_30, "기본생활 유지 확률", 0.78, 0.88),
     (couple_30, "여행·취미 평균 충족률", 0.85, 0.97),
 ])
 def test_headline(hh_fn, key, lo, hi):
@@ -186,3 +186,102 @@ def test_annuity_variants_pricing_order():
     assert pay(annuity_joint=True) < plain
     assert plain < pay(annuity_start_age=80)                       # 늦게 받을수록 금액은 커진다
     assert pay(annuity_joint=True) < pay(annuity_joint=True, annuity_survivor_ratio=0.7)
+
+
+# ── v28 제도 정밀화: 유족연금 · 기초연금 ──
+def test_survivor_rules():
+    from retire_sim.pension import survivor_pct, survivor_split, survivor_annual
+    assert (survivor_pct(5), survivor_pct(10), survivor_pct(19.9), survivor_pct(20), survivor_pct(35)) == (0.4, 0.5, 0.5, 0.6, 0.6)
+    own, sv = survivor_split(np.array([100.0, 10.0, 0.0]), np.array([60.0, 60.0, 60.0]), 0.30)
+    # own 100: 100+18=118 > 60 → 본인연금+30%; own 10: 10+18=28 < 60 → 유족연금만; own 0 → 유족연금만
+    assert np.allclose(own, [100, 0, 0]) and np.allclose(sv, [18, 60, 60])
+    assert abs(survivor_annual(Person(65, "M", nps_monthly=100, nps_years=25)) - 720) < 1e-9
+
+
+def test_basic_pension_rules():
+    from retire_sim.pension import basic_pension_annual
+    from retire_sim.config import NPSRules
+    r = NPSRules(); one = np.ones(1); z = np.zeros(1)
+    # 단독 수급, 재산 없음, 국민연금 없음 → 월 34.97만원 × 12
+    a = basic_pension_annual(z, z, z, [one > 0], [z], [one < 0], r, one)
+    assert abs(a[0] - 34.97 * 12) < 1e-6
+    # 부부 모두 수급 → 각 20% 감액
+    b = basic_pension_annual(z, z, z, [one > 0, one > 0], [z, z], [one < 0, one < 0], r, one)
+    assert abs(b[0] - 2 * 34.97 * 0.8 * 12) < 1e-6
+    # 소득인정액이 선정기준액(단독 247만) 초과 → 0
+    c = basic_pension_annual(np.array([300.0]), z, z, [one > 0], [z], [one < 0], r, one)
+    assert c[0] == 0
+    # 64세는 대상 아님
+    assert basic_pension_annual(z, z, z, [one < 0], [z], [one < 0], r, one)[0] == 0
+
+
+def test_v28_directions():
+    from retire_sim.config import NPSRules
+    global CFG
+    old = CFG
+    try:
+        res = {}
+        for sv, bs in [(False, False), (True, False), (False, True)]:
+            CFG = SimConfig(care=CareMarkov(), nps=NPSRules(survivor_on=sv, basic_on=bs))
+            res[(sv, bs)] = engine_tax.summarize(_run(couple_60()))["기본생활 유지 확률"]
+        assert res[(True, False)] > res[(False, False)]
+        assert res[(False, True)] > res[(False, False)]
+    finally:
+        CFG = old
+
+
+# ── v29 최적화: 글라이드 경로 · 인출 순서 · 탐색 ──
+def test_glide_and_order():
+    from dataclasses import replace
+    hh = couple_60()
+    flat = engine_tax.summarize(_run(hh))
+    same = engine_tax.summarize(_run(replace(hh, glide_end=hh.stock_weight)))      # 시작=끝이면 고정 비중과 동일
+    assert abs(flat["기본생활 유지 확률"] - same["기본생활 유지 확률"]) < 1e-9
+    low = engine_tax.summarize(_run(replace(hh, glide_end=0.1)))
+    assert low["기본생활 유지 확률"] != flat["기본생활 유지 확률"]
+    isa = engine_tax.summarize(_run(replace(hh, draw_order="isa_first")))
+    assert 0 <= isa["고갈확률"] <= 1
+
+
+def test_optimize_search_structure():
+    from retire_sim import optimize
+    out = optimize.search(couple_60(), CFG, "nps", e=ECO, tc=TaxConfig(overseas_share=0.2))
+    assert len(out["rows"]) == 5 and out["rows"][2]["고갈확률 차이(기준 대비)"] == 0.0
+    assert set(out["check"]) == {"기준", "추천 후보"}
+    # 연금 개시를 미루면 (같은 시나리오에서) 이 가구는 기본생활 유지 확률이 높아진다
+    assert out["rows"][4]["기본생활 유지 확률"] > out["rows"][0]["기본생활 유지 확률"]
+
+
+# ── v30 장수위험: 확률적 사망률 · 사별 효과 ──
+def test_longevity_multiplier():
+    m = mortality.longevity_multiplier(20000, 30, 0.05, 0.005, 42)
+    assert m.shape == (20000, 30) and abs(m.mean() - 1) < 0.02          # 평균 1 근처(분산 보정)
+    assert m[:, 25].std() > m[:, 1].std()                                # 시간이 갈수록 불확실성 증가
+    assert mortality.longevity_multiplier(10, 5, 0, 0, 42) is None
+    assert np.allclose(mortality.longevity_multiplier(100, 5, 0.05, 0.005, 7), mortality.longevity_multiplier(100, 5, 0.05, 0.005, 7))
+
+
+def test_widowhood_effect():
+    q = mortality.default_qx(110)
+    n, T = 40000, 30
+    rng = np.random.default_rng(0)
+    al = np.stack([mortality.simulate_alive(q["M"], 70, T, n, rng), mortality.simulate_alive(q["F"], 68, T, n, rng)])
+    a2, _, _ = mortality.apply_widowhood(al, None, None, [q["M"], q["F"]], [70, 68], ["M", "F"], (0.3, 0.15), 3.0, False, 1)
+    assert (a2 <= al).all()                                               # 추가 사망만 생길 수 있음
+    both = al[0].sum(1) + al[1].sum(1); both2 = a2[0].sum(1) + a2[1].sum(1)
+    assert both2.mean() < both.mean()
+    off, _, _ = mortality.apply_widowhood(al, None, None, [q["M"], q["F"]], [70, 68], ["M", "F"], (0, 0), 3.0, False, 1)
+    assert (off == al).all()
+
+
+def test_v30_tail_risk_up():
+    global CFG
+    old = CFG
+    try:
+        CFG = SimConfig(care=CareMarkov(), longevity_sigma_level=0, longevity_sigma_trend=0, widow_excess=(0, 0))
+        off = engine_tax.summarize(_run(couple_30()))["CTE90 부족액(실질)"]
+        CFG = SimConfig(care=CareMarkov(), widow_excess=(0, 0))
+        on = engine_tax.summarize(_run(couple_30()))["CTE90 부족액(실질)"]
+        assert on > off                                                   # 장수 불확실성은 꼬리 위험을 키운다
+    finally:
+        CFG = old

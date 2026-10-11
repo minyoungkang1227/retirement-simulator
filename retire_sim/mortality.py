@@ -95,17 +95,18 @@ def _qx_at(qx, t, improve: bool, offset: float = 0.0):
     return project_qx(qx, t + offset) if improve else qx
 
 
-def simulate_alive(qx: np.ndarray, start_age: int, T: int, n: int, rng, improve: bool = False, offset: float = 0.0) -> np.ndarray:
+def simulate_alive(qx: np.ndarray, start_age: int, T: int, n: int, rng, improve: bool = False, offset: float = 0.0, qmult=None) -> np.ndarray:
     """alive[p, t] : t년 시작 시점 생존 여부 (t=0은 현재)."""
     ages = np.minimum(start_age + np.arange(T), len(qx) - 1)
-    die = rng.random((n, T)) < qx[ages]
+    qq = qx[ages][None, :] * (1.0 if qmult is None else qmult)
+    die = rng.random((n, T)) < qq
     alive = np.ones((n, T + 1), dtype=bool)
     alive[:, 1:] = np.cumprod(~die, axis=1).astype(bool)
     return alive
 
 
 def simulate_life(qx: np.ndarray, start_age: int, T: int, n: int, rng, care, return_severe: bool = False,
-                  improve: bool = False, offset: float = 0.0) -> tuple:
+                  improve: bool = False, offset: float = 0.0, qmult=None) -> tuple:
     """다중상태 경로. 반환: alive (n, T+1), in_care (n, T+1) [, severe (n, T+1)].
 
     단일 상태(legacy): q_H = q_x / (1 + (m−1)·p), p ≈ i·D, D = 1/(m·q + rec)
@@ -117,16 +118,16 @@ def simulate_life(qx: np.ndarray, start_age: int, T: int, n: int, rng, care, ret
     for t in range(T):
         q_t = _qx_at(qx, t, improve, offset)
         x = min(start_age + t, len(qx) - 1)
-        q = q_t[x]; i = care.inc(x)
+        q = q_t[x] * (1.0 if qmult is None else qmult[:, t]); i = care.inc(x)
         if two:
             p = care.prev(x); sh = care.severe_share; mS = care.mort_mult_severe
-            qH = min(q / (1 + (m - 1) * p * (1 - sh) + (mS - 1) * p * sh), 1.0)
+            qH = np.minimum(q / (1 + (m - 1) * p * (1 - sh) + (mS - 1) * p * sh), 1.0)
         else:
-            D = min(1.0 / max(m * q + rec, 1e-9), 10.0); p = min(i * D, 0.5)
-            qH = min(q / (1 + (m - 1) * p), 1.0); mS = m
+            D = np.minimum(1.0 / np.maximum(m * q + rec, 1e-9), 10.0); p = np.minimum(i * D, 0.5)
+            qH = np.minimum(q / (1 + (m - 1) * p), 1.0); mS = m
         a, c, sv = alive[:, t], incare[:, t], severe[:, t]
         u = rng.random(n); v = rng.random(n)
-        qdie = np.where(sv, min(mS * qH, 1.0), np.where(c, min(m * qH, 1.0), qH))
+        qdie = np.where(sv, np.minimum(mS * qH, 1.0), np.where(c, np.minimum(m * qH, 1.0), qH))
         die = u < qdie
         to_care = ~c & ~die & (v < i)
         recover = c & ~die & (v < rec)
@@ -138,3 +139,44 @@ def simulate_life(qx: np.ndarray, start_age: int, T: int, n: int, rng, care, ret
             prog = c & ~sv & ~die & ~recover & (w < care.progress)
             severe[:, t + 1] = incare[:, t + 1] & ((sv & ~recover) | new_sev | prog)
     return (alive, incare, severe) if return_severe else (alive, incare)
+
+
+
+# ── v30 장수위험: 확률적 사망률 수준 · 사별 효과 ──
+def longevity_multiplier(n: int, T: int, sigma_level: float, sigma_trend: float, seed) -> np.ndarray:
+    """경로별 사망률 배수 (n, T). 두 배우자에게 공통(체계적 위험).
+    m[p,t] = exp(η_p − ε_p·t − 분산보정),  η~N(0,σ_level²) : 수준 불확실성,  ε~N(0,σ_trend²) : 사망률 개선 속도 불확실성.
+    별도 난수 흐름을 쓰므로 끄면 기존 결과와 동일하고, 켜도 다른 난수(경제·간병)는 그대로(공통 난수 유지)."""
+    if sigma_level <= 0 and sigma_trend <= 0:
+        return None
+    r = np.random.default_rng([int(seed) if seed is not None else 0, 30])
+    eta = sigma_level * r.standard_normal(n); eps = sigma_trend * r.standard_normal(n)
+    t = np.arange(T)[None, :]
+    var = sigma_level ** 2 + (sigma_trend * t) ** 2
+    return np.exp(eta[:, None] - eps[:, None] * t - 0.5 * var)
+
+
+def apply_widowhood(alive, incare, severe, qx_list, ages, sexes, excess, tau, improve, seed, qmult=None):
+    """사별 후 생존 배우자의 사망 위험 상승(애도·돌봄 상실 등). 2인 가구에만 적용.
+    alive: (2, n, T+1). 사별 s년 뒤 추가 사망률 = q_t × excess × exp(−s/τ). 먼저 사망한 사람은 영향 없음(순서 보존).
+    sexes: 구성원별 "M"/"F", excess: (남성, 여성) 초과 위험 — 구성원의 성별로 고른다."""
+    if alive.shape[0] != 2 or (excess[0] <= 0 and excess[1] <= 0):
+        return alive, incare, severe
+    r = np.random.default_rng([int(seed) if seed is not None else 0, 31])
+    n, Tp1 = alive.shape[1], alive.shape[2]
+    out = alive.copy()
+    for i in (0, 1):
+        j = 1 - i; ex = excess[0] if sexes[i] == "M" else excess[1]
+        if ex <= 0: continue
+        since = np.cumsum(~alive[j], axis=1)                       # j 사망 후 경과 (사망 시점 포함해 1부터)
+        for t in range(Tp1 - 1):
+            x = min(ages[i] + t, len(qx_list[i]) - 1)
+            q = project_qx(qx_list[i], t)[x] if improve else qx_list[i][x]
+            if qmult is not None: q = q * qmult[:, t]
+            s_ = np.maximum(since[:, t] - 1, 0)
+            qe = np.minimum(q * ex * np.exp(-s_ / tau), 1.0) * (since[:, t] > 0)
+            d = r.random(n) < qe
+            out[i, d, t + 1:] = False
+    inc2 = incare & out if incare is not None else None
+    sev2 = severe & out if severe is not None else None
+    return out, inc2, sev2

@@ -24,14 +24,20 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     eco = generate(e, T, n, rng); cpi = eco["cpi"]
     from .config import CareMarkov
     markov = isinstance(cfg.care, CareMarkov) and cfg.care.enabled
+    qmult = mortality.longevity_multiplier(n, T, cfg.longevity_sigma_level, cfg.longevity_sigma_trend, cfg.seed)   # (v30)
     if markov:
         lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care, return_severe=True,
-                                         improve=cfg.mortality_improvement) for m in hh.members]
+                                         improve=cfg.mortality_improvement, qmult=qmult) for m in hh.members]
         alive = np.stack([l[0] for l in lives]); incare = np.stack([l[1] for l in lives]); severe = np.stack([l[2] for l in lives])
         care_level = cfg.care.cost_median * np.exp(cfg.care.cost_log_sigma * rng.standard_normal((k, n)))
         sev_level = getattr(cfg.care, 'cost_severe_median', cfg.care.cost_median) * np.exp(getattr(cfg.care, 'cost_severe_sigma', cfg.care.cost_log_sigma) * rng.standard_normal((k, n)))
     else:
-        alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng, improve=cfg.mortality_improvement) for m in hh.members])
+        alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng, improve=cfg.mortality_improvement, qmult=qmult) for m in hh.members])
+        incare = severe = None
+    if k == 2:                                                  # (v30) 사별 효과
+        alive, incare, severe = mortality.apply_widowhood(alive, incare, severe, [qx_table[m.sex] for m in hh.members],
+                                                          [m.age for m in hh.members], [m.sex for m in hh.members],
+                                                          cfg.widow_excess, cfg.widow_tau, cfg.mortality_improvement, cfg.seed, qmult)
     hh_alive = alive.sum(0) > 0
     own = np.array(tc.ownership if tc.ownership else [1 / k] * k, float)
     hown = np.array(house.owner_share if house.owner_share else [1.0] + [0.0] * (k - 1), float)
@@ -44,7 +50,13 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     dep_at = np.full(n, -1)
     tax_y = np.zeros((n, T)); hi_y = np.zeros((n, T)); prop_y = np.zeros((n, T))
     estate_real = np.full(n, np.nan); etax_real = np.full(n, np.nan); transfer_real = np.full(n, np.nan)
-    w = hh.stock_weight; W_hist = np.zeros((n, T + 1)); W_hist[:, 0] = Wt
+    w = hh.stock_weight
+    if hh.glide_end is not None:                                # (v29) 나이별 주식 비중 경로 (선형)
+        _a0, _a1 = hh.glide_ages; _ag = hh.members[0].age + np.arange(T + 1)
+        w_path = hh.stock_weight + (hh.glide_end - hh.stock_weight) * np.clip((_ag - _a0) / max(_a1 - _a0, 1), 0, 1)
+    else:
+        w_path = np.full(T + 1, float(hh.stock_weight))
+    W_hist = np.zeros((n, T + 1)); W_hist[:, 0] = Wt
     ess_base = hh.essential if hh.essential is not None else hh.annual_spending
     spend_base = ess_base + hh.lifestyle
     life_ratio = np.full((n, T), np.nan)
@@ -110,6 +122,14 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             if m.private_pension_start <= age < m.private_pension_start + m.private_pension_years:
                 x += m.private_pension_annual / (1 + pibar) ** yr
             return x
+        def inc_alone(i, yrs):                             # (v28) 배우자 사망 후 구성원 i의 보장소득: 유족연금 선택 반영
+            base = inc_vec(i, yrs)
+            if k < 2 or not cfg.nps.survivor_on: return base
+            m = hh.members[i]; ages = m.age + yrs
+            own = np.where(ages >= m.nps_start_age, pension.nps_annual_amount(m, cfg.nps), 0.0)
+            S = pension.survivor_annual(hh.members[1 - i])
+            o2, s2 = pension.survivor_split(own, S, cfg.nps.survivor_overlap)
+            return base - own + o2 + s2
         rent_real = house.rent_annual
         H = T + 1; floor_tab = np.zeros((H, 3))
         for t0 in range(H):
@@ -121,7 +141,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 surv.append(np.concatenate([[1.0], np.cumprod(1 - q)[:-1]]))   # s년 뒤 생존확률
             vs = v_r ** np.arange(horizon)
             yrs = np.arange(t0, t0 + horizon)
-            gap = lambda members, ratio: np.maximum(ess_base * ratio - sum(inc_vec(i, yrs) for i in members) - rent_real, 0.0)
+            gap = lambda members, ratio: np.maximum(ess_base * ratio - sum((inc_alone if len(members) == 1 and k > 1 else inc_vec)(i, yrs) for i in members) - rent_real, 0.0)
             g0 = gap([0], 1.0 if k == 1 else hh.survivor_spending_ratio)
             if k == 1:
                 floor_tab[t0, :] = np.sum(vs * surv[0] * g0); continue
@@ -170,6 +190,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         return amt, gain * w * tc.overseas_share
 
     for t in range(T):
+        w = float(w_path[t])
         a = alive[:, :, t]; na = a.sum(0); live = na > 0
         # 명의 재분배(사망자 몫은 생존자에게)
         def redistribute(base):
@@ -184,6 +205,12 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             if age >= m.nps_start_age: nps[i] = a[i] * pension.nps_annual_amount(m, cfg.nps) * cpi[:, t]
             if m.private_pension_start <= age < m.private_pension_start + m.private_pension_years:
                 priv[i] = a[i] * m.private_pension_annual
+        surv = np.zeros((k, n)); surv_flag = [np.zeros(n, bool) for _ in range(k)]
+        if k == 2 and cfg.nps.survivor_on:                  # (v28) 유족연금: 배우자 사망 후 max(유족연금, 본인연금 + 30%×유족연금)
+            for i in range(2):
+                S = pension.survivor_annual(hh.members[1 - i]) * cpi[:, t] * (a[i] & ~a[1 - i])
+                o2, s2 = pension.survivor_split(nps[i], S, cfg.nps.survivor_overlap)
+                nps[i] = np.where(S > 0, o2, nps[i]); surv[i] = s2; surv_flag[i] = s2 > 0
         bz = np.zeros((k, n)); work = np.zeros((k, n), bool)
         for i, m in enumerate(hh.members):
             b = biz[i]
@@ -229,6 +256,16 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             ev_cost += m_now
         mort_bal = np.maximum(mort_bal * (1 + mort_rate) - m_now, 0)
         official = (house.official * hscale + extra_house * 0.69) * hidx[:, t] * cpi[:, t]     # 새 집 공시가격 ≈ 시세의 69%
+        # (v28) 기초연금: 65세 이상, 소득인정액(소득평가액 + 재산 소득환산) 기준
+        basic_inc = np.zeros(n)
+        if cfg.nps.basic_on:
+            elig = [a[i] & (hh.members[i].age + t >= 65) for i in range(k)]
+            if any(e.any() for e in elig):
+                inc_m = (nps.sum(0) + surv.sum(0) + priv.sum(0) + rent + bz.sum(0)) / 12
+                fin_now = np.maximum(Wt + Wi + Wp + S + D - debt, 0)
+                gross = np.maximum(official - np.where(rm_on, rm_bal, 0.0) - mort_bal, 0)
+                basic_inc = pension.basic_pension_annual(inc_m, gross, fin_now, elig,
+                                                         [(nps[i] + surv[i]) / 12 for i in range(k)], surv_flag, cfg.nps, cpi[:, t]) * live
 
         # 2) 증여 전략 (10년마다)
         realized = np.zeros(n); gift_tax_now = np.zeros(n)
@@ -293,7 +330,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             i0 = ad.care_member
             ci_ben = ad.care_benefit * trig[i0, :, t]
             ci_cost = ci_prem * (a[i0] & ~incare[i0, :, t] & (hh.members[i0].age + t < ad.care_pay_until))
-        income_all = nps.sum(0) + priv.sum(0) + rent + bz.sum(0) + ann_inc + ci_ben + rm_inc
+        income_all = nps.sum(0) + surv.sum(0) + basic_inc + priv.sum(0) + rent + bz.sum(0) + ann_inc + ci_ben + rm_inc
         if retired:
             # 목표 우선순위: 기본생활(Essential) 보호선을 먼저 지키고, 남는 만큼만 여행·취미(Lifestyle) 지출
             if floor_tab is not None:
@@ -386,8 +423,12 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         rest = need - pw + taxes + hi + prop
         if retired and not debt_settled:                       # 은퇴 첫해: 남은 빚은 금융자산으로 상환
             debt_retire_real = np.where(live, debt / cpi[:, t], debt_retire_real); rest = rest + debt; debt = np.zeros(n); debt_settled = True
-        amt, gain = sell_from_taxable(np.maximum(rest, 0)); realized += gain
-        from_i = np.minimum(np.maximum(rest, 0) - amt, Wi); Wi -= from_i
+        if hh.draw_order == "isa_first":                       # (v29) ISA(비과세·분리과세) 먼저 소진
+            from_i = np.minimum(np.maximum(rest, 0), Wi); Wi -= from_i
+            amt, gain = sell_from_taxable(np.maximum(rest, 0) - from_i); realized += gain
+        else:
+            amt, gain = sell_from_taxable(np.maximum(rest, 0)); realized += gain
+            from_i = np.minimum(np.maximum(rest, 0) - amt, Wi); Wi -= from_i
         surplus = np.maximum(-rest, 0)
         repay = np.minimum(surplus, debt); debt -= repay; surplus -= repay   # 여유 저축은 빚부터 갚음
         Wt += surplus; Bt += surplus

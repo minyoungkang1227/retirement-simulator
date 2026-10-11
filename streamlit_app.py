@@ -12,7 +12,7 @@ import streamlit as st
 
 from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShock, AddOns
 from retire_sim.economy_v2 import EconomyV2
-from retire_sim import engine_tax, mortality
+from retire_sim import engine_tax, mortality, optimize
 from retire_sim.tax import TaxConfig, HouseConfig
 from retire_sim.pension import estimate_nps_monthly
 
@@ -166,6 +166,14 @@ def build(p: dict, v: dict):
         q = {s: np.minimum(a * v["q_mult"], 1) for s, a in mortality.default_qx().items()}
         for a in q.values(): a[-1] = 1
     return hh, cfg, eco, TaxConfig(**tkw), house, biz, q, AddOns(**v.get("addons", {}))
+
+
+@st.cache_data(ttl=600, max_entries=16, show_spinner=False)
+def explore(p_json: str, kind: str) -> dict:
+    """(v29) 주식 비중 경로 / 국민연금 개시 나이 / 인출 순서를 같은 시나리오 위에서 비교."""
+    p = json.loads(p_json)
+    hh, cfg, eco, tc, house, biz, q, ad = build(p, {})
+    return optimize.search(hh, cfg, kind, e=eco, tc=tc, house=house, qx_table=q, biz=biz, addons=ad)
 
 
 @st.cache_data(ttl=600, max_entries=128, show_spinner=False)
@@ -736,6 +744,23 @@ with tab2:
             st.caption("주택연금: 한국주택금융공사 2026-03 종신지급 정액형 월지급금 기준(명목 정액), 대출이자(금리+1.1%p)·보증료 0.75%가 쌓여 사망 시 집값에서 상환(집값 초과분은 청구 안 함), 재산세 25% 감면. "
                        "집 줄이기: 매도 비용 0.6%, 1주택 양도세(12억 초과분), 새 집 취득세 반영.")
 
+    st.markdown("---")
+    with st.expander("선택지 비교해 보기 (주식 비중·국민연금 개시 나이·인출 순서)"):
+        st.markdown("같은 1만 가지 미래에서 여러 선택지를 한꺼번에 비교합니다. **추천이 아니라 비교**입니다. 여러 개 중 제일 좋은 걸 고르면 우연히 좋게 나온 것이 뽑힐 수 있어서, 새 미래로 한 번 더 확인한 결과도 같이 보여드려요.")
+        kinds = {"주식 비중을 나이 들며 줄이기": "glide", "국민연금 받기 시작하는 나이": "nps", "돈 꺼내 쓰는 순서 (ISA 먼저?)": "order"}
+        pick = st.radio("무엇을 비교할까요?", list(kinds), horizontal=True, key="explore_kind")
+        if st.button("비교 계산하기", key="explore_go"):
+            with st.spinner("여러 선택지를 계산 중입니다 (약 30초)…"):
+                ss["explore"] = (kinds[pick], explore(json.dumps(p, sort_keys=True), kinds[pick]))
+        if ss.get("explore") and ss["explore"][0] == kinds[pick]:
+            out = ss["explore"][1]
+            df = pd.DataFrame([{"선택지": r["선택지"], "기본생활 지킬 확률": pct(r["기본생활 유지 확률"]),
+                                "지금 설정 대비": f"{-r['고갈확률 차이(기준 대비)'] * 100:+.1f}%p ± {r['±'] * 100:.1f}"} for r in out["rows"]])
+            st.dataframe(df, hide_index=True)
+            c = out["check"]
+            st.caption(f"가장 높게 나온 선택지: **{out['best']}**. 새 미래로 다시 확인하면 지금 설정 {pct(c['기준']['기본생활 유지 확률'])} → 이 선택지 {pct(c['추천 후보']['기본생활 유지 확률'])}. "
+                       "단, 국민연금을 늦게 받는 것은 그만큼 건강·자산 여건이 받쳐줘야 하고, 주식 비중은 마음의 편안함도 중요합니다.")
+
 with tab6:
     st.markdown("주식·예금·연금·보험을 **더했을 때** 목표 달성과 위험이 어떻게 바뀌는지 봅니다. "
                 "주식·예금·연금 일시납은 지금 금융자산에서 옮기는 것으로 계산합니다. **매수·가입 권유가 아닙니다.**")
@@ -875,8 +900,11 @@ with tab5:
 - 금리·물가·주가가 서로 연결되어 움직이는 1만 가지 미래와, 통계청 생명표 기반 부부 각자의 수명·간병을 계산합니다.
 - 목표는 **기본생활 → 여행·취미 → 남길 자산** 순으로 지킵니다. 매년 '기본생활비를 끝까지 내려면 남겨둘 돈'을 먼저 따로 두고, 그보다 많을 때만 여행·취미 예산을 씁니다. (균형형: 실제 수명 가능성과 연금 개시를 반영해 계산, 조금 더 오래 산다고 보수적으로 가정 / 안심형: 95세까지 지금 부족분이 계속된다고 가정)
 - 국민연금, 사적연금 분리과세, 금융소득종합과세, 건강보험료, 재산세·종부세, 상속·증여세를 반영합니다.
+- **유족연금**: 배우자가 먼저 돌아가시면 '유족연금(고인 연금의 60%, 가입 20년 이상 가정)'과 '내 국민연금 + 유족연금의 30%' 중 더 큰 쪽을 받는 것으로 계산합니다.
+- **기초연금(2026, 월 약 35만 원)**: 65세 이상이면 소득·재산을 합친 '소득인정액'이 기준(단독 247만 원, 부부 395.2만 원) 이하일 때 받는 것으로 계산합니다. 부부 모두 받으면 각 20% 감액, 국민연금이 많으면 일부 감액(근사). 기본생활 보호선에는 넣지 않았습니다(자격이 바뀔 수 있어 보수적으로 처리).
 - 주택연금(한국주택금융공사 2026 월지급금표)과 집 줄이기(매도 비용·양도세·취득세)를 선택지로 비교할 수 있습니다.
 - 집값도 오르내립니다. 물가 대비 연 1.25%씩 오르되 해마다 ±10% 정도 흔들리는 것으로 계산합니다(한국부동산원 2013~2026 자료 기준).
+- **오래 살 위험**: 앞으로 수명이 얼마나 늘지 모른다는 점(사망률 불확실성)과, 배우자를 먼저 보낸 뒤 생존자의 사망 위험이 잠시 높아지는 점(사별 효과)을 넣었습니다. 후자는 해외 연구 기반 가정입니다.
 - 20~40대는 소득·저축률·퇴직연금으로 은퇴 전 적립을 계산하고, 국민연금은 2026 개혁(소득대체율 43%) 기준으로 추정할 수 있습니다(근사치, 정확한 값은 국민연금공단 조회).
 
 **알아두실 점**

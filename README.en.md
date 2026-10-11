@@ -31,6 +31,8 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 4. **Stochastic economy** — OU real rate and inflation estimated from Bank of Korea (ECOS) data, with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
 5. **Statistically honest comparisons** — paired-difference confidence intervals on common random numbers decide "different / not different"
 
+> **Note (v28–v30):** The example figures below are from v27. v28 added survivor and basic pensions, which raised the probability of sustaining essential spending (about +10 to +28 pp for the reference households); v30 added longevity uncertainty, which fattens the tail risk. See the web app for current numbers; use the tables for direction and rough ordering.
+
 ## Example (couple aged 52 and 50, retiring at 60, KRW 500M, saving KRW 1.5M/month · placeholder assumptions)
 
 - Essential KRW 3M/month + lifestyle KRW 12M/year − pensions KRW 1.6M/month → **income gap KRW 2.4M/month**
