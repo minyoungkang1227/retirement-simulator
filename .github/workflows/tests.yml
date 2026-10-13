@@ -14,4 +14,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install numpy pandas pytest
+            - run: pip install -r requirements-api.txt   # API 테스트까지 실행
       - run: pytest -q
