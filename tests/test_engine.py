@@ -3,6 +3,8 @@
 """
 import os
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -436,3 +438,81 @@ def test_app_and_library_versions_match():
     expects = int(re.search(r"^APP_EXPECTS_MODEL = (\d+)", src, re.M).group(1))
     assert int(__version__) >= expects, (
         f"retire_sim v{__version__} < 앱이 요구하는 v{expects} — retire_sim/__init__.py 의 __version__ 을 올리세요")
+
+
+# ── v34 연금보험 상품: 공시이율·최저보증·사업비·해지공제 ──
+def _prod_eco(T=45, n=2000, seed=11):
+    from retire_sim.economy_v2 import generate
+    return generate(ECO, T, n, np.random.default_rng(seed))
+
+
+def test_product_minimum_guarantee_is_a_floor():
+    """최저보증이율은 공시이율의 바닥이다. 금리가 아무리 낮아도 그 아래로 안 내려간다."""
+    from retire_sim.product import AnnuityProduct, credited_rate
+
+    pr = AnnuityProduct()
+    zero = np.zeros((50, 30))                                   # 시장금리 0% 세계
+    on = credited_rate(pr, zero, guarantee=True)
+    off = credited_rate(pr, zero, guarantee=False)
+    assert np.allclose(off, 0.0)                                # 보증이 없으면 0까지 내려간다
+    assert np.allclose(on[:, 0], 0.010) and np.allclose(on[:, 7], 0.0075) and np.allclose(on[:, 12], 0.005)
+    assert (on >= off - 1e-12).all()
+    high = np.full((50, 30), 0.08)                              # 금리가 높으면 보증은 작동하지 않는다
+    assert np.allclose(credited_rate(pr, high, True), credited_rate(pr, high, False))
+
+
+def test_product_costs_and_surrender():
+    """사업비는 적립금을 줄이고, 해지공제 때문에 초기 해지는 낸 돈보다 적게 돌려받는다."""
+    from retire_sim.product import AnnuityProduct, accumulate
+
+    eco = _prod_eco(); rate, cpi = eco["rate"][:, :30], eco["cpi"]
+    pr = AnnuityProduct(monthly_premium=50, pay_years=20, start_age=65)
+    full = accumulate(pr, rate, cpi, until=20)
+    free = accumulate(replace(pr, acq_rate_early=0, acq_rate_late=0, admin_rate_pay=0, admin_rate_post=0), rate, cpi, until=20)
+    assert (free["balance"][:, 20] > full["balance"][:, 20]).all()          # 사업비가 없으면 더 쌓인다
+    assert full["cost"].sum(1).mean() > 0
+    paid = full["paid"].cumsum(1)
+    assert (full["surrender"][:, 1] < paid[:, 0]).all()                     # 1년차 해지 → 원금 손실
+    assert (full["surrender"][:, 1:] <= full["balance"][:, 1:] + 1e-9).all()
+    assert (full["paid"][:, 20:] == 0).all()                                # 납입기간 뒤엔 보험료 없음
+    assert np.allclose(full["balance"][:, 20], full["balance"][:, 29])      # 개시 뒤 적립금은 그대로 둔다
+
+
+def test_product_annuity_factor_direction():
+    """연금현가계수: 보증기간이 길수록·예정이율이 낮을수록·부부형일수록 커진다(= 연금액은 작아진다)."""
+    from retire_sim.product import AnnuityProduct, annuity_factor
+
+    qx = mortality.default_qx(); one = [Person(65, "M")]; two = [Person(65, "M"), Person(63, "F")]
+    base = AnnuityProduct(guarantee_years=0)
+    a = annuity_factor(base, one, qx, 0)
+    assert a < annuity_factor(replace(base, guarantee_years=20), one, qx, 0)
+    assert a < annuity_factor(replace(base, annuity_rate=0.01), one, qx, 0)   # 할인율이 낮으면 현가가 크다
+    assert a < annuity_factor(replace(base, joint=True), two, qx, 0)
+    assert a < annuity_factor(replace(base, annuity_mort_mult=0.5), one, qx, 0)   # 더 오래 살면 계수가 커진다
+
+
+def test_product_guarantee_value_is_a_put():
+    """최저보증은 금리가 낮게 흘러간 경로에서만 값을 한다 — 나쁜 경로의 이득이 평균보다 크다."""
+    from retire_sim.product import AnnuityProduct, guarantee_value
+
+    eco = _prod_eco(T=45, n=4000)
+    g = guarantee_value(AnnuityProduct(monthly_premium=50, pay_years=20, start_age=65),
+                        [Person(45, "M")], mortality.default_qx(), eco["rate"], eco["cpi"])
+    assert g["평균 연금액 증가"] >= 0 and g["보증 있음 연금액(중앙값)"] >= g["보증 없음 연금액(중앙값)"]
+    assert g["하위 10% 경로에서 증가"] > g["평균 연금액 증가"]            # 풋옵션의 성격
+    assert 0 <= g["보증이 작동한 경로 비율"] <= 1
+
+
+def test_product_vehicle_comparison():
+    """연금보험은 모으는 데는 불리하지만 '살아 있는 동안 바닥날 확률'은 0이다."""
+    from retire_sim.product import AnnuityProduct, compare_vehicles
+
+    eco = _prod_eco(T=55, n=3000)
+    c = compare_vehicles(AnnuityProduct(monthly_premium=50, pay_years=20, start_age=65),
+                         [Person(45, "M")], mortality.default_qx(), eco)
+    assert c["개시 나이"] == 65
+    ins, fund = c["연금개시 적립금"]["연금보험"], c["연금개시 적립금"]["펀드"]
+    assert ins[1] < fund[1]                                              # 사업비·낮은 적립이율 때문
+    out = c["살아 있는 동안 바닥날 확률"]
+    assert out["연금보험"] == 0.0 and out["펀드"] > 0 and out["예금"] > out["펀드"]
+    assert c["사업비(명목 중앙값)"] > 0 and c["낸 돈(명목 중앙값)"] > 0

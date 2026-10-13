@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 33          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 34          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -32,7 +32,7 @@ if not _model_ok:
 
 from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShock, AddOns, NPSRules
 from retire_sim.economy_v2 import EconomyV2
-from retire_sim import engine_tax, mortality, optimize, report
+from retire_sim import engine_tax, mortality, optimize, report, product
 from retire_sim.session import calc_id, save_blob, load_blob
 from retire_sim.tax import TaxConfig, HouseConfig
 from retire_sim.pension import estimate_nps_monthly
@@ -698,6 +698,35 @@ with tab1:
     st.markdown('<div class="legend">선이 0에 닿는 때가 모아둔 돈을 다 쓰는 때예요. 운이 나쁘면(주가 하락·물가 상승 등) 더 빨리, '
                 '운이 좋으면 더 늦게 닿습니다. 집은 포함하지 않았어요.</div>', unsafe_allow_html=True)
 
+@st.cache_data(ttl=600, max_entries=16, show_spinner=False)
+def product_compare(p_json: str, spec_json: str) -> dict:
+    """실제 연금보험 스펙으로 '연금보험 vs 펀드 vs 예금'을 같은 시나리오에서 비교."""
+    from retire_sim.economy_v2 import generate
+    pp, sp = json.loads(p_json), json.loads(spec_json)
+    eco_cfg = EconomyV2.enhanced()
+    now_rate = eco_cfg.q0 + eco_cfg.pi0                       # 모형의 현재 명목금리
+    prod = product.AnnuityProduct(
+        monthly_premium=sp["premium"], pay_years=sp["years"], start_age=sp["start_age"],
+        credit_spread=sp["credit"] - now_rate,                # 공시이율 입력값을 스프레드로 환산
+        guarantee=((5, sp["g5"]), (10, sp["g10"]), (10 ** 9, sp["g10p"])),
+        acq_rate_early=sp["acq"], acq_rate_late=sp["acq"] / 2, admin_rate_pay=sp["admin"],
+        guarantee_years=sp["gt"], joint=sp["joint"], annuity_rate=sp["ann_rate"])
+    me = [Person(age=pp["age"], sex=pp["sex"])]
+    if sp["joint"] and pp["spouse"]:
+        me.append(Person(age=pp["s_age"], sex=pp["s_sex"]))
+    T = max(cfg_max_age() - me[0].age, sp["start_age"] - me[0].age + 35)
+    eco = generate(eco_cfg, T, 5000, np.random.default_rng(42))
+    qx = mortality.default_qx()
+    out = product.compare_vehicles(prod, me, qx, eco, stock_weight=PROFILES[pp["profile"]])
+    out["보증가치"] = product.guarantee_value(prod, me, qx, eco["rate"], eco["cpi"])
+    out["상한"] = T - (out["개시 나이"] - me[0].age)
+    return out
+
+
+def cfg_max_age() -> int:
+    return 100
+
+
 def make_report(p, base, client, advisor, cid) -> str:
     """현재 결과를 상담 리포트(HTML)로 묶는다. 화면에 보여주는 숫자와 같은 값을 쓴다."""
     s_ = base["s"]; ok = s_["기본생활 유지 확률"]; n_ok = int(round(ok * 10))
@@ -998,6 +1027,60 @@ with tab6:
                     st.caption(f"{k}: 예상 연금액 연 약 {r['annuity_pay']:,.0f}만 원 (처음 받는 금액, 사업비 5% 가정)")
                 if k.startswith("간병보험") and r["care_premium"] > 0:
                     st.caption(f"{k}: 모델로 산출한 보험료 연 약 {r['care_premium']:,.0f}만 원 (80세까지 납입, 부가보험료 30% 가정, 지급 조건: {c_trig})")
+
+    st.markdown("---")
+    with st.expander("실제 연금보험 상품으로 비교하기 (월납 적립형)"):
+        st.markdown("상품설명서의 숫자를 넣으면 **같은 돈을 연금보험·펀드·예금에 넣었을 때**를 같은 시나리오에서 비교합니다.")
+        c1, c2, c3 = st.columns(3)
+        pr_prem = c1.number_input("월 보험료 (만 원)", 5, 500, 50, step=5, key="pr_prem")
+        pr_years = c2.number_input("납입기간 (년)", 5, 40, 20, step=1, key="pr_years")
+        pr_start = c3.number_input("연금개시 나이", max(p["age"] + 1, 50), 85, max(p["age"] + 1, 65), key="pr_start")
+        c1, c2, c3 = st.columns(3)
+        pr_credit = c1.number_input("공시이율 (%)", 0.0, 10.0, 2.3, step=0.1, key="pr_credit",
+                                    help="상품설명서의 현재 공시이율. 2025.12 기준 생보사 일반연금 평균 2.31%")
+        pr_acq = c2.number_input("계약체결비용 (보험료의 %)", 0.0, 20.0, 6.2, step=0.1, key="pr_acq",
+                                 help="보험연구원 조사 기준 월납 5.6~6.9%")
+        pr_admin = c3.number_input("계약관리비용 (보험료의 %)", 0.0, 20.0, 5.5, step=0.1, key="pr_admin",
+                                   help="납입기간 중. 보험연구원 조사 기준 4.2~9%")
+        c1, c2, c3, c4 = st.columns(4)
+        pr_g5 = c1.number_input("최저보증 5년 미만 (%)", 0.0, 5.0, 1.0, step=0.05, key="pr_g5")
+        pr_g10 = c2.number_input("5~10년 (%)", 0.0, 5.0, 0.75, step=0.05, key="pr_g10")
+        pr_g10p = c3.number_input("10년 이상 (%)", 0.0, 5.0, 0.5, step=0.05, key="pr_g10p")
+        pr_gt = c4.number_input("보증지급 기간 (년)", 0, 30, 10, step=5, key="pr_gt")
+        pr_joint = st.checkbox("부부형 (두 사람 모두 살아있는 동안 지급)", value=False, key="pr_joint",
+                               disabled=not p["spouse"])
+        if st.button("상품 비교하기", type="primary", key="pr_go", width="stretch"):
+            spec = dict(premium=float(pr_prem), years=int(pr_years), start_age=int(pr_start),
+                        credit=pr_credit / 100, acq=pr_acq / 100, admin=pr_admin / 100,
+                        g5=pr_g5 / 100, g10=pr_g10 / 100, g10p=pr_g10p / 100,
+                        gt=int(pr_gt), joint=bool(pr_joint and p["spouse"]), ann_rate=0.02)
+            with st.spinner("상품을 비교하는 중"):
+                ss["pr_out"] = product_compare(json.dumps(p, sort_keys=True), json.dumps(spec, sort_keys=True))
+        if ss.get("pr_out"):
+            o = ss["pr_out"]; cap = o["상한"]
+            m = lambda t: f"{t[1]:,.0f}"
+            band = lambda t: f"{t[0]:,.0f} ~ {t[2]:,.0f}"
+            st.markdown(f"**{o['개시 나이']}세에 모인 돈** (오늘 돈 아님, 그때 금액)")
+            st.dataframe(pd.DataFrame([
+                {"넣는 곳": k, "중앙값 (만 원)": m(v), "하위 10% ~ 상위 10%": band(v)}
+                for k, v in o["연금개시 적립금"].items()]), hide_index=True)
+            yr = lambda t: ("끝까지" if t[1] >= cap else f"{t[1]:.0f}년")
+            out = o["살아 있는 동안 바닥날 확률"]
+            st.markdown(f"**연금보험은 첫해 {m(o['연금보험 첫해 연금액'])}만 원**을 주고 죽을 때까지 지급합니다. "
+                        f"같은 금액을 펀드·예금에서 꺼내 쓰면 각각 {yr(o['같은 금액을 꺼낼 때 버티는 햇수']['펀드'])}, "
+                        f"{yr(o['같은 금액을 꺼낼 때 버티는 햇수']['예금'])} 버팁니다.")
+            st.dataframe(pd.DataFrame([{"넣는 곳": k, "살아 있는 동안 돈이 바닥날 확률": f"{v * 100:.0f}%"}
+                                       for k, v in out.items()]), hide_index=True)
+            g = o["보증가치"]
+            st.markdown(f'<div class="tip"><b>이 비교에서 읽을 것</b><br>'
+                        f'연금보험은 <b>모으는 데는 가장 불리</b>합니다. 사업비를 떼고, 공시이율이 시장 수익률보다 낮기 때문입니다. '
+                        f'대신 <b>오래 살아도 돈이 끊기지 않습니다</b> — 펀드는 {out["펀드"] * 100:.0f}%, 예금은 {out["예금"] * 100:.0f}%의 경우 '
+                        f'살아 있는 동안 바닥납니다.<br>'
+                        f'<b>최저보증이율</b>은 금리가 낮게 흘러간 경우에만 값을 합니다. 평균으로는 연 {g["평균 연금액 증가"]:.0f}만 원이지만 '
+                        f'나쁜 쪽 10% 경우에는 연 {g["하위 10% 경로에서 증가"]:.0f}만 원입니다.</div>',
+                        unsafe_allow_html=True)
+            st.caption("특정 상품의 가입 권유가 아닙니다. 상품설명서의 숫자를 직접 넣어 비교해 보는 도구입니다. "
+                       "실제 상품에는 사망보장·중도인출·연금전환 옵션 등 여기 반영되지 않은 조건이 있습니다.")
 
 with tab3:
     st.markdown("정해진 위기가 온다고 가정했을 때 목표가 얼마나 흔들리는지 봅니다.")
