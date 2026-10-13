@@ -43,48 +43,47 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 
 > **v31 (2026-10-13):** Instead of adding to the model, this release **removed complexity that did not change the answer and proved the arithmetic**. In a deterministic limit the engine now matches the closed form to a relative error of 1e-7 (`scripts/benchmark_analytic.py`); a component ablation (`scripts/ablate.py`) found one of the two economy generators made no difference beyond Monte Carlo noise, so it was deleted. Model code 1,874 → 1,643 lines (−12%), 14 → 11 modules. Error budget (`scripts/error_budget.py`): Monte Carlo noise ±0.7pp vs 14pp from a 1σ move in the equity risk premium — **read the result as a range, not a single number.**
 
-> **Note (v28–v30):** The example figures below are from v27. v28 added survivor and basic pensions, which raised the probability of sustaining essential spending (about +10 to +28 pp for the reference households); v30 added longevity uncertainty, which fattens the tail risk. See the web app for current numbers; use the tables for direction and rough ordering.
+## Example (model v33 · 10,000 paths · reproduce with `scripts/readme_numbers.py`)
 
-## Example (couple aged 52 and 50, retiring at 60, KRW 500M, saving KRW 1.5M/month · placeholder assumptions)
+**Couple aged 52 and 50, retiring at 60, KRW 500M financial assets, saving KRW 1.5M/month** (essential KRW 3M/month + lifestyle KRW 12M/year, pensions KRW 1.6M/month, KRW 100M legacy)
 
-- Essential KRW 3M/month + lifestyle KRW 12M/year − pensions KRW 1.6M/month → **income gap KRW 2.4M/month**
-- Goal success: essential **48%**, lifestyle funding **60%**, KRW 100M legacy **37%**
+- Goal success: essential **56%**, lifestyle funding **66%**, KRW 100M legacy **42%**
 
 | What if | Change in essential success (95% CI) |
 |---|---|
-| Retire 2 years later | **+11.8pp** (±0.6) |
-| Spend 10% less | +9.2pp (±0.6) |
-| Growth profile | +6.4pp (±0.5) |
-| Save KRW 0.5M more per month | +4.8pp (±0.4) |
-| Conservative profile | −13.9pp (±0.7) |
+| Retire 2 years later | **+10.2pp** (±0.6) |
+| Spend 10% less | +8.0pp (±0.5) |
+| Growth profile (70% equity) | +4.4pp (±0.5) |
+| Save KRW 0.5M more per month | +4.1pp (±0.4) |
+| Conservative profile (30% equity) | −12.3pp (±0.7) |
 
 | Crisis | Change in essential success |
 |---|---|
-| Equities −40% in the first year of retirement | −15.7pp |
-| Equities −40% ten years into retirement | −10.4pp |
-| Three years of 6% inflation | −5.6pp |
+| Equities −40% in the first year of retirement | −15.0pp |
+| Equities −40% ten years into retirement | −10.0pp |
+| Three years of 6% inflation | −5.2pp |
 | Longer life (mortality −20%) | −3.6pp |
-| Long-term care incidence doubled | −1.0pp |
+| Long-term care incidence doubled | −3.0pp |
 
 - For this household **retirement timing is the strongest lever**, and the same crash hurts most right after retirement (sequence-of-returns risk).
-- Splitting spending into essential + flexible lowers the depletion probability versus fixed spending of the same total (53.9% → 47.6%).
-- The largest uncertainty is the **equity risk premium**: within its estimated range (5.2% ± 1.4pp) essential success moves between 36% and 59%, which is why differences between choices matter more than levels.
+- The largest uncertainty is the **equity risk premium**: within its estimated range (5.2% ± 1.4pp) essential success moves between **45% and 66%**, while Monte Carlo noise is ±0.7pp — about one twentieth of it. That is why differences between choices matter more than levels.
 
-**Young savers (dual-income couple aged 30 and 29, KRW 90M gross income, 15% saving rate, workplace pension, National Pension estimated automatically at KRW 2.43M/month)**
+**Young savers (dual-income couple aged 30 and 29, KRW 90M gross income, 15% saving rate, workplace pension, National Pension estimated automatically)**
 
-- Essential success **82%**, lifestyle funding **91%**
-- To keep essentials 9 times out of 10: save **23%** of gross income (about KRW 1.71M/month in year one)
-- What if: save KRW 0.5M more per month +8.1pp, retire 2 years later +6.7pp, spend 10% less +6.1pp · without the workplace pension −23.0pp
-- Big expenses: college for two children from age 48 (KRW 10M × 8 years) −4.7pp · buying a KRW 600M home at 35 (60% loan, 30 years, KRW 200M deposit returned) −10.7pp (−6.7pp with a 25-year loan, +8.1pp if it also saves KRW 0.8M/month in rent) · both plus a KRW 100M wedding gift at 58 −25.8pp
+- Essential success **83%**, lifestyle funding **92%**, KRW 100M legacy **75%**
+- What if: save KRW 0.5M more per month +6.6pp · retire 2 years later +5.8pp · spend 10% less +5.1pp
+- **Without the workplace pension −24.2pp** — at this age nothing else comes close.
 
-**House-rich, cash-poor household (couple aged 65 and 63, KRW 300M financial assets, home worth KRW 700M)**
+**House-rich, cash-poor household (couple aged 65 and 63, KRW 300M financial assets, home worth KRW 700M, essential KRW 2.5M/month + lifestyle KRW 12M/year, KRW 300M legacy)**
 
 | Housing strategy | Essential success | Lifestyle funding | KRW 300M legacy | Note |
 |---|---|---|---|---|
-| Keep as is | 13% | 33% | 100% | — |
-| Reverse mortgage now (63) | 70% (+56.5pp) | 94% | 43% | KRW 1.65M/month |
-| Reverse mortgage at 70 | 77% (+63.7pp) | 91% | 47% | KRW 2.15M/month (today's value) |
-| Downsize to half price at 70 | 71% (+57.9pp) | 88% | 99% | KRW 340M released |
+| Keep as is | 23% | 32% | 95% | — |
+| Reverse mortgage now (63) | 83% (+59.7pp) | 97% | 70% | KRW 1.65M/month |
+| Reverse mortgage at 70 | 88% (+65.1pp) | 89% | 74% | KRW 2.25M/month (today's value) |
+| Downsize to half price at 70 | 79% (+56.3pp) | 87% | 86% | KRW 350M released |
+
+- When the home is most of the balance sheet, **whether to use it is the biggest single choice**. A reverse mortgage buys retirement security; downsizing protects the bequest as well.
 
 ![goals](docs/images/goals_whatif.png)
 ![tax strategies](docs/images/tax_strategies.png)
