@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 35          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 36          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -422,6 +422,34 @@ if ss.step < len(STEPS) and not ss.get("done"):
                                          help="부부 중 나이 적은 사람 기준, 55세 이상·공시가격 12억 이하 1주택")
                 ds_age = c2.number_input("집 줄이기 나이 (0 = 안 함)", 0, 90, p.get("ds_age", 0), help="본인 나이 기준, 팔고 작은 집으로 이사")
                 ds_ratio = c3.slider("새 집 가격 (기존 대비 %)", 20, 90, p.get("ds_ratio", 50), step=10)
+            with st.expander("부모 부양 (더블케어)", expanded=bool(p.get("parents"))):
+                st.caption("부모님이 나중에 간병이 필요해질 가능성을 확률로 계산합니다. 자녀 교육비와 겹치는 시기가 가장 빠듯합니다. "
+                           "분담 비율은 형제가 똑같이 나눠 내면 1/형제 수입니다. 부모님 생활비는 넣지 않고 간병비만 봅니다.")
+                old_par = (p.get("parents") or []) + [{}] * 4
+                new_par = []
+                for j in range(4):
+                    d0 = old_par[j] or {}
+                    c1, c2, c3 = st.columns([1, 1, 1.4])
+                    who = c1.selectbox(f"{j + 1}", ["없음", "아버지", "어머니", "장인", "장모"],
+                                       index=(["없음", "아버지", "어머니", "장인", "장모"].index(d0["who"])
+                                              if d0.get("who") in ("아버지", "어머니", "장인", "장모") else 0),
+                                       key=f"par_who{j}", label_visibility="collapsed" if j else "visible")
+                    p_age = c2.number_input("나이", 40, 110, int(d0.get("age", 78)), key=f"par_age{j}",
+                                            label_visibility="collapsed" if j else "visible")
+                    p_sh = c3.slider("내가 대는 몫 (%)", 0, 100, int(float(d0.get("share", 0.5)) * 100), step=10,
+                                     key=f"par_sh{j}", label_visibility="collapsed" if j else "visible")
+                    if who != "없음" and p_sh > 0:
+                        new_par.append(dict(who=who, age=int(p_age), sex="M" if who in ("아버지", "장인") else "F",
+                                            share=p_sh / 100))
+            with st.expander("계산 가정 (바꾸지 않아도 됩니다)"):
+                care_growth = st.slider("간병비가 물가보다 더 오르는 정도 (%p/년)", -1.0, 3.0,
+                                        float(p.get("care_growth", 1.0)), step=0.5,
+                                        help="간병은 사람이 하는 일이라 비용이 임금을 따라갑니다. "
+                                             "장기요양 수가는 2022~2026년 평균 4.05%, 같은 기간 물가는 3.02%로 연 1.0%p 빨랐습니다.")
+                behaviour = st.checkbox("사람답게 행동한다고 가정 (폭락장에 주식을 줄이고, 지출을 바로 못 줄임)",
+                                        value=bool(p.get("behaviour")),
+                                        help="켜면 주가가 25% 빠진 다음 해에 주식을 절반으로 줄이고 천천히 돌아오며, "
+                                             "여행·취미 지출을 한 해에 30%까지만 줄입니다. 끄면 규칙대로 움직이는 가구가 됩니다.")
             with st.expander("큰 지출 계획 (자녀 교육비·결혼 자금·주택 구입 등)", expanded=bool(p.get("events"))):
                 st.caption("나이는 본인 기준, 금액은 오늘 가치(만 원). 주택 구입은 집값 전체, 나머지는 1년 금액 × 기간(년).")
                 kinds = ["없음", "자녀 교육비", "결혼·독립 지원", "주택 구입", "기타"]
@@ -475,7 +503,8 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 paths = st.select_slider("시나리오 수", [2000, 5000, 10000], value=p["paths"])
             back, nxt = nav(i, "s7")
             if nxt or back:
-                p.update(region=region, h_official=h_off, h_market=h_mkt, h_n=int(h_n), h_joint=bool(h_joint), h_years=int(h_years),
+                p.update(parents=new_par, care_growth=float(care_growth), behaviour=bool(behaviour),
+                         region=region, h_official=h_off, h_market=h_mkt, h_n=int(h_n), h_joint=bool(h_joint), h_years=int(h_years),
                          h_hi=float(h_hi), rent=int(rent), rm_age=int(rm_age), ds_age=int(ds_age), ds_ratio=int(ds_ratio), events=new_ev, ev_ltv=int(ltv), ev_loan_years=int(lyr), ev_jeonse=float(jb), ev_rent=int(er), biz=int(biz), biz_until=int(biz_until), biz_work=bool(biz_work),
                          overseas=int(overseas), own_equal=bool(own_equal), survivor=int(survivor), floor=floor,
                          enhanced=bool(enhanced), paths=int(paths)); go(1 if nxt else -1)

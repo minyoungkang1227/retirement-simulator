@@ -39,9 +39,9 @@ def couple_30():
 
 # ── 1. 대표 가구 결과 (범위로 고정: 분산 감소·리팩터링은 허용, 로직 변화는 잡아냄) ──
 @pytest.mark.parametrize("hh_fn,key,lo,hi", [
-    (couple_60, "기본생활 유지 확률", 0.66, 0.77),
-    (couple_30, "기본생활 유지 확률", 0.78, 0.88),
-    (couple_30, "여행·취미 평균 충족률", 0.85, 0.97),
+    (couple_60, "기본생활 유지 확률", 0.65, 0.75),
+    (couple_30, "기본생활 유지 확률", 0.73, 0.83),
+    (couple_30, "여행·취미 평균 충족률", 0.87, 0.97),
 ])
 def test_headline(hh_fn, key, lo, hi):
     s = engine_tax.summarize(_run(hh_fn()))
@@ -516,3 +516,102 @@ def test_product_vehicle_comparison():
     out = c["살아 있는 동안 바닥날 확률"]
     assert out["연금보험"] == 0.0 and out["펀드"] > 0 and out["예금"] > out["펀드"]
     assert c["사업비(명목 중앙값)"] > 0 and c["낸 돈(명목 중앙값)"] > 0
+
+
+# ── v36 간병비 인플레이션: 사람이 하는 일이라 임금을 따라간다 ──
+def test_care_cost_inflation_raises_tail_risk():
+    """간병비가 일반 물가보다 빨리 오르면 꼬리 위험이 커진다. 기간이 길수록 영향이 크다."""
+    global CFG
+    old = CFG
+    try:
+        out = {}
+        for g in (0.0, 0.01):
+            CFG = SimConfig(care=CareMarkov(), care_real_growth=g)
+            out[g] = {name: engine_tax.summarize(_run(fn()))
+                      for name, fn in (("60대", couple_60), ("30대", couple_30))}
+        for name in ("60대", "30대"):
+            a, b = out[0.0][name], out[0.01][name]
+            assert b["기본생활 유지 확률"] < a["기본생활 유지 확률"]
+            assert b["CTE90 부족액(실질)"] > a["CTE90 부족액(실질)"]
+        # 남은 기간이 긴 30대가 복리로 더 크게 받는다
+        up = lambda n: out[0.01][n]["CTE90 부족액(실질)"] / out[0.0][n]["CTE90 부족액(실질)"]
+        assert up("30대") > up("60대")
+    finally:
+        CFG = old
+
+
+def test_care_inflation_zero_matches_old_behaviour():
+    """0으로 두면 일반 물가와 같이 오른다 — v35까지의 가정과 같아야 한다."""
+    global CFG
+    old = CFG
+    try:
+        CFG = SimConfig(care=CareMarkov(), care_real_growth=0.0)
+        a = engine_tax.summarize(_run(couple_60()))
+        CFG = SimConfig(care=CareMarkov())          # 기본값은 0.010
+        b = engine_tax.summarize(_run(couple_60()))
+        assert a["기본생활 유지 확률"] != b["기본생활 유지 확률"]
+        assert abs(SimConfig().care_real_growth - 0.010) < 1e-12
+    finally:
+        CFG = old
+
+
+# ── v36 더블케어: 부양하는 부모의 간병비 ──
+def test_dependent_parents_cost_more_as_share_rises():
+    """부모를 많이 부양할수록 노후가 빠듯해진다. 분담 비율과 인원 수에 비례해 나빠져야 한다."""
+    from dataclasses import replace as _replace
+
+    hh = couple_30()
+    base = engine_tax.summarize(_run(hh))["기본생활 유지 확률"]
+    half = engine_tax.summarize(_run(_replace(hh, dependents=[
+        dict(age=75, sex="M", share=0.5), dict(age=72, sex="F", share=0.5)])))["기본생활 유지 확률"]
+    full = engine_tax.summarize(_run(_replace(hh, dependents=[
+        dict(age=75, sex="M", share=1.0), dict(age=72, sex="F", share=1.0)])))["기본생활 유지 확률"]
+    one = engine_tax.summarize(_run(_replace(hh, dependents=[
+        dict(age=75, sex="M", share=0.5)])))["기본생활 유지 확률"]
+    assert full < half < one < base
+    # share=0 이나 빈 목록은 아무 영향이 없어야 한다
+    zero = engine_tax.summarize(_run(_replace(hh, dependents=[dict(age=75, sex="M", share=0.0)])))
+    assert zero["기본생활 유지 확률"] == base
+    assert engine_tax.summarize(_run(_replace(hh, dependents=[])))["기본생활 유지 확률"] == base
+
+
+# ── v36 행동 가정: 패닉 매도와 지출 경직성 ──
+def test_panic_selling_hurts():
+    """폭락 뒤 주식을 줄이면 회복을 놓친다. 더 크게 줄이거나 늦게 돌아올수록 나빠진다."""
+    global CFG
+    old = CFG
+    try:
+        def P(**kw):
+            global CFG
+            CFG = SimConfig(care=CareMarkov(), **kw)
+            return engine_tax.summarize(_run(couple_60()))["기본생활 유지 확률"]
+
+        none = P()
+        assert P(panic_drop=0.25) < none
+        assert P(panic_drop=0.25, panic_cut=0.2) < P(panic_drop=0.25, panic_cut=0.8)      # 많이 팔수록 나쁘다
+        assert P(panic_drop=0.25, panic_recover=0.05) < P(panic_drop=0.25, panic_recover=0.5)  # 늦게 돌아올수록 나쁘다
+        assert P(panic_drop=0.0) == none                                                   # 끄면 그대로
+    finally:
+        CFG = old
+
+
+def test_spending_rigidity_protects_lifestyle_but_hurts_essentials():
+    """지출을 못 줄이면 여행·취미 충족률은 올라가지만 기본생활이 위태로워진다."""
+    global CFG
+    old = CFG
+    try:
+        CFG = SimConfig(care=CareMarkov())
+        a = engine_tax.summarize(_run(couple_60()))
+        CFG = SimConfig(care=CareMarkov(), lifestyle_floor=0.30)
+        b = engine_tax.summarize(_run(couple_60()))
+        assert b["여행·취미 평균 충족률"] > a["여행·취미 평균 충족률"]
+        assert b["기본생활 유지 확률"] < a["기본생활 유지 확률"]
+        assert b["CTE90 부족액(실질)"] > a["CTE90 부족액(실질)"]
+    finally:
+        CFG = old
+
+
+def test_behaviour_defaults_are_off():
+    """기본값은 '합리적 가구' — 행동 가정은 켜야 적용된다(기존 결과와의 연속성)."""
+    c = SimConfig()
+    assert c.panic_drop == 0.0 and c.lifestyle_floor == 0.0

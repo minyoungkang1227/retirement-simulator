@@ -39,6 +39,8 @@ DEFAULTS = dict(
     biz=0, biz_until=65, biz_work=False, rm_age=0, ds_age=0, ds_ratio=50, events=[],
     ev_ltv=60, ev_loan_years=30, ev_jeonse=0.0, ev_rent=0,
     overseas=20, own_equal=True, survivor=70, enhanced=True, paths=10000,
+    # (v36) 간병비 초과상승률(%p/년), 부양하는 부모, 행동 가정
+    care_growth=1.0, parents=[], behaviour=False,
 )
 
 
@@ -91,7 +93,8 @@ CHOICES = {"sex": ("M", "F"), "s_sex": ("M", "F"), "profile": tuple(PROFILES),
            "region": ("대도시", "중소도시", "농어촌"), "save_mode": ("월 금액", "소득의 %"),
            "floor": ("계리적", "보수적")}
 RANGES = {"age": (18, 100), "s_age": (18, 100), "retire_age": (30, 100), "nps_start": (55, 75),
-          "paths": (100, 200_000), "survivor": (0, 100), "overseas": (0, 100), "children": (0, 10)}
+          "paths": (100, 200_000), "survivor": (0, 100), "overseas": (0, 100), "children": (0, 10),
+          "care_growth": (-2.0, 5.0)}
 NON_NEGATIVE = ("deposit", "invest", "ret_acct", "other", "saving", "salary", "s_salary",
                 "essential", "lifestyle", "nps", "s_nps", "priv", "legacy",
                 "h_official", "h_market", "h_n", "rent", "biz")
@@ -118,8 +121,14 @@ def validate(p: dict) -> dict:
                     bad.append(f"{k}={p[k]} — 0 이상이어야 합니다")
             except (TypeError, ValueError):
                 bad.append(f"{k}={p[k]!r} — 숫자여야 합니다")
-    if not isinstance(p.get("events", []), list):
-        bad.append("events — 목록이어야 합니다")
+    for key in ("events", "parents"):
+        if not isinstance(p.get(key, []), list):
+            bad.append(f"{key} — 목록이어야 합니다")
+    for d in (p.get("parents") or []):
+        if not isinstance(d, dict) or not (18 <= float(d.get("age", -1)) <= 110):
+            bad.append(f"parents — 나이가 18~110이어야 합니다: {d!r}")
+        elif d.get("sex", "F") not in ("M", "F"):
+            bad.append(f"parents — sex 는 M 또는 F 여야 합니다: {d!r}")
     if bad:
         raise ValueError("; ".join(bad))
     return p
@@ -177,14 +186,18 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
         retire_age=retire if p["age"] < retire else None,
         annual_saving=(v.get("saving_monthly", p["saving"]) + v.get("saving_delta", 0)) * 12,
         survivor_spending_ratio=p["survivor"] / 100,
+        dependents=[dict(age=int(d["age"]), sex=d.get("sex", "F"), share=float(d.get("share", 1.0)) )
+                    for d in (p.get("parents") or [])],
         floor_method="fixed95" if p.get("floor") == "보수적" else "actuarial")
 
     care = CareMarkov() if p["enhanced"] else CareShock()
     if v.get("care_mult"):
         care = (CareMarkov(incidence=tuple((a, x * v["care_mult"]) for a, x in CareMarkov().incidence))
                 if p["enhanced"] else CareShock(lam=0.03 * v["care_mult"]))
+    beh = dict(panic_drop=0.25, lifestyle_floor=0.30) if (v.get("behaviour", p.get("behaviour"))) else {}
     cfg = SimConfig(n_paths=v.get("paths", p["paths"]), seed=42, care=care,
-                    nps=NPSRules(basic_region=p.get("region", "대도시")))
+                    nps=NPSRules(basic_region=p.get("region", "대도시")),
+                    care_real_growth=v.get("care_growth", p.get("care_growth", 1.0)) / 100, **beh)
 
     ekw = dict(v.get("eco", {}))
     for key in ("stock_shocks", "infl_shocks"):

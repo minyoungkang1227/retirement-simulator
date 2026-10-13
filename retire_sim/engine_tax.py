@@ -48,6 +48,23 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     gifts_hist = []                                   # (t, 명목 증여액, 증여세)
     gift_val = np.zeros(n)                          # 증여한 돈의 현재 가치(자녀도 같은 수익률로 운용 가정, 명목)
     care_left = np.zeros((k, n), int); care_cost = np.zeros((k, n))
+    # (v36) 더블케어: 부양하는 부모의 간병비. 수명·간병은 가구원과 같은 방식으로 돌리고
+    #       생활비는 포함하지 않는다(따로 사시므로). 비용은 share 만큼만 이 가구가 댄다.
+    dep_care = np.zeros((n, T + 1))
+    for d in (hh.dependents or []):
+        d_age, d_sex = int(d["age"]), d.get("sex", "F")
+        share = float(d.get("share", 1.0))
+        if share <= 0:
+            continue
+        d_alive, d_in, d_sev = mortality.simulate_life(
+            qx_table[d_sex], d_age, T, n, rng, cfg.care if markov else CareMarkov(),
+            return_severe=True, improve=cfg.mortality_improvement)
+        lvl = cfg.care.cost_median * np.exp(cfg.care.cost_log_sigma * rng.standard_normal(n))
+        slv = getattr(cfg.care, "cost_severe_median", cfg.care.cost_median) * np.exp(
+            getattr(cfg.care, "cost_severe_sigma", cfg.care.cost_log_sigma) * rng.standard_normal(n))
+        dep_care += share * ((d_in & ~d_sev) * lvl[:, None] + d_sev * slv[:, None])
+    # (v36) 간병비 전용 물가: 일반 물가 × (1 + 초과상승률)^t
+    care_cpi = cpi * (1 + getattr(cfg, "care_real_growth", 0.0)) ** np.arange(T + 1)[None, :]
     dep_at = np.full(n, -1)
     tax_y = np.zeros((n, T)); hi_y = np.zeros((n, T)); prop_y = np.zeros((n, T))
     estate_real = np.full(n, np.nan); etax_real = np.full(n, np.nan); transfer_real = np.full(n, np.nan)
@@ -103,6 +120,10 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         pv_prem = (pay * v).sum(1).mean()
         ci_prem = (1 + ad.care_loading) * pv_ben / max(pv_prem, 1e-9)
     stock_ret = np.full((n, T), np.nan); port_ret = np.full((n, T), np.nan)
+    # (v36) 패닉 매도: 경로마다 '지금 실제로 들고 있는 주식 비중'을 따로 들고 간다
+    panic_on = cfg.panic_drop > 0
+    w_now = np.full(n, float(w_path[0]))
+    prev_life = None                                           # 작년에 쓴 여행·취미 예산(실질) — 지출 경직성용
 
     # ── v16 기본생활비 보호선: 생존확률 가중 현가 (계리적) ──
     # 상태 0 = 부부 모두 생존(1인 가구는 본인 생존), 1 = 본인만, 2 = 배우자만.
@@ -191,7 +212,15 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         return amt, gain * w * tc.overseas_share
 
     for t in range(T):
-        w = float(w_path[t])
+        w_target = float(w_path[t])
+        if panic_on:
+            if t > 0:                                           # 작년 주가가 많이 빠졌으면 줄이고, 아니면 천천히 복귀
+                hit = eco["stock"][:, t - 1] <= -cfg.panic_drop
+                w_now = np.where(hit, w_target * cfg.panic_cut,
+                                 w_now + (w_target - w_now) * cfg.panic_recover)
+            w = np.clip(w_now, 0.0, 1.0)
+        else:
+            w = w_target
         a = alive[:, :, t]; na = a.sum(0); live = na > 0
         # 명의 재분배(사망자 몫은 생존자에게)
         def redistribute(base):
@@ -300,16 +329,17 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         retired = True if hh.retire_age is None else (hh.members[0].age + t >= hh.retire_age)
         ess = ess_base * ratio * cpi[:, t] * live
         life_want = hh.lifestyle * ratio * cpi[:, t] * live
-        care = np.zeros(n)
+        care = dep_care[:, t] * care_cpi[:, t] * live          # (v36) 부모 간병 분담분
         if markov:
-            care = ((incare[:, :, t] & ~severe[:, :, t]) * care_level + severe[:, :, t] * sev_level).sum(0) * cpi[:, t]
+            care = care + ((incare[:, :, t] & ~severe[:, :, t]) * care_level
+                           + severe[:, :, t] * sev_level).sum(0) * care_cpi[:, t]
         elif cfg.care.enabled:
             c = cfg.care
             for i, m in enumerate(hh.members):
                 new = a[i] & (care_left[i] == 0) & (m.age + t >= c.start_age) & (rng.random(n) < c.lam)
                 care_cost[i] = np.where(new, c.cost_median * np.exp(c.cost_log_sigma * rng.standard_normal(n)), care_cost[i])
                 care_left[i] = np.where(new, c.duration_years, care_left[i])
-                act = a[i] & (care_left[i] > 0); care += act * care_cost[i] * cpi[:, t]
+                act = a[i] & (care_left[i] > 0); care += act * care_cost[i] * care_cpi[:, t]
                 care_left[i] = np.where(act, care_left[i] - 1, 0)
 
         # 6) 연금계좌 인출
@@ -350,6 +380,12 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 ann = (1 - 1.02 ** -yrs_left) / 0.02            # (v12) 실질 2%로 할인한 확정 연금현가계수
                 floor = np.maximum(ess - income_all, 0) * ann
             life_paid = np.clip(Wt + Wi + Wp + S + D - floor, 0, life_want)
+            if cfg.lifestyle_floor > 0 and prev_life is not None:
+                # (v36) 지출 경직성: 형편이 나빠져도 한 해에 이 비율 넘게는 못 줄인다.
+                #       줄이지 못한 만큼은 그대로 쓰게 되므로 기본생활 쪽 여유가 더 빨리 깎인다.
+                keep = prev_life * cpi[:, t] / np.maximum(cpi[:, t - 1] if t else cpi[:, 0], 1e-9)
+                life_paid = np.minimum(np.maximum(life_paid, keep * (1 - cfg.lifestyle_floor)), life_want)
+            prev_life = life_paid
             ess_eff = np.maximum(ess - rent_save * cpi[:, t] * live, 0)            # 자가 전환: 은퇴 후 주거비(월세 등) 절감
             spend = ess_eff + life_paid
             if hh.lifestyle > 0:

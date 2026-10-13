@@ -45,6 +45,10 @@ class Household:
     #   "loan_years": 30, "deposit_back": 30000, "rent_saving": 1200}]                      (전세 보증금 회수, 절감 주거비 연)
     # 본인 나이 기준, 금액은 만원·오늘 가치
     events: list = field(default_factory=list)
+    # (v36) 더블케어: 부양하는 부모. [{"age": 78, "sex": "F", "share": 0.5}, ...]
+    #   share 는 그 부모의 간병비 중 이 가구가 대는 몫(형제가 나눠 내면 1/형제수).
+    #   부모의 수명·간병은 가구원과 같은 생명표·마르코프로 돌리되, 생활비는 포함하지 않는다.
+    dependents: list = field(default_factory=list)
     floor_method: str = "actuarial"       # "actuarial"(v16): 생존확률 가중 현가 / "fixed95"(v12): 95세까지 확정
     floor_mort_mult: float = 0.8          # 보호선 산출용 사망률 배수 (<1이면 오래 사는 쪽으로 보수적)
     floor_real_rate: float = 0.02         # 보호선 할인율(실질)
@@ -189,3 +193,17 @@ class SimConfig:
     widow_excess: tuple = (0.22, 0.03)    # 장기 초과 사망 위험 (남, 여). (0,0)이면 끔
     widow_spike: float = 2.0              # 사별 직후 추가 배수
     widow_tau: float = 0.5                # 급등 부분의 감쇠 시간(년)
+    # (v36) 간병비는 일반 물가보다 빠르게 오른다 — 사람이 하는 일이라 비용이 임금을 따라가기 때문.
+    #   장기요양 수가 인상률 2022~2026: 4.32 / 4.70 / 2.92 / 3.93 / 4.4% (평균 4.05%)
+    #   같은 기간 소비자물가:        5.1 / 3.6 / 2.3 / 2.1 / 약 2.0% (평균 3.02%)
+    #   → 연 약 1.0%p 더 빠르다. 0으로 두면 일반 물가와 같이 오른다(v35까지의 가정).
+    care_real_growth: float = 0.010
+
+    # (v36) 행동 가정 — 모형은 규칙대로 움직이지만 사람은 그렇지 않다.
+    #   패닉 매도: 주가가 크게 빠진 다음 해에 주식을 줄이고, 천천히만 돌아온다.
+    #   지출 경직성: 형편이 나빠져도 생활 수준을 한 번에 못 줄인다.
+    #   둘 다 0이면 지금까지와 같은 '완벽하게 합리적인 가구'가 된다.
+    panic_drop: float = 0.0        # 이만큼 떨어지면 패닉 (예: 0.25 = −25%)
+    panic_cut: float = 0.5         # 주식 비중을 이 배로 줄인다
+    panic_recover: float = 0.25    # 매년 이만큼씩 원래 비중으로 돌아온다
+    lifestyle_floor: float = 0.0   # 여행·취미를 한 해에 이 비율 넘게는 못 줄인다 (예: 0.3)
