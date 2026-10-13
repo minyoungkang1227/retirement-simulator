@@ -53,7 +53,6 @@ class EconomyV2:
     jump_sigma: float = 0.10   # 점프 크기 로그표준편차
     antithetic: bool = False   # 반대 난수 사용
     # ── v11 수리적 보완 ──
-    integrated_rate: bool = False  # 주식 수익률에 연초 금리 대신 1년 금리 적분 ∫r 사용 (채권과 일관)
     term_premium: float = 0.0      # 위험의 시장가격: 가격용(Q) 장기평균 = θ + term_premium → 채권 기간 프리미엄
     # ── v26 집값 ──
     house_real_growth: float = 0.0   # 물가 대비 실질 상승률(연). 0이면 집값 = 물가만큼만 상승(v25까지)
@@ -67,7 +66,7 @@ class EconomyV2:
         calibrated=True(기본): 물가·실질금리(v14, ECOS)와 주식(v18, KOSPI) 파라미터를 실데이터 추정치로 사용.
         calibrated=False: v13 이전 임시값."""
         base = dict(fisher=True, rho_rp=0.0, fee=0.005, erp_sd=0.01, pi_theta_sd=0.005,
-                    jump_lambda=0.1, antithetic=True, integrated_rate=True, term_premium=0.005)
+                    jump_lambda=0.1, antithetic=True, term_premium=0.005)
         if calibrated:
             base.update(CALIBRATED_2026_08)
             base.update(CALIBRATED_EQUITY_2026_08)
@@ -120,6 +119,15 @@ def _E(a):
     return (1 - np.exp(-a)) / a
 
 
+def _safe_chol(M):
+    """반양정부호 행렬의 촐레스키. 분산이 0인 요인이 있어 수치적으로 음수가 나오면 고윳값을 잘라 쓴다."""
+    try:
+        return np.linalg.cholesky(M)
+    except np.linalg.LinAlgError:
+        wv, V = np.linalg.eigh(M)
+        return V @ np.diag(np.sqrt(np.maximum(wv, 0)))
+
+
 def integrated_cov(k1, s1, k2, s2, c12, c1s, c2s):
     """1년 동안 (X1_{t+1} 잡음, ∫X1 잡음, X2_{t+1} 잡음, ∫X2 잡음, W_s(1))의 공분산 행렬.
     OU 해 X_{t+1} = θ + (X_t-θ)e^{-κ} + σ∫e^{-κ(1-s)}dW,  ∫X = θ + (X_t-θ)E(κ) + (σ/κ)∫(1-e^{-κ(1-s)})dW
@@ -138,69 +146,6 @@ def integrated_cov(k1, s1, k2, s2, c12, c1s, c2s):
         M[2*i+1, 4] = M[4, 2*i+1] = Cs[i] * S[i] / K[i] * (1 - _E(K[i]))
     M[4, 4] = 1.0
     return (M + M.T) / 2
-
-
-def generate(e: EconomyV2, T: int, n: int, rng) -> dict:
-    C = np.array([[1, e.rho_rp, e.rho_rs],
-                  [e.rho_rp, 1, e.rho_ps],
-                  [e.rho_rs, e.rho_ps, 1]])
-    L = np.linalg.cholesky(C)
-    if e.integrated_rate:
-        return _generate_integrated(e, T, n, rng)
-    need_u = e.erp_sd > 0 or e.pi_theta_sd > 0 or e.q_theta_sd > 0   # 불확실성 끄면 v2와 난수 흐름 동일
-    if e.antithetic:
-        h = (n + 1) // 2
-        Zh = rng.standard_normal((h, T, 3)); Z = np.concatenate([Zh, -Zh])[:n]
-        u = rng.standard_normal((h, 3)) if need_u else np.zeros((h, 3)); U = np.concatenate([u, -u])[:n]
-    else:
-        Z = rng.standard_normal((n, T, 3)); U = rng.standard_normal((n, 3)) if need_u else np.zeros((n, 3))
-    Z = Z @ L.T
-
-    # 파라미터 불확실성: 경로별 ERP·장기 물가
-    erp = e.erp + e.erp_sd * U[:, 0]
-    pth = e.pi_theta + e.pi_theta_sd * U[:, 1]
-    qth = e.q_theta + e.q_theta_sd * U[:, 2]
-
-    pi = np.empty((n, T + 1)); pi[:, 0] = e.pi0
-    r = np.empty((n, T + 1))
-    q = np.empty((n, T + 1))
-    if e.fisher:
-        q[:, 0] = e.q0; r[:, 0] = e.q0 + e.pi0
-    else:
-        r[:, 0] = e.r0
-    stock = np.empty((n, T)); bond = np.empty((n, T))
-    D = e.bond_duration
-    k_j = np.exp(e.jump_mu + 0.5 * e.jump_sigma**2) - 1       # 점프 보정항
-    for t in range(T):
-        pi[:, t + 1] = _ou_step(pi[:, t], pth, e.pi_kappa, e.pi_sigma, Z[:, t, 1])
-        if e.fisher:
-            q[:, t + 1] = _ou_step(q[:, t], qth, e.q_kappa, e.q_sigma, Z[:, t, 0])
-            r[:, t + 1] = q[:, t + 1] + pi[:, t + 1]
-            g = lambda tau, qq, pp: gaussian2_price(tau, qq, pp, e.q_kappa, qth + e.term_premium, e.q_sigma,
-                                                     e.pi_kappa, pth, e.pi_sigma, e.rho_rp)
-            bond[:, t] = g(D - 1, q[:, t + 1], pi[:, t + 1]) / g(D, q[:, t], pi[:, t]) - 1
-        else:
-            r[:, t + 1] = _ou_step(r[:, t], e.r_theta, e.r_kappa, e.r_sigma, Z[:, t, 0])
-            th_q = e.r_theta + e.term_premium
-            bond[:, t] = vasicek_price(D - 1, r[:, t + 1], e, th_q) / vasicek_price(D, r[:, t], e, th_q) - 1
-        logret = r[:, t] + erp - 0.5 * e.s_sigma**2 + e.s_sigma * Z[:, t, 2]
-        if e.jump_lambda > 0:
-            nj = rng.poisson(e.jump_lambda, n)
-            logret += nj * e.jump_mu + np.sqrt(nj) * e.jump_sigma * rng.standard_normal(n) - e.jump_lambda * k_j
-        stock[:, t] = np.exp(logret) - 1
-
-    for t, v in (e.stock_shocks or {}).items():
-        if t < T: stock[:, t] = v
-    if e.fee > 0:
-        stock = (1 + stock) * (1 - e.fee) - 1
-        bond = (1 + bond) * (1 - e.fee) - 1
-    infl = pi[:, 1:].copy()
-    for t, v in (e.infl_shocks or {}).items():
-        if t < T: infl[:, t] = v
-    cpi = np.concatenate([np.ones((n, 1)), np.cumprod(1 + infl, axis=1)], axis=1)
-    return {"stock": stock, "bond": bond, "infl": infl, "cpi": cpi, "rate": r,
-            "house": _house_index(e, stock, T, n, rng, U[:, 0]),
-            "antithetic": e.antithetic, "erp_path": erp}
 
 
 def _house_index(e: EconomyV2, stock, T, n, rng, u0):
@@ -226,15 +171,19 @@ def _house_index(e: EconomyV2, stock, T, n, rng, u0):
     return np.concatenate([np.ones((n, 1)), np.cumprod(np.exp(lr), axis=1)], axis=1)
 
 
-def _generate_integrated(e: EconomyV2, T: int, n: int, rng) -> dict:
-    """v11: (금리 요인의 연말값, 1년 적분)을 결합정규로 정확히 뽑아 주식은 ∫r, 채권은 가격식을 사용."""
+def generate(e: EconomyV2, T: int, n: int, rng) -> dict:
+    """(금리 요인의 연말값, 1년 적분)을 결합정규로 정확히 뽑아 주식은 ∫r, 채권은 가격식을 사용.
+
+    v31: 연초 금리를 쓰던 간이 생성기를 없애고 이 방식 하나로 통일했다. 두 방식의 결과 차이는
+    몬테카를로 오차 안에 있었고(대표 가구 ±1%p), 주식과 채권이 같은 금리를 쓰는 이 쪽이 일관된다."""
     if e.fisher:
         k1, th1, s1, x0 = e.q_kappa, None, e.q_sigma, e.q0
     else:
         k1, th1, s1, x0 = e.r_kappa, e.r_theta, e.r_sigma, e.r0
     k2, s2 = e.pi_kappa, e.pi_sigma
     M = integrated_cov(k1, s1, k2, s2, e.rho_rp, e.rho_rs, e.rho_ps)
-    L = np.linalg.cholesky(M + 1e-14 * np.eye(5))
+    d = np.diag(M).copy()                             # (v31) 지터는 요인별 분산에 비례 — 변동성 0인 요인엔 가짜 충격이 안 섞인다
+    L = _safe_chol(M + 1e-12 * np.diag(d))
     need_u = e.erp_sd > 0 or e.pi_theta_sd > 0 or e.q_theta_sd > 0
     if e.antithetic:
         h = (n + 1) // 2

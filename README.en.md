@@ -37,6 +37,8 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 4. **Stochastic economy** — OU real rate and inflation estimated from Bank of Korea (ECOS) data, with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
 5. **Statistically honest comparisons** — paired-difference confidence intervals on common random numbers decide "different / not different"
 
+> **v31 (2026-10-13):** Instead of adding to the model, this release **removed complexity that did not change the answer and proved the arithmetic**. In a deterministic limit the engine now matches the closed form to a relative error of 1e-7 (`scripts/benchmark_analytic.py`); a component ablation (`scripts/ablate.py`) found one of the two economy generators made no difference beyond Monte Carlo noise, so it was deleted. Model code 1,874 → 1,643 lines (−12%), 14 → 11 modules. Error budget (`scripts/error_budget.py`): Monte Carlo noise ±0.7pp vs 14pp from a 1σ move in the equity risk premium — **read the result as a range, not a single number.**
+
 > **Note (v28–v30):** The example figures below are from v27. v28 added survivor and basic pensions, which raised the probability of sustaining essential spending (about +10 to +28 pp for the reference households); v30 added longevity uncertainty, which fattens the tail risk. See the web app for current numbers; use the tables for direction and rough ordering.
 
 ## Example (couple aged 52 and 50, retiring at 60, KRW 500M, saving KRW 1.5M/month · placeholder assumptions)

@@ -95,7 +95,8 @@ def _qx_at(qx, t, improve: bool, offset: float = 0.0):
     return project_qx(qx, t + offset) if improve else qx
 
 
-def simulate_alive(qx: np.ndarray, start_age: int, T: int, n: int, rng, improve: bool = False, offset: float = 0.0, qmult=None) -> np.ndarray:
+def simulate_alive(qx: np.ndarray, start_age: int, T: int, n: int, rng, improve: bool = False, offset: float = 0.0,
+                   qmult=None) -> np.ndarray:
     """alive[p, t] : t년 시작 시점 생존 여부 (t=0은 현재)."""
     ages = np.minimum(start_age + np.arange(T), len(qx) - 1)
     qq = qx[ages][None, :] * (1.0 if qmult is None else qmult)

@@ -212,6 +212,22 @@ def stock_lookup(code: str):
     return stock_stats(code, years=10, ecos_key=key)
 
 
+ERP_SD = 0.014          # 주식 위험프리미엄 추정 표준오차 (KOSPI 2000~2026)
+
+
+@st.cache_data(ttl=600, max_entries=32, show_spinner=False)
+def assumption_band(p_json: str) -> tuple:
+    """가정(주식 위험프리미엄)을 ±1 표준오차만큼 움직였을 때 기본생활 지킬 확률의 범위.
+    계산 횟수를 늘려도 줄지 않는 불확실성이라, 결과를 한 숫자로 읽지 않게 하려고 보여준다."""
+    p = json.loads(p_json)
+    base = EconomyV2.enhanced().erp
+    out = []
+    for d in (-ERP_SD, ERP_SD):
+        r = simulate(p_json, json.dumps({"eco": {"erp": base + d}}, sort_keys=True))
+        out.append(r["s"]["기본생활 유지 확률"])
+    return min(out), max(out)
+
+
 def run(p, v=None):
     return simulate(json.dumps(p, sort_keys=True), json.dumps(v or {}, sort_keys=True))
 
@@ -598,6 +614,14 @@ with tab1:
         cards.append(("👨‍👩‍👧 자녀", f"{p['legacy']:.1f}억 원 남기기", f'10번 중 <span class="hl">{int(round(s.get("유산 목표 달성 확률", 0) * 10))}번</span> 가능해요'))
     for col, (h_, t_, v_) in zip(st.columns(len(cards)), cards):
         col.markdown(f'<div class="goal"><div class="h">{h_}</div><div class="t">{t_}</div><div class="v">{v_}</div></div>', unsafe_allow_html=True)
+
+    # 3-2) 가정의 불확실성 — 난수를 늘려도 줄지 않는 폭
+    with st.spinner("가정이 달라질 때의 폭을 계산 중"):
+        lo, hi = assumption_band(json.dumps(p, sort_keys=True))
+    st.markdown(f'<div class="legend">주식이 앞으로 얼마나 오를지는 아무도 모릅니다. 과거 자료로 추정한 범위 안에서만 봐도 '
+                f'위 <b>{pct(ok)}</b>는 <b>{pct(lo)} ~ {pct(hi)}</b> 사이에서 움직입니다. '
+                f'계산을 더 많이 해도 이 폭은 줄지 않으니, <b>숫자 하나보다 선택을 바꿨을 때의 차이</b>를 보세요.</div>',
+                unsafe_allow_html=True)
 
     # 4-2) 무엇부터 하면 되나 — 효과 순위
     if n_ok < 9:

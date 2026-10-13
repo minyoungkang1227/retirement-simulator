@@ -51,20 +51,6 @@ class Household:
 
 
 @dataclass
-class EconomyAssumptions:
-    stock_mu: float = 0.06        # 주식 기대 산술수익률
-    stock_sigma: float = 0.18
-    bond_mu: float = 0.03
-    bond_sigma: float = 0.05
-    rho_stock_bond: float = 0.0
-    # 물가: 이산 OU  pi_{t+1} = pi_t + kappa(theta - pi_t) + sigma*eps
-    infl_theta: float = 0.02
-    infl_kappa: float = 0.3
-    infl_sigma: float = 0.01
-    infl_init: float = 0.025
-
-
-@dataclass
 class NPSRules:
     """국민연금 조기/연기 조정률 — 개발 전 최신 기준 재확인 필요."""
     early_cut_per_year: float = 0.06
@@ -184,7 +170,6 @@ class SimConfig:
     n_paths: int = 10_000
     max_age: int = 110
     seed: Optional[int] = 42
-    economy: EconomyAssumptions = field(default_factory=EconomyAssumptions)
     nps: NPSRules = field(default_factory=NPSRules)
     care: object = field(default_factory=CareShock)   # CareShock(v2) 또는 CareMarkov(v11)
     mortality_improvement: bool = True    # (v27) 코호트 사망률 개선 반영 (False면 2024 기간생명표 그대로)

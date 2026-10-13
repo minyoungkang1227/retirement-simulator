@@ -285,3 +285,60 @@ def test_v30_tail_risk_up():
         assert on > off                                                   # 장수 불확실성은 꼬리 위험을 키운다
     finally:
         CFG = old
+
+
+# ── v31 해석해 대조: 결정론적 극한에서 닫힌식과 정확히 일치해야 함 ──
+def _deterministic_setup(R=0.03, spend=3000.0, infl=0.0):
+    """변동성·세금·사망·간병·연금을 모두 끈 세계. 유일한 움직임은 수익률과 지출."""
+    from retire_sim.config import NPSRules
+    eco = EconomyV2(r0=R, r_theta=R, r_sigma=0.0, q0=R - infl, q_theta=R - infl, q_sigma=0.0,
+                    pi0=infl, pi_theta=infl, pi_sigma=0.0, erp=0.0, s_sigma=0.0, fee=0.0,
+                    jump_lambda=0.0, erp_sd=0.0, pi_theta_sd=0.0, q_theta_sd=0.0, antithetic=False,
+term_premium=0.0, house_real_sd=0.0, house_sigma=0.0)
+    qx = {"M": np.zeros(111), "F": np.zeros(111)}
+    qx["M"][100] = qx["F"][100] = 1.0                       # 100세까지 아무도 죽지 않음
+    hh = Household(members=[Person(60, "M")], liquid_assets=50_000, stock_weight=1.0,
+                   annual_spending=spend, essential=spend, lifestyle=0.0, legacy_target=0.0,
+                   survivor_spending_ratio=1.0, floor_method="fixed95")
+    cfg = SimConfig(n_paths=64, seed=1, care=CareMarkov(enabled=False), mortality_improvement=False,
+                    longevity_sigma_level=0.0, longevity_sigma_trend=0.0, widow_excess=(0.0, 0.0),
+                    nps=NPSRules(basic_on=False, survivor_on=False))
+    return hh, cfg, eco, qx
+
+
+def test_analytic_benchmark_no_inflation():
+    """W(t+1) = (W(t) − 지출) × e^r 와 상대오차 1e-7 안에서 같아야 한다 (지출은 연초, 수익은 연말)."""
+    R, spend = 0.03, 3000.0
+    hh, cfg, eco, qx = _deterministic_setup(R, spend)
+    res = engine_tax.run(hh, cfg, e=eco, tc=TaxConfig(enabled=False), qx_table=qx)
+    W = res["W_real"][0]
+    w = float(hh.liquid_assets)
+    for t in range(15):
+        w = (w - spend) * np.exp(R)
+        assert abs(W[t + 1] - w) <= 1e-7 * abs(w), f"{t + 1}년차: 모형 {W[t + 1]:.4f} vs 닫힌식 {w:.4f}"
+
+
+def test_analytic_benchmark_with_inflation():
+    """물가가 2%여도 실질자산은 실질수익률 기준 닫힌식과 같아야 한다."""
+    R, infl, spend = 0.05, 0.02, 3000.0
+    hh, cfg, eco, qx = _deterministic_setup(R, spend, infl)
+    res = engine_tax.run(hh, cfg, e=eco, tc=TaxConfig(enabled=False), qx_table=qx)
+    W = res["W_real"][0]
+    w = float(hh.liquid_assets)
+    for t in range(15):
+        w = (w - spend) * np.exp(R) / (1 + infl)            # 실질 = 명목 ÷ 물가지수
+        assert abs(W[t + 1] - w) <= 1e-7 * abs(w), f"{t + 1}년차: 모형 {W[t + 1]:.4f} vs 닫힌식 {w:.4f}"
+
+
+def test_analytic_pension_offsets_spending():
+    """연금이 들어오면 꺼내 쓰는 돈이 그만큼 줄어야 한다 (연 1,200만 원 = 월 100만 원)."""
+    R, spend = 0.03, 3000.0
+    hh, cfg, eco, qx = _deterministic_setup(R, spend)
+    hh.members[0].nps_monthly = 100.0                      # 조기·연기 조정이 없도록 정상개시=개시=60세
+    hh.members[0].nps_normal_age = hh.members[0].nps_start_age = 60
+    res = engine_tax.run(hh, cfg, e=eco, tc=TaxConfig(enabled=False), qx_table=qx)
+    W = res["W_real"][0]
+    w = float(hh.liquid_assets)
+    for t in range(15):
+        w = (w - (spend - 1200.0)) * np.exp(R)
+        assert abs(W[t + 1] - w) <= 1e-7 * abs(w), f"{t + 1}년차: 모형 {W[t + 1]:.4f} vs 닫힌식 {w:.4f}"

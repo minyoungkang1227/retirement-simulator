@@ -1,17 +1,17 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np, copy, matplotlib
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
-from retire_sim.config import Person, Household, SimConfig, CareShock
+from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShock
 from retire_sim.economy_v2 import EconomyV2
-from retire_sim import engine, metrics, mortality
+from retire_sim import engine_tax, mortality
 
 def hh(spend=3600, w=0.4):
     return Household(members=[Person(60,"M",nps_monthly=110,private_pension_annual=600,private_pension_start=60),
                               Person(58,"F",nps_monthly=50)], liquid_assets=50_000, stock_weight=w, annual_spending=spend)
 q0 = mortality.default_qx()
 def run(h=None, e=None, cfg=None, q=None):
-    r = engine.run(h or hh(), cfg or SimConfig(), qx_table=q or q0, economy_v2=e or EconomyV2())
-    return metrics.summarize(r)["고갈확률(생존 중)"]*100
+    r = engine_tax.run(h or hh(), cfg or SimConfig(care=CareMarkov()), qx_table=q or q0, e=e or EconomyV2.enhanced())
+    return engine_tax.summarize(r)["고갈확률"]*100
 base = run()
 qlow = {k: v*0.8 for k,v in q0.items()}; qhigh = {k: np.minimum(v*1.2,1) for k,v in q0.items()}
 for d in (qlow,qhigh): d["M"][-1]=d["F"][-1]=1
