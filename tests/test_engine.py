@@ -1,6 +1,8 @@
 """회귀 테스트: 코드를 고쳐도 대표 가구의 결과가 크게 달라지지 않는지 자동 확인.
 실행: pytest -q    (커밋할 때 GitHub Actions가 자동 실행)
 """
+import os
+
 import numpy as np
 import pytest
 
@@ -372,3 +374,65 @@ def test_analytic_pension_offsets_spending():
     for t in range(15):
         w = (w - (spend - 1200.0)) * np.exp(R)
         assert abs(W[t + 1] - w) <= 1e-7 * abs(w), f"{t + 1}년차: 모형 {W[t + 1]:.4f} vs 닫힌식 {w:.4f}"
+
+
+# ── v33 상담 세션: 저장·복원과 재현 ID ──
+def test_session_roundtrip_and_calc_id():
+    import json as _json
+    from retire_sim import session, __version__
+
+    inp = {"age": 60, "essential": 250, "spouse": True, "events": [{"age": 70, "amount": 1000}]}
+    blob = session.save_blob(inp, "김철수", "홍길동 FP")
+    back, client, advisor, warn = session.load_blob(blob)
+    assert back == inp and client == "김철수" and advisor == "홍길동 FP" and warn == ""
+    assert session.load_blob(blob.encode())[0] == inp                      # bytes 로 넣어도 같다
+
+    # 계산 ID: 키 순서와 무관, 입력이 바뀌면 달라짐, 모델 버전이 바뀌어도 달라짐
+    cid = session.calc_id(inp)
+    assert len(cid) == 10 and cid == session.calc_id(dict(reversed(list(inp.items()))))
+    assert cid != session.calc_id({**inp, "essential": 251})
+    assert cid != session.calc_id(inp, version="999")
+    assert _json.loads(blob)["calc_id"] == cid
+
+    # 다른 모델 버전에서 저장된 파일은 경고와 함께 열린다
+    d = _json.loads(blob); d["model_version"] = "1"
+    back2, _, _, warn2 = session.load_blob(_json.dumps(d))
+    assert back2 == inp and str(__version__) in warn2
+
+    for bad in ('{"hello": 1}', '{"format": "retire-compass/1"}', '{"format": "other", "inputs": {}}'):
+        with pytest.raises(ValueError):
+            session.load_blob(bad)
+
+
+def test_report_html_is_self_contained():
+    """리포트는 외부 자료 없이 열려야 한다 — 그림은 SVG 문자열로 직접 그린다."""
+    from retire_sim import report
+
+    rows = [(60, 5.0, 4.0, 3.0), (70, 6.0, 4.0, 2.0), (80, 7.0, 3.0, 0.0)]
+    svg = report.line_chart_svg(rows)
+    assert svg.startswith("<svg") and svg.count("<polyline") == 3
+    assert report.line_chart_svg([]) == ""
+    # 폭포: 0인 항목은 빼고, 남는 부족분은 '모아둔 돈에서' 막대로 이어 붙인다
+    wf = report.waterfall_svg([("연금", 2400), ("생활비", -3600), ("세금", 0.0)])
+    assert wf.count("<rect") == 3 and "모아둔 돈에서" in wf
+    assert report.waterfall_svg([("연금", 4000), ("생활비", -3600)]).count("<rect") == 2   # 남으면 안 붙는다
+    assert report.waterfall_svg([]) == ""
+
+    h = report.build(dict(client="김<철>수", advisor_line="", date="2026년 10월 13일", calc_id="ABC1234567",
+                          version="33", hero="테스트", goals=[("A", "B", "C")], gap_eq="x", gap_big="y",
+                          band="z", actions=[("무엇", "어떻게", "10% → 20%")], fan_svg=svg, flow_svg=wf,
+                          assumptions="가정"))
+    assert h.startswith("<!doctype html>") and "ABC1234567" in h and "무엇" in h
+    assert "김&lt;철&gt;수" in h and "<철>" not in h                        # 고객명은 HTML 이스케이프
+    assert "@media print" in h and "page-break-before" in h                # 인쇄 레이아웃
+    assert "<img" not in h and "<script" not in h                          # 외부 이미지·스크립트 없음
+
+
+def test_app_and_library_versions_match():
+    """앱이 전제하는 모델 버전과 라이브러리 버전이 어긋나면 배포 때 조용히 깨진다 — 여기서 막는다."""
+    import re
+    from retire_sim import __version__
+    src = open(os.path.join(os.path.dirname(__file__), "..", "streamlit_app.py"), encoding="utf-8").read()
+    expects = int(re.search(r"^APP_EXPECTS_MODEL = (\d+)", src, re.M).group(1))
+    assert int(__version__) >= expects, (
+        f"retire_sim v{__version__} < 앱이 요구하는 v{expects} — retire_sim/__init__.py 의 __version__ 을 올리세요")

@@ -5,14 +5,35 @@
 입력값은 계산에만 쓰이며 서버에 저장하지 않습니다(계산 결과는 10분간 메모리 캐시).
 """
 import json
+from datetime import date
 import numpy as np
 import pandas as pd
 import altair as alt
 import streamlit as st
 
+# ── 배포 안전장치 ───────────────────────────────────────────────────────────
+# Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
+# 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
+# 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
+APP_EXPECTS_MODEL = 33          # 이 앱 파일이 전제하는 retire_sim 버전
+try:
+    from retire_sim import __version__ as MODEL_VERSION
+    _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
+except Exception:
+    MODEL_VERSION, _model_ok = "(확인 불가)", False
+if not _model_ok:
+    st.error(
+        f"**계산 모듈이 옛 버전입니다** (앱은 v{APP_EXPECTS_MODEL} 이상을 쓰는데 지금 불러온 것은 v{MODEL_VERSION}).\n\n"
+        "코드는 새로 올라갔지만 서버가 예전 모듈을 그대로 들고 있을 때 생깁니다. "
+        "**Manage app → ⋮ → Reboot app** 으로 앱을 한 번 다시 시작하면 해결됩니다."
+    )
+    st.stop()
+# ───────────────────────────────────────────────────────────────────────────
+
 from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShock, AddOns, NPSRules
 from retire_sim.economy_v2 import EconomyV2
-from retire_sim import engine_tax, mortality, optimize
+from retire_sim import engine_tax, mortality, optimize, report
+from retire_sim.session import calc_id, save_blob, load_blob
 from retire_sim.tax import TaxConfig, HouseConfig
 from retire_sim.pension import estimate_nps_monthly
 
@@ -195,7 +216,15 @@ def simulate(p_json: str, v_json: str) -> dict:
     if np.any(~np.isnan(res["stock_ret"])):
         sr, pr = res["stock_ret"].ravel(), res["port_ret"].ravel(); ok = ~np.isnan(sr)
         corr = float(np.corrcoef(sr[ok], pr[ok])[0, 1])
-    return {"s": s, "dep": (d >= 0), "anti": bool(res.get("antithetic")),
+    # 은퇴 후 '살아 있는 해'의 평균 세금·건보료·보유세 (리포트의 1년 흐름용, 실질)
+    r_age = p.get("retire_age", 0)
+    t0 = max(0, min(r_age - p["age"], res["T"]))
+    live = res["hh_alive"][:, t0:res["T"]]
+    def _avg(key):
+        v = res[key][:, t0:res["T"]]
+        return float(v[live].mean()) if live.any() else 0.0
+    post = {"세금": _avg("tax_y"), "건보료": _avg("hi_y"), "보유세": _avg("prop_y")}
+    return {"s": s, "post": post, "dep": (d >= 0), "anti": bool(res.get("antithetic")),
             "dep_age": float(np.median(d[d >= 0] + y)) if (d >= 0).any() else None, "fan": fan, "curve": curve,
             "p50_85": float(np.percentile(w85, 50)) if w85.size else 0.0, "annuity_pay": res.get("annuity_pay", 0.0),
             "care_premium": res.get("care_premium", 0.0), "stock_corr": corr,
@@ -365,6 +394,16 @@ if ss.step < len(STEPS) and not ss.get("done"):
                         essential=300, lifestyle=1200, nps_auto=True, nps_years=5, s_nps_years=4, nps_start=65, priv=0, legacy=1.0, profile="균형형",
                         salary=5000, s_salary=4000, save_mode="소득의 %", save_rate=15, wage_g=1.0, ret_contrib=True)
             ss.done = True; st.rerun()
+        with st.expander("저장해 둔 고객 불러오기"):
+            up = st.file_uploader("고객 파일(.json)", type="json", key="load_file", label_visibility="collapsed")
+            if up is not None and st.button("불러오기", key="load_go", width="stretch"):
+                try:
+                    inp, cl, adv, warn = load_blob(up.getvalue())
+                    ss.p.update(inp); ss["client"] = cl; ss["advisor"] = adv
+                    if warn: ss["load_warn"] = warn
+                    ss.done = True; st.rerun()
+                except Exception as ex:
+                    st.error(f"불러오지 못했습니다: {ex}")
         st.divider()
 
     i = ss.step
@@ -583,7 +622,7 @@ s = base["s"]
 if st.button("입력 수정하기"):
     ss.done = False; ss.step = len(STEPS) - 1; st.rerun()
 
-tab1, tab2, tab6, tab3, tab4, tab5, tab7 = st.tabs(["결과", "바꿔보기", "상품 추가", "위기 상황", "세금", "가정과 한계", "자세한 설명"])
+tab1, tab2, tab6, tab3, tab4, tab8, tab5, tab7 = st.tabs(["결과", "바꿔보기", "상품 추가", "위기 상황", "세금", "리포트", "가정과 한계", "자세한 설명"])
 
 with tab1:
     need, pension, gap = income_gap(p)
@@ -658,6 +697,50 @@ with tab1:
         tooltip=["경우", "나이", alt.Tooltip("억 원:Q", format=".1f")]).properties(height=280), width="stretch")
     st.markdown('<div class="legend">선이 0에 닿는 때가 모아둔 돈을 다 쓰는 때예요. 운이 나쁘면(주가 하락·물가 상승 등) 더 빨리, '
                 '운이 좋으면 더 늦게 닿습니다. 집은 포함하지 않았어요.</div>', unsafe_allow_html=True)
+
+def make_report(p, base, client, advisor, cid) -> str:
+    """현재 결과를 상담 리포트(HTML)로 묶는다. 화면에 보여주는 숫자와 같은 값을 쓴다."""
+    s_ = base["s"]; ok = s_["기본생활 유지 확률"]; n_ok = int(round(ok * 10))
+    need, pension, gap = income_gap(p)
+    short = max(gap, 0)
+    when = f"{base['dep_age']:.0f}세쯤 " if base["dep_age"] else ""
+    hero = (f'지금 계획대로면 10번 중 <span class="n">{10 - n_ok}번</span>은 {when}생활비가 모자랍니다.'
+            if n_ok < 10 else "지금 계획대로면 10번 중 9번 이상 생활비를 끝까지 낼 수 있습니다.")
+    goals = [("🏠 기본 생활", "먹고 사는 데 꼭 필요한 돈", f"10번 중 {n_ok}번 가능")]
+    if p["lifestyle"] > 0:
+        goals.append(("✈️ 여행·취미", "원하는 예산 중 쓸 수 있는 정도", f"{s_.get('여행·취미 평균 충족률', 0) * 100:.0f}% 정도"))
+    if p["legacy"] > 0:
+        goals.append((f"👨‍👩‍👧 자녀", f"{p['legacy']:.1f}억 원 남기기",
+                      f"10번 중 {int(round(s_.get('유산 목표 달성 확률', 0) * 10))}번 가능"))
+    lo, hi = assumption_band(json.dumps(p, sort_keys=True))
+    band = (f"주식이 앞으로 얼마나 오를지는 아무도 모릅니다. 과거 자료로 추정한 범위 안에서만 봐도 위 "
+            f"<b>{pct(ok)}</b>는 <b>{pct(lo)} ~ {pct(hi)}</b> 사이에서 움직입니다. "
+            f"계산을 더 많이 해도 이 폭은 줄지 않으니, 숫자 하나보다 <b>선택을 바꿨을 때의 차이</b>를 보셔야 합니다.")
+    acts = [(lab, how, f"{ok * 100:.0f}% → {min(ok + g, 1) * 100:.0f}% ({g * 100:+.0f}%p)")
+            for lab, how, g, _ in action_ranking(json.dumps(p, sort_keys=True))[:3]] if n_ok < 9 else []
+    # 100세까지만 그린다 — 그 뒤는 살아 있는 경로가 적어 분위수가 들쭉날쭉해 읽기 어렵다
+    rows = [(int(r[0]), r[4] / 10000, r[3] / 10000, r[2] / 10000) for r in base["fan"] if r[0] <= 100]
+    po = base.get("post", {})
+    flow = [("연금 수입", pension * 12), ("생활비", -(p["essential"] * 12 + p["lifestyle"])),
+            ("세금", -po.get("세금", 0.0)), ("건보료", -po.get("건보료", 0.0))]
+    if po.get("보유세", 0) > 0:
+        flow.append(("보유세", -po["보유세"]))
+    assume = ("· 금리·물가·주가가 서로 연결되어 움직이는 1만 가지 미래를 계산했습니다(한국은행 ECOS 2000~2026, KOSPI).<br>"
+              "· 수명은 통계청 2024 완전생명표에 앞으로의 수명 연장을 반영했고, 간병은 건강보험공단 장기요양 통계로 추정했습니다.<br>"
+              "· 국민연금·유족연금·기초연금·건강보험료·세금을 2026년 기준으로 반영했습니다.<br>"
+              f"· 기본생활비 월 {p['essential']:,}만 원, 여행·취미 연 {p['lifestyle']:,}만 원, "
+              f"국민연금 개시 {p['nps_start']}세로 계산했습니다.<br>"
+              "· 결과는 가정에 따라 달라집니다. 절대값보다 선택지 사이의 차이를 보시기 바랍니다.")
+    return report.build(dict(
+        client=client or "고객", advisor_line=f" · 상담 {advisor}" if advisor else "",
+        date=f"{date.today():%Y년 %m월 %d일}", calc_id=cid, version=MODEL_VERSION,
+        hero=hero, goals=goals,
+        gap_eq=f"필요한 생활비 월 {need:.0f}만 원 − 받는 연금 월 {pension:.0f}만 원 (오늘 돈 가치 기준)",
+        gap_big=(f"매달 {short:.0f}만 원을 모아둔 돈에서 꺼내 써야 합니다" if short > 0
+                 else "연금만으로 생활비가 충분합니다"),
+        band=band, actions=acts, fan_svg=report.line_chart_svg(rows),
+        flow_svg=report.waterfall_svg(flow), assumptions=assume))
+
 
 def whatif(rows):
     out = []
@@ -941,6 +1024,36 @@ with tab4:
                     "가족에게 남는 돈(중앙값)": f"{rs['가족 이전 총액(중앙값)'] / 10000:.1f}억"})
     st.dataframe(pd.DataFrame(out), hide_index=True, width="stretch")
     st.caption("증여는 가족에게 남는 돈을 늘리지만 내 기본생활 유지 확률을 낮출 수 있습니다.")
+
+with tab8:
+    st.markdown("상담 결과를 **고객에게 남길 리포트**로 만듭니다. 내려받아 열고 브라우저에서 인쇄(Ctrl+P) → "
+                "'PDF로 저장'을 고르면 PDF가 됩니다.")
+    if ss.get("load_warn"):
+        st.warning(ss["load_warn"])
+    c1, c2 = st.columns(2)
+    client = c1.text_input("고객 성함", value=ss.get("client", ""), placeholder="예: 김철수", key="rep_client")
+    advisor = c2.text_input("상담자 (선택)", value=ss.get("advisor", ""), placeholder="예: 홍길동 FP", key="rep_advisor")
+    ss["client"] = client; ss["advisor"] = advisor
+    cid = calc_id(p)
+    st.caption(f"계산 ID **{cid}** · 모델 v{MODEL_VERSION} — 같은 입력과 같은 버전이면 언제 다시 계산해도 같은 결과입니다.")
+
+    d1, d2 = st.columns(2)
+    d1.download_button("고객 파일 저장 (.json)", save_blob(p, client, advisor),
+                       file_name=f"노후나침반_{client or '고객'}_{date.today():%Y%m%d}.json",
+                       mime="application/json", width="stretch",
+                       help="다음 상담 때 첫 화면에서 이 파일을 올리면 입력이 그대로 복원됩니다.")
+
+    if st.button("리포트 만들기", type="primary", key="report_go", width="stretch"):
+        with st.spinner("리포트를 만드는 중"):
+            ss["report_html"] = make_report(p, base, client, advisor, cid)
+    if ss.get("report_html"):
+        d2.download_button("리포트 내려받기 (.html)", ss["report_html"],
+                           file_name=f"노후점검리포트_{client or '고객'}_{date.today():%Y%m%d}.html",
+                           mime="text/html", width="stretch")
+        st.markdown("**미리보기**")
+        # HTML 문자열을 그대로 띄우려면 이 함수여야 한다 (st.iframe 은 주소만 받는다).
+        # 앱 전체 스타일과 섞이지 않도록 iframe 안에서 그린다.
+        st.components.v1.html(ss["report_html"], height=760, scrolling=True)
 
 with tab5:
     st.markdown("""
