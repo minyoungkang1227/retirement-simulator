@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 34          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 35          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -34,14 +34,28 @@ from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShoc
 from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality, optimize, report, product
 from retire_sim.session import calc_id, save_blob, load_blob
+from retire_sim.inputs import (PROFILES, AVG_SPEND, DEFAULTS, build_case,
+                              total_assets, nps_values, monthly_saving, income_gap)
+from retire_sim.advice import ERP_SD, action_ranking as _action_ranking, assumption_band as _assumption_band
+from retire_sim.reporting import build_report
+from retire_sim.branding import Brand
 from retire_sim.tax import TaxConfig, HouseConfig
 from retire_sim.pension import estimate_nps_monthly
 
-st.set_page_config(page_title="노후나침반 · 은퇴 목표 진단", page_icon="🧭", layout="centered")
-TEAL, CORAL, INK, MUTED = "#1F6F78", "#C8553D", "#1C2B33", "#5B6B73"
-PROFILES = {"보수형": 0.3, "균형형": 0.5, "성장형": 0.7}
+# 화이트라벨: RETIRE_BRAND 환경변수나 Streamlit Secrets 의 [brand] 로 기관 설정을 받는다
+def _load_brand() -> Brand:
+    try:
+        if "brand" in st.secrets:
+            return Brand.from_dict(dict(st.secrets["brand"]))
+    except Exception:
+        pass
+    return Brand.from_env()
+
+
+BRAND = _load_brand()
+st.set_page_config(page_title=f"{BRAND.name} · 은퇴 목표 진단", page_icon="🧭", layout="centered")
+TEAL, CORAL, INK, MUTED = BRAND.primary, BRAND.accent, BRAND.ink, BRAND.muted   # 화면 색도 기관 설정을 따른다
 # 국민연금연구원 「2024년 국민노후보장패널조사(10차 부가조사)」 50세 이상이 생각하는 노후 생활비 (월, 만원)
-AVG_SPEND = {"부부_최소": 217, "부부_적정": 298, "개인_최소": 139, "개인_적정": 198}
 
 
 def avg_essential(spouse: bool) -> int:
@@ -97,112 +111,32 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
 
 ss = st.session_state
 if "p" not in ss:
-    ss.p = dict(age=52, sex="M", retire_age=60, spouse=True, s_age=50, s_sex="F",
-                deposit=1.5, invest=2.0, ret_acct=1.5, other=0.0, saving=150, salary=0, s_salary=0, save_mode="월 금액", save_rate=15, wage_g=1.0, ret_contrib=False, nps_auto=False, nps_years=10, s_nps_years=10,
-                essential=217, lifestyle=1000, nps=110, s_nps=50, nps_start=65,
-                priv=0, priv_start=60, priv_years=20, legacy=1.0, children=2, profile="균형형",
-                region="대도시", h_official=0.0, h_market=0.0, h_n=1, h_joint=False, h_years=10, h_hi=0.0, rent=0,
-                biz=0, biz_until=65, biz_work=False, rm_age=0, ds_age=0, ds_ratio=50, events=[], ev_ltv=60, ev_loan_years=30, ev_jeonse=0.0, ev_rent=0, overseas=20, own_equal=True, survivor=70,
-                enhanced=True, paths=10000)
+    ss.p = dict(DEFAULTS)
     ss.step = 0
 p = ss.p
 
 
 # ─────────────────────────── 계산 ───────────────────────────
-def total_assets(p):
-    return p["deposit"] + p["invest"] + p["ret_acct"] + p["other"]
 
 
-def nps_values(p):
-    """국민연금 월액(본인, 배우자): 자동 계산이면 소득·가입기간으로 추정."""
-    if p.get("nps_auto"):
-        n1 = estimate_nps_monthly(p.get("salary", 0), p.get("nps_years", 0), p["age"], p["retire_age"])
-        n2 = estimate_nps_monthly(p.get("s_salary", 0), p.get("s_nps_years", 0), p["s_age"], p["retire_age"] - (p["age"] - p["s_age"])) if p["spouse"] else 0.0
-        return n1, n2
-    return float(p["nps"]), float(p["s_nps"]) if p["spouse"] else 0.0
 
 
-def monthly_saving(p):
-    if p["age"] >= p["retire_age"]: return 0.0
-    if p.get("save_mode") == "소득의 %":
-        return (p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)) * p.get("save_rate", 0) / 100 / 12
-    return float(p["saving"])
 
 
-def build(p: dict, v: dict):
-    nps_start = v.get("nps_start", p["nps_start"])
-    retire = p["retire_age"] + v.get("retire_delta", 0)
-    mk = lambda age, sex, nps, priv=0, ps=0, py=0: Person(
-        age=age, sex=sex, nps_monthly=nps, nps_start_age=nps_start,
-        private_pension_annual=priv, private_pension_start=ps, private_pension_years=py)
-    n1, n2 = nps_values(p)
-    members = [mk(p["age"], p["sex"], n1, p["priv"], p["priv_start"], p["priv_years"] if p["priv"] > 0 else 0)]
-    members[0].salary = float(p.get("salary", 0))
-    if p["spouse"]:
-        members.append(mk(p["s_age"], p["s_sex"], n2)); members[1].salary = float(p.get("s_salary", 0))
-    m = v.get("spend_mult", 1.0)
-    liquid = max(v.get("assets", total_assets(p)) - p["ret_acct"], 0)
-    use_rate = p.get("save_mode") == "소득의 %" and "saving_monthly" not in v
-    events = []
-    for ev in p.get("events", []):
-        if ev["kind"] == "주택 구입":
-            events.append(dict(label=ev["kind"], age=int(ev["age"]), amount=float(ev["amount"]), kind="house",
-                               ltv=p.get("ev_ltv", 60) / 100, loan_years=int(p.get("ev_loan_years", 30)),
-                               deposit_back=float(p.get("ev_jeonse", 0)) * 10000, rent_saving=float(p.get("ev_rent", 0)) * 12))
-        else:
-            events.append(dict(label=ev["kind"], age=int(ev["age"]), amount=float(ev["amount"]), years=int(ev["years"]), kind="cost"))
-    hh = Household(members=members, liquid_assets=liquid * 10000, pension_balance=p["ret_acct"] * 10000, events=events,
-                   saving_rate=(v.get("save_rate_override", p.get("save_rate", 0) / 100) + v.get("saving_delta", 0) * 12 / max((p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)), 1)) if use_rate else 0.0, wage_growth=p.get("wage_g", 1.0) / 100,
-                   retirement_contrib=bool(p.get("ret_contrib")) and p["age"] < p["retire_age"],
-                   stock_weight=v.get("stock_weight", PROFILES[p["profile"]]),
-                   annual_spending=p["essential"] * 12 * m, essential=p["essential"] * 12 * m,
-                   lifestyle=p["lifestyle"] * m, legacy_target=p["legacy"] * 10000,
-                   retire_age=retire if p["age"] < retire else None,
-                   annual_saving=(v.get("saving_monthly", p["saving"]) + v.get("saving_delta", 0)) * 12,
-                   survivor_spending_ratio=p["survivor"] / 100,
-                   floor_method="fixed95" if p.get("floor") == "보수적" else "actuarial")
-    care = CareMarkov() if p["enhanced"] else CareShock()
-    if v.get("care_mult"):
-        care = CareMarkov(incidence=tuple((a, x * v["care_mult"]) for a, x in CareMarkov().incidence)) \
-            if p["enhanced"] else CareShock(lam=0.03 * v["care_mult"])
-    cfg = SimConfig(n_paths=v.get("paths", p["paths"]), seed=42, care=care,
-                    nps=NPSRules(basic_region=p.get("region", "대도시")))
-    ekw = dict(v.get("eco", {}))
-    for key in ("stock_shocks", "infl_shocks"):
-        if key in ekw: ekw[key] = {int(t): x for t, x in ekw[key].items()}
-    eco = EconomyV2.enhanced(**ekw) if p["enhanced"] else EconomyV2(**ekw)
-    tkw = dict(overseas_share=p["overseas"] / 100, n_children=p["children"],
-               ownership=None if (p["own_equal"] or not p["spouse"]) else (1, 0))
-    tkw.update(v.get("tax", {}))
-    k = len(members)
-    hv = v.get("house", {})
-    rm_age = hv.get("rm_age", p.get("rm_age", 0)); ds_age = hv.get("ds_age", p.get("ds_age", 0))
-    house = HouseConfig(official=p["h_official"] * 10000, market=p["h_market"] * 10000, n_houses=p["h_n"],
-                        owner_share=(tuple([1 / k] * k) if p["h_joint"] else None), years_held=p["h_years"],
-                        hi_property_monthly=p["h_hi"] or None, rent_annual=p["rent"],
-                        reverse_mortgage_age=rm_age or None, downsize_age=ds_age or None,
-                        downsize_ratio=hv.get("ds_ratio", p.get("ds_ratio", 50)) / 100)
-    biz = [dict(income=p["biz"], until_age=p["biz_until"], workplace=p["biz_work"])] if p["biz"] > 0 else [None]
-    biz += [None] * (k - 1)
-    q = None
-    if v.get("q_mult"):
-        q = {s: np.minimum(a * v["q_mult"], 1) for s, a in mortality.default_qx().items()}
-        for a in q.values(): a[-1] = 1
-    return hh, cfg, eco, TaxConfig(**tkw), house, biz, q, AddOns(**v.get("addons", {}))
 
 
 @st.cache_data(ttl=600, max_entries=16, show_spinner=False)
 def explore(p_json: str, kind: str) -> dict:
     """(v29) 주식 비중 경로 / 국민연금 개시 나이 / 인출 순서를 같은 시나리오 위에서 비교."""
     p = json.loads(p_json)
-    hh, cfg, eco, tc, house, biz, q, ad = build(p, {})
+    hh, cfg, eco, tc, house, biz, q, ad = build_case(p, {})
     return optimize.search(hh, cfg, kind, e=eco, tc=tc, house=house, qx_table=q, biz=biz, addons=ad)
 
 
 @st.cache_data(ttl=600, max_entries=128, show_spinner=False)
 def simulate(p_json: str, v_json: str) -> dict:
     p, v = json.loads(p_json), json.loads(v_json)
-    hh, cfg, eco, tc, house, biz, q, ad = build(p, v)
+    hh, cfg, eco, tc, house, biz, q, ad = build_case(p, v)
     res = engine_tax.run(hh, cfg, e=eco, tc=tc, house=house, qx_table=q, biz=biz, addons=ad)
     s = engine_tax.summarize(res)
     d = res["depleted_at"]; y = res["youngest_age"]; ages = np.arange(res["T"] + 1) + y
@@ -242,20 +176,10 @@ def stock_lookup(code: str):
     return stock_stats(code, years=10, ecos_key=key)
 
 
-ERP_SD = 0.014          # 주식 위험프리미엄 추정 표준오차 (KOSPI 2000~2026)
-
-
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def assumption_band(p_json: str) -> tuple:
-    """가정(주식 위험프리미엄)을 ±1 표준오차만큼 움직였을 때 기본생활 지킬 확률의 범위.
-    계산 횟수를 늘려도 줄지 않는 불확실성이라, 결과를 한 숫자로 읽지 않게 하려고 보여준다."""
-    p = json.loads(p_json)
-    base = EconomyV2.enhanced().erp
-    out = []
-    for d in (-ERP_SD, ERP_SD):
-        r = simulate(p_json, json.dumps({"eco": {"erp": base + d}}, sort_keys=True))
-        out.append(r["s"]["기본생활 유지 확률"])
-    return min(out), max(out)
+    """가정(주식 위험프리미엄)을 ±1 표준오차만큼 움직였을 때의 범위. 계산은 advice 가 한다."""
+    return _assumption_band(json.loads(p_json))
 
 
 def run(p, v=None):
@@ -300,38 +224,10 @@ def required_saving(p_json: str, target: float = 0.9):
     return solve_for(f, lo, hi, target)
 
 
-@st.cache_data(ttl=600, max_entries=16, show_spinner=False)
+@st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def action_ranking(p_json: str):
-    """바꿀 수 있는 선택지들을 같은 시나리오로 돌려 효과(기본생활 지킬 확률 상승) 순으로 정렬."""
-    p = json.loads(p_json); paths = min(p["paths"], 3000)   # 후보가 많아 가볍게 (순위만 보면 충분)
-    b0 = run(p, {"paths": paths})
-    cands = []
-    pre = p["age"] < p["retire_age"]
-    if pre:
-        cands += [("은퇴를 2년 늦추기", f"{p['retire_age']}세 → {p['retire_age'] + 2}세", {"retire_delta": 2}),
-                  ("매달 저축 30만 원 늘리기", f"월 {monthly_saving(p):.0f}만 원 → {monthly_saving(p) + 30:.0f}만 원", {"saving_delta": 30})]
-    cands += [("생활비를 10% 줄이기", f"기본 월 {p['essential']}만 원 → {p['essential'] * 0.9:.0f}만 원", {"spend_mult": 0.9})]
-    for k, w in PROFILES.items():
-        if k != p["profile"]:
-            cands.append((f"투자 성향을 {k}으로", f"{p['profile']} → {k} (주식 비중 {w * 100:.0f}%)", {"stock_weight": w}))
-    for a in (60, 65, 68, 70):
-        if a != p["nps_start"] and a >= min(p["age"], 70):
-            cands.append((f"국민연금을 {a}세부터 받기", f"{p['nps_start']}세 → {a}세", {"nps_start": a}))
-    if p["h_market"] > 0 and p["h_n"] == 1 and p["h_official"] <= 12 and not p.get("rm_age"):
-        young = min(p["age"], p["s_age"]) if p["spouse"] else p["age"]
-        for ra in sorted({max(young, 55, p["retire_age"] - (p["age"] - young)), max(young, 70)}):
-            cands.append((f"{ra}세에 주택연금 가입", "집에 살면서 매달 연금 받기", {"house": {"rm_age": int(ra)}}))
-    if p["h_market"] > 0 and not p.get("ds_age"):
-        da = max(p["age"], 70)
-        cands.append((f"{da}세에 집을 줄여 이사", f"시세 {p['h_market']:.1f}억 → 절반 가격 집", {"house": {"ds_age": int(da), "ds_ratio": 50}}))
-    out = []
-    for lab, how, v in cands:
-        v = dict(v); v["paths"] = paths
-        r = run(p, v); dlt, ci = paired(r, b0)
-        gain = -dlt
-        if gain > ci: out.append((lab, how, gain, ci))
-    return sorted(out, key=lambda x: -x[2])
-
+    """효과가 큰 순서 — 계산은 라이브러리(advice)가 하고 여기서는 캐시만 한다."""
+    return _action_ranking(json.loads(p_json))
 
 def paired(a, b):
     x = a["dep"].astype(float) - b["dep"].astype(float); n = len(x)
@@ -343,11 +239,6 @@ def paired(a, b):
 def pct(x): return f"{x * 100:.0f}%"
 
 
-def income_gap(p):
-    need = p["essential"] + p["lifestyle"] / 12
-    n1, n2 = nps_values(p)
-    pension = n1 + n2 + p["priv"] / 12
-    return need, pension, need - pension
 
 
 # ─────────────────────────── 단계별 입력 ───────────────────────────
@@ -365,7 +256,7 @@ def go(delta):
     ss.step = max(0, min(len(STEPS) - 1, ss.step + delta)); st.rerun()
 
 
-st.markdown("### 🧭 노후나침반")
+st.markdown(f"### 🧭 {BRAND.name}")
 if ss.step < len(STEPS) and not ss.get("done"):
     st.markdown(f'<p class="sub">내가 원하는 은퇴생활을 지키려면 무엇이 필요한지, 1만 가지 미래로 확인합니다. '
                 f'단계 {ss.step + 1}/{len(STEPS)} · {STEPS[ss.step]}</p>', unsafe_allow_html=True)
@@ -728,47 +619,10 @@ def cfg_max_age() -> int:
 
 
 def make_report(p, base, client, advisor, cid) -> str:
-    """현재 결과를 상담 리포트(HTML)로 묶는다. 화면에 보여주는 숫자와 같은 값을 쓴다."""
-    s_ = base["s"]; ok = s_["기본생활 유지 확률"]; n_ok = int(round(ok * 10))
-    need, pension, gap = income_gap(p)
-    short = max(gap, 0)
-    when = f"{base['dep_age']:.0f}세쯤 " if base["dep_age"] else ""
-    hero = (f'지금 계획대로면 10번 중 <span class="n">{10 - n_ok}번</span>은 {when}생활비가 모자랍니다.'
-            if n_ok < 10 else "지금 계획대로면 10번 중 9번 이상 생활비를 끝까지 낼 수 있습니다.")
-    goals = [("🏠 기본 생활", "먹고 사는 데 꼭 필요한 돈", f"10번 중 {n_ok}번 가능")]
-    if p["lifestyle"] > 0:
-        goals.append(("✈️ 여행·취미", "원하는 예산 중 쓸 수 있는 정도", f"{s_.get('여행·취미 평균 충족률', 0) * 100:.0f}% 정도"))
-    if p["legacy"] > 0:
-        goals.append((f"👨‍👩‍👧 자녀", f"{p['legacy']:.1f}억 원 남기기",
-                      f"10번 중 {int(round(s_.get('유산 목표 달성 확률', 0) * 10))}번 가능"))
-    lo, hi = assumption_band(json.dumps(p, sort_keys=True))
-    band = (f"주식이 앞으로 얼마나 오를지는 아무도 모릅니다. 과거 자료로 추정한 범위 안에서만 봐도 위 "
-            f"<b>{pct(ok)}</b>는 <b>{pct(lo)} ~ {pct(hi)}</b> 사이에서 움직입니다. "
-            f"계산을 더 많이 해도 이 폭은 줄지 않으니, 숫자 하나보다 <b>선택을 바꿨을 때의 차이</b>를 보셔야 합니다.")
-    acts = [(lab, how, f"{ok * 100:.0f}% → {min(ok + g, 1) * 100:.0f}% ({g * 100:+.0f}%p)")
-            for lab, how, g, _ in action_ranking(json.dumps(p, sort_keys=True))[:3]] if n_ok < 9 else []
-    # 100세까지만 그린다 — 그 뒤는 살아 있는 경로가 적어 분위수가 들쭉날쭉해 읽기 어렵다
-    rows = [(int(r[0]), r[4] / 10000, r[3] / 10000, r[2] / 10000) for r in base["fan"] if r[0] <= 100]
-    po = base.get("post", {})
-    flow = [("연금 수입", pension * 12), ("생활비", -(p["essential"] * 12 + p["lifestyle"])),
-            ("세금", -po.get("세금", 0.0)), ("건보료", -po.get("건보료", 0.0))]
-    if po.get("보유세", 0) > 0:
-        flow.append(("보유세", -po["보유세"]))
-    assume = ("· 금리·물가·주가가 서로 연결되어 움직이는 1만 가지 미래를 계산했습니다(한국은행 ECOS 2000~2026, KOSPI).<br>"
-              "· 수명은 통계청 2024 완전생명표에 앞으로의 수명 연장을 반영했고, 간병은 건강보험공단 장기요양 통계로 추정했습니다.<br>"
-              "· 국민연금·유족연금·기초연금·건강보험료·세금을 2026년 기준으로 반영했습니다.<br>"
-              f"· 기본생활비 월 {p['essential']:,}만 원, 여행·취미 연 {p['lifestyle']:,}만 원, "
-              f"국민연금 개시 {p['nps_start']}세로 계산했습니다.<br>"
-              "· 결과는 가정에 따라 달라집니다. 절대값보다 선택지 사이의 차이를 보시기 바랍니다.")
-    return report.build(dict(
-        client=client or "고객", advisor_line=f" · 상담 {advisor}" if advisor else "",
-        date=f"{date.today():%Y년 %m월 %d일}", calc_id=cid, version=MODEL_VERSION,
-        hero=hero, goals=goals,
-        gap_eq=f"필요한 생활비 월 {need:.0f}만 원 − 받는 연금 월 {pension:.0f}만 원 (오늘 돈 가치 기준)",
-        gap_big=(f"매달 {short:.0f}만 원을 모아둔 돈에서 꺼내 써야 합니다" if short > 0
-                 else "연금만으로 생활비가 충분합니다"),
-        band=band, actions=acts, fan_svg=report.line_chart_svg(rows),
-        flow_svg=report.waterfall_svg(flow), assumptions=assume))
+    """상담 리포트. 화면에 이미 계산해 둔 결과와 순위를 넘겨 다시 돌리지 않는다."""
+    acts = action_ranking(json.dumps(p, sort_keys=True)) if base["s"]["기본생활 유지 확률"] < 0.9 else []
+    return build_report(p, client_name=client, advisor=advisor, brand=BRAND, actions=acts,
+                        band=assumption_band(json.dumps(p, sort_keys=True)))
 
 
 def whatif(rows):

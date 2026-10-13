@@ -1,5 +1,45 @@
 # 변경 내역 (Changelog)
 
+## v35 — HTTP API와 화이트라벨 (2026-10-14)
+
+기업이 자기 앱에 이 계산을 붙일 수 있게 하고, 리포트·화면에서 우리 이름을 지웠습니다.
+
+### ① 업무 로직을 앱 밖으로 (`inputs.py`, `advice.py`, `reporting.py`)
+가장 큰 작업은 API가 아니라 **그 앞의 정리**였습니다. 입력을 엔진 설정으로 바꾸는 `build()`, 선택지 순위를 매기는 `action_ranking()`, 리포트를 조립하는 `make_report()` 가 전부 `streamlit_app.py` 안에 있었습니다. 화면을 거치지 않으면 계산을 돌릴 수 없는 구조라 API도 배치도 불가능했습니다.
+
+- `retire_sim/inputs.py` — 입력 변환(`build_case`), 기본값(`defaults`/`fill`), **입력 검증(`validate`)**
+- `retire_sim/advice.py` — 선택지 순위(`action_ranking`), 가정의 폭(`assumption_band`)
+- `retire_sim/reporting.py` — 리포트 조립(`build_report`)
+
+앱과 API가 **같은 함수**를 쓰므로 둘의 결과가 어긋날 수 없습니다. 앱이 자체 `build` 를 다시 만들면 테스트가 잡습니다.
+
+**입력 검증**을 새로 넣었습니다. `sex=123` 같은 값이 들어오면 엔진 안에서 `KeyError` 로 터지던 것을, 앞단에서 "sex=123 — 가능한 값: M, F"처럼 어디가 틀렸는지 알려 주고 막습니다(API는 422).
+
+### ② HTTP API (`retire_sim/api.py`)
+```
+RETIRE_API_KEYS="기관A:키1,기관B:키2" uvicorn retire_sim.api:app --port 8000
+```
+| 엔드포인트 | 하는 일 |
+|---|---|
+| `GET /health`, `GET /version` | 상태·모델 버전 |
+| `GET /defaults` | 입력 기본값 — 아는 값만 덮어쓰면 됩니다 |
+| `POST /simulate` | 가구 입력 → 목표 달성 확률·꼬리 위험·세금 |
+| `POST /compare` | 여러 선택지를 **같은 난수**로 비교 (짝지은 95% 신뢰구간) |
+| `POST /report` | 상담 리포트 HTML (브랜드 적용) |
+| `POST /product/compare` | 연금보험 vs 펀드 vs 예금 |
+
+응답마다 `calc_id` 와 `model_version` 을 넣습니다. 나중에 "그때 그 숫자"를 그대로 재현할 수 있어야 하기 때문입니다. 인증은 API 키 한 줄이고, 키를 설정하지 않으면 로컬 개발용으로만 열립니다. 한 요청이 서버를 독차지하지 않도록 경로 수·선택지 수에 상한을 뒀습니다.
+
+### ③ 화이트라벨 (`branding.py`)
+기관 이름·색·로고·고지문을 설정 하나로 뺐습니다. 환경변수(`RETIRE_BRAND`), Streamlit Secrets(`[brand]`), 파일, API 요청의 `brand` 필드 어디로든 줄 수 있습니다.
+
+색은 **`#RGB`·`#RRGGBB` 만** 받습니다. 리포트 CSS에 그대로 들어가므로 `red; } body { display:none` 같은 값이 통과하면 안 됩니다. 로고도 `https:` 와 `data:image/` 만 허용합니다(`javascript:` 차단). 설정이 깨져 있어도 기본값으로 뜹니다 — 브랜딩 때문에 서비스가 죽으면 안 되니까요.
+
+### 함께
+- `requirements-api.txt` 분리 — 웹 앱 배포에는 FastAPI가 설치되지 않습니다
+- CI가 API 테스트까지 실행하도록 워크플로 갱신
+- 테스트 41개 → 55개 (API·인증·입력검증·브랜드 안전성·앱/라이브러리 일치)
+
 ## v34 — 실제 연금보험 상품 비교 (2026-10-13)
 
 지금까지 `AddOns` 의 연금은 "종신연금"처럼 **유형** 수준이었습니다. 그런데 설계사가 파는 것은 "A생명 ○○연금보험 2종"이고 공시이율·사업비·최저보증이율·해지공제가 상품마다 다릅니다. 상품설명서의 숫자를 그대로 넣어 비교할 수 있게 `retire_sim/product.py` 를 만들었습니다.

@@ -1,0 +1,6 @@
+# HTTP API 를 띄울 때만 필요합니다 (웹 앱에는 쓰이지 않음)
+#   pip install -r requirements.txt -r requirements-api.txt
+#   RETIRE_API_KEYS="기관A:키1" uvicorn retire_sim.api:app --port 8000
+fastapi>=0.110
+uvicorn[standard]>=0.29
+httpx>=0.27          # 테스트 클라이언트
