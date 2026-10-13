@@ -5,11 +5,180 @@
 순서(매년): 연금수입 → 증여 → 계좌 이전 → 지출 → 연금계좌 인출 → 세금·건보료 → 과세계좌·ISA 인출 → 수익률 → 상속
 """
 import numpy as np
-from .config import Household, SimConfig, AddOns
+from .config import Household, SimConfig, AddOns, CareMarkov
 from . import mortality, pension
 from .economy_v2 import EconomyV2, generate
 from .tax import (reverse_mortgage_monthly, acquisition_tax_rate, one_house_cgt, TaxConfig, HouseConfig, income_tax_person, private_pension_tax, health_premium, estate_tax,
                   property_tax, comprehensive_property_tax, rent_tax, gift_tax)
+
+
+def glide_path(hh: Household, T):
+    """(v29) 나이별 주식 비중 경로. glide_end가 없으면 평생 같은 비중."""
+    if hh.glide_end is None:
+        return np.full(T + 1, float(hh.stock_weight))
+    a0, a1 = hh.glide_ages
+    ages = hh.members[0].age + np.arange(T + 1)
+    return hh.stock_weight + (hh.glide_end - hh.stock_weight) * np.clip((ages - a0) / max(a1 - a0, 1), 0, 1)
+
+
+def joint_pv(hh: Household, qx_table, t0):
+    """부부 중 한 명이라도 생존하는 동안 연 1원의 현가 (실질 할인).
+    주택연금·월세 절감처럼 '살아있는 동안 계속 들어오는 돈'을 보호선에서 빼줄 때 쓴다."""
+    v = 1 / (1 + hh.floor_real_rate); surv = []
+    for m in hh.members:
+        q = np.minimum(qx_table[m.sex] * hh.floor_mort_mult, 1.0); x = min(m.age + t0, len(q) - 1)
+        surv.append(np.concatenate([[1.0], np.cumprod(1 - q[x:-1])]))
+    L = min(len(z) for z in surv); p = surv[0][:L]
+    if len(surv) > 1:
+        p = surv[0][:L] + surv[1][:L] - surv[0][:L] * surv[1][:L]
+    return float(np.sum(v ** np.arange(L) * p))
+
+
+def annuity_pv(hh: Household, cfg: SimConfig, ad: AddOns, qx_table, members, t0):
+    """t0년에 가입할 때 연금 1원(첫해)의 현가. 부부형 생존자 비율·보증기간·체증형 반영.
+
+    지급비율 = 보증기간 중이면 1, 이후 둘 다 생존 1 / 한 명만 생존 survivor_ratio / 아무도 없으면 0.
+    보험료 = 일시납 / (이 현가 × (1 + 사업비율)) 로 쓰인다.
+    """
+    v = 1 / (1 + ad.annuity_rate); g = ad.annuity_escalation; r = ad.annuity_survivor_ratio
+    surv = []
+    for i in members:
+        m = hh.members[i]
+        q = np.minimum(mortality.project_qx(qx_table[m.sex], t0) * ad.annuity_mort_mult, 1.0) \
+            if cfg.mortality_improvement else np.minimum(qx_table[m.sex] * ad.annuity_mort_mult, 1.0)
+        x = min(m.age + t0, len(q) - 1)
+        surv.append(np.concatenate([[1.0], np.cumprod(1 - q[x:-1])]))
+    L = min(len(z) for z in surv)
+    if len(surv) > 1:
+        p0, p1 = surv[0][:L], surv[1][:L]
+        pay = p0 * p1 + r * (p0 * (1 - p1) + (1 - p0) * p1)
+    else:
+        pay = surv[0][:L]
+    s_ = np.arange(L)
+    if ad.annuity_guarantee_years > 0:
+        pay = np.where(s_ < ad.annuity_guarantee_years, 1.0, pay)
+    return float(np.sum((v ** s_) * ((1 + g) ** s_) * pay))
+
+
+def care_insurance_premium(hh: Household, ad: AddOns, alive, incare, trig, T):
+    """간병보험료를 수지상등 원칙으로 산출: (1 + 사업비율) × 급부 현가 / 보험료 납입 현가.
+
+    이 모델이 뽑은 간병·사망 경로(trig = 지급 트리거) 그대로를 쓰므로,
+    보험료가 이 가구의 실제 위험을 반영한다.
+    """
+    i0 = ad.care_member; v = (1 + ad.care_rate) ** -np.arange(T + 1)
+    ages_i = hh.members[i0].age + np.arange(T + 1)
+    pv_ben = (trig[i0] * v).sum(1).mean() * ad.care_benefit
+    pay = alive[i0] & ~incare[i0] & (ages_i < ad.care_pay_until)[None, :]
+    pv_prem = (pay * v).sum(1).mean()
+    return (1 + ad.care_loading) * pv_ben / max(pv_prem, 1e-9)
+
+
+def life_paths(hh: Household, cfg: SimConfig, qx_table, T, n, rng, markov: bool):
+    """가구원의 생존·간병 경로와 간병비 수준을 뽑는다.
+
+    반환: alive, incare, severe (각 (구성원, 경로, 연도) 불리언), care_level, sev_level (경증·중증 연간 비용).
+    markov=False면 간병 단계를 쓰지 않으므로 incare·severe·비용은 None.
+    난수는 호출 순서대로 rng에서 뽑으므로, 이 함수의 호출 위치를 바꾸면 경로가 바뀐다.
+    """
+    k = len(hh.members)
+    qmult = mortality.longevity_multiplier(n, T, cfg.longevity_sigma_level,
+                                           cfg.longevity_sigma_trend, cfg.seed)   # (v30) 장수 불확실성
+    if markov:
+        lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care, return_severe=True,
+                                         improve=cfg.mortality_improvement, qmult=qmult) for m in hh.members]
+        alive = np.stack([l[0] for l in lives])
+        incare = np.stack([l[1] for l in lives]); severe = np.stack([l[2] for l in lives])
+        care_level = cfg.care.cost_median * np.exp(cfg.care.cost_log_sigma * rng.standard_normal((k, n)))
+        sev_level = cfg.care.cost_severe_median * np.exp(cfg.care.cost_severe_sigma * rng.standard_normal((k, n)))
+    else:
+        alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng,
+                                                   improve=cfg.mortality_improvement, qmult=qmult)
+                          for m in hh.members])
+        incare = severe = care_level = sev_level = None
+    if k == 2:                                                  # (v30) 사별 효과
+        alive, incare, severe = mortality.apply_widowhood(
+            alive, incare, severe, [qx_table[m.sex] for m in hh.members],
+            [m.age for m in hh.members], [m.sex for m in hh.members],
+            cfg.widow_excess, cfg.widow_tau, cfg.mortality_improvement, cfg.seed,
+            qmult, cfg.widow_spike)
+    return alive, incare, severe, care_level, sev_level
+
+
+def dependent_care(hh: Household, cfg: SimConfig, qx_table, T, n, rng, markov: bool):
+    """(v36) 더블케어: 부양하는 부모의 간병비 (경로, 연도), 실질 기준.
+
+    수명·간병은 가구원과 같은 방식으로 돌리되 생활비는 넣지 않는다(따로 사시므로).
+    비용은 share(형제간 분담 비율) 만큼만 이 가구가 댄다.
+    """
+    dep = np.zeros((n, T + 1))
+    proc = cfg.care if markov else CareMarkov()        # 간병 전이 과정(비용 수준은 아래에서 cfg.care 기준)
+    c = cfg.care
+    sev_med = getattr(c, "cost_severe_median", c.cost_median)      # CareShock에는 중증 단계가 없다
+    sev_sig = getattr(c, "cost_severe_sigma", c.cost_log_sigma)
+    for d in (hh.dependents or []):
+        share = float(d.get("share", 1.0))
+        if share <= 0:
+            continue
+        _, d_in, d_sev = mortality.simulate_life(
+            qx_table[d.get("sex", "F")], int(d["age"]), T, n, rng, proc,
+            return_severe=True, improve=cfg.mortality_improvement)
+        lvl = c.cost_median * np.exp(c.cost_log_sigma * rng.standard_normal(n))
+        slv = sev_med * np.exp(sev_sig * rng.standard_normal(n))
+        dep += share * ((d_in & ~d_sev) * lvl[:, None] + d_sev * slv[:, None])
+    return dep
+
+
+def floor_table(hh: Household, cfg: SimConfig, e: EconomyV2, house: HouseConfig, qx_table, T, ess_base):
+    """기본생활비 보호선 F[t, 상태]: 생존확률로 가중한 '앞으로 필요한 기본생활비 부족분'의 현가.
+
+    상태 0 = 부부 모두 생존(1인 가구는 본인 생존), 1 = 본인만 생존, 2 = 배우자만 생존.
+    F[t, 상태] = Σ_s v^s Σ_상태' P(상태'|상태, t→t+s) · max(기본생활비×비율 − 보장소득_실질, 0)
+    경로에 의존하지 않으므로(시뮬레이션 전에 한 번 계산) 루프 밖에서 표로 만들어 둔다.
+    """
+    k = len(hh.members)
+    v_r = 1 / (1 + hh.floor_real_rate); pibar = e.pi_theta
+    qf = [np.minimum(qx_table[m.sex] * hh.floor_mort_mult, 1.0) for m in hh.members]
+
+    def inc_vec(i, yrs):                                   # 구성원 i의 보장소득(실질) 벡터
+        m = hh.members[i]; ages = m.age + yrs
+        x = np.where(ages >= m.nps_start_age, pension.nps_annual_amount(m, cfg.nps), 0.0)
+        mask = (m.private_pension_start <= ages) & (ages < m.private_pension_start + m.private_pension_years)
+        return x + np.where(mask, m.private_pension_annual / (1 + pibar) ** yrs, 0.0)
+
+    def inc_alone(i, yrs):                                 # (v28) 배우자 사망 후: 유족연금 선택 반영
+        base = inc_vec(i, yrs)
+        if k < 2 or not cfg.nps.survivor_on:
+            return base
+        m = hh.members[i]; ages = m.age + yrs
+        own = np.where(ages >= m.nps_start_age, pension.nps_annual_amount(m, cfg.nps), 0.0)
+        S = pension.survivor_annual(hh.members[1 - i])
+        o2, s2 = pension.survivor_split(own, S, cfg.nps.survivor_overlap)
+        return base - own + o2 + s2
+
+    rent_real = house.rent_annual
+    H = T + 1; floor_tab = np.zeros((H, 3))
+    for t0 in range(H):
+        horizon = H - t0
+        surv = []
+        for i, m in enumerate(hh.members):
+            x0 = min(m.age + t0, len(qf[i]) - 1)
+            q = qf[i][x0:x0 + horizon]; q = np.concatenate([q, np.ones(max(0, horizon - len(q)))])
+            surv.append(np.concatenate([[1.0], np.cumprod(1 - q)[:-1]]))   # s년 뒤 생존확률
+        vs = v_r ** np.arange(horizon)
+        yrs = np.arange(t0, t0 + horizon)
+        gap = lambda members, ratio: np.maximum(
+            ess_base * ratio - sum((inc_alone if len(members) == 1 and k > 1 else inc_vec)(i, yrs)
+                                   for i in members) - rent_real, 0.0)
+        g0 = gap([0], 1.0 if k == 1 else hh.survivor_spending_ratio)
+        if k == 1:
+            floor_tab[t0, :] = np.sum(vs * surv[0] * g0); continue
+        g1 = gap([1], hh.survivor_spending_ratio); gb = gap([0, 1], 1.0)
+        p0, p1 = surv[0], surv[1]
+        floor_tab[t0, 0] = np.sum(vs * (p0 * p1 * gb + p0 * (1 - p1) * g0 + (1 - p0) * p1 * g1))
+        floor_tab[t0, 1] = np.sum(vs * p0 * g0)
+        floor_tab[t0, 2] = np.sum(vs * p1 * g1)
+    return floor_tab
 
 
 def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None,
@@ -22,23 +191,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     k = len(hh.members); youngest = min(m.age for m in hh.members)
     T, n = cfg.max_age - youngest, cfg.n_paths
     eco = generate(e, T, n, rng); cpi = eco["cpi"]
-    from .config import CareMarkov
     markov = isinstance(cfg.care, CareMarkov) and cfg.care.enabled
-    qmult = mortality.longevity_multiplier(n, T, cfg.longevity_sigma_level, cfg.longevity_sigma_trend, cfg.seed)   # (v30)
-    if markov:
-        lives = [mortality.simulate_life(qx_table[m.sex], m.age, T, n, rng, cfg.care, return_severe=True,
-                                         improve=cfg.mortality_improvement, qmult=qmult) for m in hh.members]
-        alive = np.stack([l[0] for l in lives]); incare = np.stack([l[1] for l in lives]); severe = np.stack([l[2] for l in lives])
-        care_level = cfg.care.cost_median * np.exp(cfg.care.cost_log_sigma * rng.standard_normal((k, n)))
-        sev_level = getattr(cfg.care, 'cost_severe_median', cfg.care.cost_median) * np.exp(getattr(cfg.care, 'cost_severe_sigma', cfg.care.cost_log_sigma) * rng.standard_normal((k, n)))
-    else:
-        alive = np.stack([mortality.simulate_alive(qx_table[m.sex], m.age, T, n, rng, improve=cfg.mortality_improvement, qmult=qmult) for m in hh.members])
-        incare = severe = None
-    if k == 2:                                                  # (v30) 사별 효과
-        alive, incare, severe = mortality.apply_widowhood(alive, incare, severe, [qx_table[m.sex] for m in hh.members],
-                                                          [m.age for m in hh.members], [m.sex for m in hh.members],
-                                                          cfg.widow_excess, cfg.widow_tau, cfg.mortality_improvement, cfg.seed,
-                                                          qmult, getattr(cfg, 'widow_spike', 0.0))
+    alive, incare, severe, care_level, sev_level = life_paths(hh, cfg, qx_table, T, n, rng, markov)
     hh_alive = alive.sum(0) > 0
     own = np.array(tc.ownership if tc.ownership else [1 / k] * k, float)
     hown = np.array(house.owner_share if house.owner_share else [1.0] + [0.0] * (k - 1), float)
@@ -48,32 +202,14 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     gifts_hist = []                                   # (t, 명목 증여액, 증여세)
     gift_val = np.zeros(n)                          # 증여한 돈의 현재 가치(자녀도 같은 수익률로 운용 가정, 명목)
     care_left = np.zeros((k, n), int); care_cost = np.zeros((k, n))
-    # (v36) 더블케어: 부양하는 부모의 간병비. 수명·간병은 가구원과 같은 방식으로 돌리고
-    #       생활비는 포함하지 않는다(따로 사시므로). 비용은 share 만큼만 이 가구가 댄다.
-    dep_care = np.zeros((n, T + 1))
-    for d in (hh.dependents or []):
-        d_age, d_sex = int(d["age"]), d.get("sex", "F")
-        share = float(d.get("share", 1.0))
-        if share <= 0:
-            continue
-        d_alive, d_in, d_sev = mortality.simulate_life(
-            qx_table[d_sex], d_age, T, n, rng, cfg.care if markov else CareMarkov(),
-            return_severe=True, improve=cfg.mortality_improvement)
-        lvl = cfg.care.cost_median * np.exp(cfg.care.cost_log_sigma * rng.standard_normal(n))
-        slv = getattr(cfg.care, "cost_severe_median", cfg.care.cost_median) * np.exp(
-            getattr(cfg.care, "cost_severe_sigma", cfg.care.cost_log_sigma) * rng.standard_normal(n))
-        dep_care += share * ((d_in & ~d_sev) * lvl[:, None] + d_sev * slv[:, None])
+    dep_care = dependent_care(hh, cfg, qx_table, T, n, rng, markov)
     # (v36) 간병비 전용 물가: 일반 물가 × (1 + 초과상승률)^t
-    care_cpi = cpi * (1 + getattr(cfg, "care_real_growth", 0.0)) ** np.arange(T + 1)[None, :]
+    care_cpi = cpi * (1 + cfg.care_real_growth) ** np.arange(T + 1)[None, :]
     dep_at = np.full(n, -1)
     tax_y = np.zeros((n, T)); hi_y = np.zeros((n, T)); prop_y = np.zeros((n, T))
     estate_real = np.full(n, np.nan); etax_real = np.full(n, np.nan); transfer_real = np.full(n, np.nan)
     w = hh.stock_weight
-    if hh.glide_end is not None:                                # (v29) 나이별 주식 비중 경로 (선형)
-        _a0, _a1 = hh.glide_ages; _ag = hh.members[0].age + np.arange(T + 1)
-        w_path = hh.stock_weight + (hh.glide_end - hh.stock_weight) * np.clip((_ag - _a0) / max(_a1 - _a0, 1), 0, 1)
-    else:
-        w_path = np.full(T + 1, float(hh.stock_weight))
+    w_path = glide_path(hh, T)
     W_hist = np.zeros((n, T + 1)); W_hist[:, 0] = Wt
     ess_base = hh.essential if hh.essential is not None else hh.annual_spending
     spend_base = ess_base + hh.lifestyle
@@ -89,89 +225,21 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         mv = np.minimum(ad.deposit_amount, Wt); Wt -= mv; Bt -= mv; D += mv
     ann_pay = np.zeros(n); ann_t = max(0, ad.annuity_start_age - hh.members[0].age)
     ann_members = list(range(k)) if (ad.annuity_joint and k > 1) else [0]
-    def annuity_factor(t0):
-        """연금 1원(첫해)의 현가. 부부형 생존자 비율·보증기간·체증형 반영.
-        지급비율 = max(보증기간 중이면 1, 둘 다 생존 1 / 한 명 생존 r / 아무도 없으면 0)"""
-        v = 1 / (1 + ad.annuity_rate); g = ad.annuity_escalation; r = ad.annuity_survivor_ratio
-        surv = []
-        for i in ann_members:
-            m = hh.members[i]
-            q = np.minimum(mortality.project_qx(qx_table[m.sex], t0) * ad.annuity_mort_mult, 1.0) \
-                if cfg.mortality_improvement else np.minimum(qx_table[m.sex] * ad.annuity_mort_mult, 1.0)
-            x = min(m.age + t0, len(q) - 1)
-            surv.append(np.concatenate([[1.0], np.cumprod(1 - q[x:-1])]))
-        L = min(len(z) for z in surv)
-        if len(surv) > 1:
-            p0, p1 = surv[0][:L], surv[1][:L]
-            pay = p0 * p1 + r * (p0 * (1 - p1) + (1 - p0) * p1)
-        else:
-            pay = surv[0][:L]
-        s_ = np.arange(L)
-        if ad.annuity_guarantee_years > 0:
-            pay = np.where(s_ < ad.annuity_guarantee_years, 1.0, pay)
-        return float(np.sum((v ** s_) * ((1 + g) ** s_) * pay))
-    ci_prem = 0.0; ci_on = ad.care_benefit > 0 and markov and ad.care_member < k
-    if ci_on:                                                  # 수지상등: 모델 자체의 간병·사망 경로로 보험료 산출
-        i0 = ad.care_member; v = (1 + ad.care_rate) ** -np.arange(T + 1)
-        ages_i = hh.members[i0].age + np.arange(T + 1)
-        trig = severe if (ad.care_trigger == "severe" and getattr(cfg.care, "two_level", False)) else incare
-        pv_ben = (trig[i0] * v).sum(1).mean() * ad.care_benefit
-        pay = alive[i0] & ~incare[i0] & (ages_i < ad.care_pay_until)[None, :]
-        pv_prem = (pay * v).sum(1).mean()
-        ci_prem = (1 + ad.care_loading) * pv_ben / max(pv_prem, 1e-9)
+    annuity_factor = lambda t0: annuity_pv(hh, cfg, ad, qx_table, ann_members, t0)
+    ci_on = ad.care_benefit > 0 and markov and ad.care_member < k
+    trig = None                                                # 간병보험 지급 트리거(중증만 / 경증부터)
+    if ci_on:
+        trig = severe if (ad.care_trigger == "severe" and cfg.care.two_level) else incare
+        ci_prem = care_insurance_premium(hh, ad, alive, incare, trig, T)
+    else:
+        ci_prem = 0.0
     stock_ret = np.full((n, T), np.nan); port_ret = np.full((n, T), np.nan)
     # (v36) 패닉 매도: 경로마다 '지금 실제로 들고 있는 주식 비중'을 따로 들고 간다
     panic_on = cfg.panic_drop > 0
     w_now = np.full(n, float(w_path[0]))
     prev_life = None                                           # 작년에 쓴 여행·취미 예산(실질) — 지출 경직성용
 
-    # ── v16 기본생활비 보호선: 생존확률 가중 현가 (계리적) ──
-    # 상태 0 = 부부 모두 생존(1인 가구는 본인 생존), 1 = 본인만, 2 = 배우자만.
-    # F[t, 상태] = Σ_s v^s Σ_상태' P(상태'|상태, t→t+s) · max(기본생활비×비율 − 보장소득_실질, 0)   (오늘 가치)
-    floor_tab = None
-    if hh.floor_method == "actuarial":
-        v_r = 1 / (1 + hh.floor_real_rate); pibar = e.pi_theta
-        qf = [np.minimum(qx_table[m.sex] * hh.floor_mort_mult, 1.0) for m in hh.members]
-        def inc_vec(i, yrs):                               # 구성원 i의 보장소득(실질) 벡터
-            m = hh.members[i]; ages = m.age + yrs
-            x = np.where(ages >= m.nps_start_age, pension.nps_annual_amount(m, cfg.nps), 0.0)
-            mask = (m.private_pension_start <= ages) & (ages < m.private_pension_start + m.private_pension_years)
-            return x + np.where(mask, m.private_pension_annual / (1 + pibar) ** yrs, 0.0)
-
-        def inc_real(i, yr):                               # 구성원 i의 yr년차 보장소득(실질): 국민연금(물가연동) + 사적연금(명목 정액)
-            m = hh.members[i]; age = m.age + yr; x = 0.0
-            if age >= m.nps_start_age: x += pension.nps_annual_amount(m, cfg.nps)
-            if m.private_pension_start <= age < m.private_pension_start + m.private_pension_years:
-                x += m.private_pension_annual / (1 + pibar) ** yr
-            return x
-        def inc_alone(i, yrs):                             # (v28) 배우자 사망 후 구성원 i의 보장소득: 유족연금 선택 반영
-            base = inc_vec(i, yrs)
-            if k < 2 or not cfg.nps.survivor_on: return base
-            m = hh.members[i]; ages = m.age + yrs
-            own = np.where(ages >= m.nps_start_age, pension.nps_annual_amount(m, cfg.nps), 0.0)
-            S = pension.survivor_annual(hh.members[1 - i])
-            o2, s2 = pension.survivor_split(own, S, cfg.nps.survivor_overlap)
-            return base - own + o2 + s2
-        rent_real = house.rent_annual
-        H = T + 1; floor_tab = np.zeros((H, 3))
-        for t0 in range(H):
-            horizon = H - t0
-            surv = []
-            for i, m in enumerate(hh.members):
-                x0 = min(m.age + t0, len(qf[i]) - 1)
-                q = qf[i][x0:x0 + horizon]; q = np.concatenate([q, np.ones(max(0, horizon - len(q)))])
-                surv.append(np.concatenate([[1.0], np.cumprod(1 - q)[:-1]]))   # s년 뒤 생존확률
-            vs = v_r ** np.arange(horizon)
-            yrs = np.arange(t0, t0 + horizon)
-            gap = lambda members, ratio: np.maximum(ess_base * ratio - sum((inc_alone if len(members) == 1 and k > 1 else inc_vec)(i, yrs) for i in members) - rent_real, 0.0)
-            g0 = gap([0], 1.0 if k == 1 else hh.survivor_spending_ratio)
-            if k == 1:
-                floor_tab[t0, :] = np.sum(vs * surv[0] * g0); continue
-            g1 = gap([1], hh.survivor_spending_ratio); gb = gap([0, 1], 1.0)
-            p0, p1 = surv[0], surv[1]
-            floor_tab[t0, 0] = np.sum(vs * (p0 * p1 * gb + p0 * (1 - p1) * g0 + (1 - p0) * p1 * g1))
-            floor_tab[t0, 1] = np.sum(vs * p0 * g0)
-            floor_tab[t0, 2] = np.sum(vs * p1 * g1)
+    floor_tab = floor_table(hh, cfg, e, house, qx_table, T, ess_base) if hh.floor_method == "actuarial" else None
     short_real = np.zeros(n)                                   # 생존 중 부족했던 기본생활비 누계(실질)
     cons_u = np.zeros(n); cons_a = np.zeros(n)                 # (v27) CRRA 효용 누적, 할인·생존 가중 합
     gamma = getattr(cfg, 'risk_aversion', 3.0); beta = 1 / 1.02
@@ -193,14 +261,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     mort_bal = np.zeros(n); mort_pay = np.zeros(n); mort_rate = np.zeros(n)   # 주택담보대출(원리금균등, 명목)
     rent_save = np.zeros(n)                                    # (v24) 집을 사서 더 안 내게 된 월세·전세대출 이자(연, 오늘 가치)
     debt_retire_real = np.full(n, np.nan); debt_settled = False
-    def joint_factor(t0):                                      # 부부 중 한 명이라도 생존하는 동안의 연금현가 (실질 할인)
-        v = 1 / (1 + hh.floor_real_rate); surv = []
-        for m in hh.members:
-            q = np.minimum(qx_table[m.sex] * hh.floor_mort_mult, 1.0); x = min(m.age + t0, len(q) - 1)
-            surv.append(np.concatenate([[1.0], np.cumprod(1 - q[x:-1])]))
-        L = min(len(x) for x in surv); p = surv[0][:L]
-        if len(surv) > 1: p = surv[0][:L] + surv[1][:L] - surv[0][:L] * surv[1][:L]
-        return float(np.sum(v ** np.arange(L) * p))
+    joint_factor = lambda t0: joint_pv(hh, qx_table, t0)
 
     def sell_from_taxable(amount):
         """과세계좌에서 매도: 실현이익 반환(해외주식분만 과세 대상)."""
@@ -406,7 +467,9 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         need = spend + care + ci_cost + ev_cost - income_all - saving
         pw = np.zeros(n); pw_taxable = np.zeros(n)
         pen_self = ad.pension_contrib_annual > 0 or hh.pension_balance > 0 or hh.retirement_contrib
-        pen_active = tc.enabled and (tc.use_pension or pen_self)
+        # 세금을 끄는 것(tc.enabled=False)은 '세금을 안 매긴다'는 뜻이어야 한다.
+        # 전에는 이 줄이 연금계좌 인출 자체를 막아, 세금을 끄면 퇴직연금이 동결돼 결과가 거꾸로 나왔다.
+        pen_active = tc.use_pension or pen_self
         pen_open = (tc.use_pension and t >= tc.pen_wait_years) or (pen_self and retired and hh.members[0].age + t >= 55)
         if pen_active and pen_open:
             pw = np.clip(np.minimum(need, tc.pen_withdraw_cap * na), 0, Wp)

@@ -615,3 +615,144 @@ def test_behaviour_defaults_are_off():
     """기본값은 '합리적 가구' — 행동 가정은 켜야 적용된다(기존 결과와의 연속성)."""
     c = SimConfig()
     assert c.panic_drop == 0.0 and c.lifestyle_floor == 0.0
+
+
+# ── v37 루프 밖으로 뺀 계산들: 경로에 의존하지 않으므로 단독으로 검증할 수 있다 ──
+
+def test_glide_path_is_linear_between_ages_and_flat_outside():
+    """주식 비중 경로: 시작 나이 전엔 처음 비중, 끝 나이 후엔 목표 비중, 사이는 선형."""
+    hh = replace(couple_60(), stock_weight=0.6, glide_end=0.2, glide_ages=(60, 80))
+    w = engine_tax.glide_path(hh, 40)                      # 60세부터 40년
+    assert w[0] == pytest.approx(0.6)                      # 60세: 아직 안 줄였다
+    assert w[10] == pytest.approx(0.4)                     # 70세: 절반
+    assert w[20] == pytest.approx(0.2) and w[30] == pytest.approx(0.2)   # 80세 이후 유지
+    assert np.all(np.diff(w) <= 1e-12)                     # 단조 감소
+    flat = engine_tax.glide_path(replace(couple_60(), stock_weight=0.45, glide_end=None), 20)
+    assert np.allclose(flat, 0.45)
+
+
+def test_joint_pv_falls_with_age_and_exceeds_single_life():
+    """부부 연금현가: 나이가 들면 짧아지고, 둘 중 한 명이라도 살아있는 기간이므로 1인보다 길다."""
+    hh = couple_60(); qx = mortality.default_qx()
+    a, b = engine_tax.joint_pv(hh, qx, 0), engine_tax.joint_pv(hh, qx, 15)
+    assert a > b > 0
+    single = engine_tax.joint_pv(replace(hh, members=[hh.members[0]]), qx, 0)
+    assert a > single                                      # 연생(last survivor) > 단생
+
+
+def test_annuity_pv_ordering():
+    """연금 1원의 현가는 할인율↑에 줄고, 보증기간·체증형·부부형에 늘어난다."""
+    hh = couple_60(); qx = mortality.default_qx()
+    f = lambda **kw: engine_tax.annuity_pv(hh, SimConfig(), AddOns(**kw), qx,
+                                           [0, 1] if kw.get("annuity_joint") else [0], 0)
+    base = f()
+    assert f(annuity_rate=0.05) < base < f(annuity_rate=0.01)
+    assert f(annuity_guarantee_years=20) > base            # 보증기간은 지급을 늘린다
+    assert f(annuity_escalation=0.02) > base               # 체증형
+    assert f(annuity_joint=True) > base                    # 부부형(생존자 지급)
+    assert f(annuity_mort_mult=1.5) < base                 # 더 빨리 죽는다고 보면 짧다
+
+
+def test_floor_table_shrinks_with_age_and_with_more_pension():
+    """보호선: 남은 기간이 짧아지면 줄고, 보장소득이 많으면 줄고, 음수가 되지 않는다."""
+    hh = couple_60(); e = EconomyV2.enhanced()
+    tab = engine_tax.floor_table(hh, SimConfig(), e, HouseConfig(), mortality.default_qx(), 40, 3000)
+    assert tab.shape == (41, 3)
+    assert np.all(tab >= 0)
+    assert tab[0, 0] > tab[20, 0] > tab[39, 0]             # 나이가 들수록 남은 부족분이 작다
+    rich = replace(hh, members=[replace(hh.members[0], nps_monthly=400), replace(hh.members[1], nps_monthly=300)])
+    tab2 = engine_tax.floor_table(rich, SimConfig(), e, HouseConfig(), mortality.default_qx(), 40, 3000)
+    assert tab2[0, 0] < tab[0, 0]                          # 연금이 많으면 보호선이 낮다
+
+
+def test_dependent_care_scales_with_share_and_is_zero_without_parents():
+    """더블케어: 부양 부모가 없으면 0, 분담 비율에 비례, 두 명이면 한 명보다 크다."""
+    hh = couple_60(); cfg = SimConfig(care=CareMarkov()); qx = mortality.default_qx()
+    g = lambda deps, seed=1: engine_tax.dependent_care(
+        replace(hh, dependents=deps), cfg, qx, 30, 3000, np.random.default_rng(seed), True).sum()
+    assert g(None) == 0 and g([]) == 0
+    assert g([{"age": 85, "sex": "F", "share": 0.0}]) == 0
+    full, half = g([{"age": 85, "sex": "F"}]), g([{"age": 85, "sex": "F", "share": 0.5}])
+    assert half == pytest.approx(full * 0.5)               # 같은 난수 → 정확히 절반
+    assert g([{"age": 85, "sex": "F"}, {"age": 88, "sex": "M"}]) > full
+
+
+def test_care_insurance_premium_follows_equivalence_principle():
+    """간병보험료 = (1 + 사업비율) × 급부현가 / 납입현가. 사업비율에 선형, 급부액에 선형."""
+    hh = couple_60(); cfg = SimConfig(care=CareMarkov()); qx = mortality.default_qx()
+    alive, incare, severe, _, _ = engine_tax.life_paths(hh, cfg, qx, 40, 2000,
+                                                        np.random.default_rng(0), True)
+    p = lambda **kw: engine_tax.care_insurance_premium(hh, AddOns(care_benefit=1200, **kw),
+                                                       alive, incare, severe, 40)
+    base = p(); l0 = AddOns().care_loading
+    assert base > 0
+    assert p(care_loading=0.5) == pytest.approx(base / (1 + l0) * 1.5, rel=1e-9)   # 사업비율에 선형
+    assert p(care_loading=0.0) == pytest.approx(base / (1 + l0), rel=1e-9)
+    p2 = engine_tax.care_insurance_premium(hh, AddOns(care_benefit=2400), alive, incare, severe, 40)
+    assert p2 == pytest.approx(base * 2, rel=1e-9)         # 급부 2배 → 보험료 2배
+
+
+def test_life_paths_shapes_and_widowhood_applied():
+    """생존·간병 경로의 모양과 단조성. 사별 효과는 부부에게만 적용된다."""
+    hh = couple_60(); cfg = SimConfig(care=CareMarkov()); qx = mortality.default_qx()
+    alive, incare, severe, lvl, slv = engine_tax.life_paths(hh, cfg, qx, 40, 2000,
+                                                            np.random.default_rng(0), True)
+    assert alive.shape == (2, 2000, 41) and incare.shape == alive.shape
+    assert np.all(alive[:, :, 1:] <= alive[:, :, :-1])     # 한 번 죽으면 되살아나지 않는다
+    assert np.all(~severe | incare)                        # 중증은 간병 상태의 부분집합
+    assert np.all(~incare | alive)                         # 간병은 생존자만
+    assert lvl.shape == (2, 2000) and np.all(slv > 0)
+    a2, i2, s2, l2, _ = engine_tax.life_paths(hh, cfg, qx, 40, 2000,
+                                              np.random.default_rng(0), False)
+    assert i2 is None and s2 is None and l2 is None        # 마르코프를 끄면 간병 상태가 없다
+
+
+def test_every_brand_field_reaches_the_report():
+    """화이트라벨: 기관이 설정한 브랜드 값이 하나라도 조용히 무시되면 안 된다.
+    (v37에서 tagline이 설정만 되고 리포트에 안 나오던 버그를 잡고 고정)"""
+    from retire_sim import branding, inputs, reporting
+    b = branding.Brand(name="가나다은행", tagline="타그라인표식", primary="#123456", accent="#654321",
+                       ink="#111222", muted="#333444", line="#555666",
+                       logo_url="https://example.com/logo.png",
+                       footer="푸터표식", disclaimer="고지표식")
+    html = reporting.build_report(inputs.defaults(), client_name="홍길동", advisor="김설계", brand=b)
+    for f in ("name", "tagline", "primary", "accent", "ink", "muted", "line",
+              "logo_url", "footer", "disclaimer"):
+        assert getattr(b, f) in html, f"브랜드 '{f}' 값이 리포트에 나타나지 않는다"
+
+
+def test_notebook_matches_modules():
+    """노트북의 %%writefile 셀이 저장소 모듈과 같아야 한다.
+
+    다르면 Colab에서 노트북을 돌릴 때 모듈이 옛 코드로 되돌아간다(실제로 겪은 사고).
+    실패하면: python scripts/sync_notebook.py
+    """
+    import json
+    import pathlib
+    nb_path = pathlib.Path(__file__).resolve().parent.parent / "notebooks" / "retire_sim_colab.ipynb"
+    if not nb_path.exists():
+        pytest.skip("노트북이 없는 배포")
+    root = nb_path.parent.parent
+    stale = []
+    for c in json.loads(nb_path.read_text())["cells"]:
+        if c.get("cell_type") != "code":
+            continue
+        head, _, body = "".join(c["source"]).partition("\n")
+        if not head.strip().startswith("%%writefile"):
+            continue
+        f = root / head.split(None, 1)[1].strip()
+        if f.exists() and body != f.read_text():
+            stale.append(str(f.relative_to(root)))
+    assert not stale, "노트북이 모듈과 다릅니다 (python scripts/sync_notebook.py): " + ", ".join(stale)
+
+
+def test_disabling_taxes_only_removes_taxes_not_the_pension_account():
+    """세금을 끄는 것은 '세금을 안 매긴다'는 뜻이어야 한다.
+
+    v37 전에는 tc.enabled=False가 연금계좌 인출까지 막아, 퇴직연금을 쌓는 가구는
+    세금을 끄면 결과가 '나빠지는' 거꾸로 된 값이 나왔다(−19%p). 측정값을 믿으면 사고가 나는 자리.
+    """
+    hh = replace(couple_30(), pension_balance=1000, retirement_contrib=True)
+    on = engine_tax.summarize(_run(hh))["기본생활 유지 확률"]
+    off = engine_tax.summarize(_run(hh, tc=TaxConfig(overseas_share=0.2, enabled=False)))["기본생활 유지 확률"]
+    assert off > on, "세금을 끄면 좋아져야 한다 (연금계좌가 함께 잠기면 안 된다)"

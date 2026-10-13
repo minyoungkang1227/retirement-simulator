@@ -101,7 +101,6 @@ class AddOns:
     stock_beta: float = 1.0          # 시장(KOSPI) 베타
     stock_idio_sigma: float = 0.25   # 고유 변동성(연)
     stock_rate_beta: float = 0.0     # 금리 1.0(=100%p) 변화당 로그수익률 변화 (예: -2.0 → 금리 +1%p에 -2%)
-    stock_name: str = ""
     # 예금 (단기금리로 운용, 이자는 금융소득)
     deposit_amount: float = 0.0
     # 종신연금 (일시납 즉시·거치형, 연금보험 비과세 가정)

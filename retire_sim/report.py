@@ -125,6 +125,7 @@ h1 {{ font-size: 1.5rem; margin: 0 0 2px; }}
 h2 {{ font-size: 1.05rem; margin: 22px 0 8px; color: {b.primary};
       border-bottom: 2px solid {b.line}; padding-bottom: 5px; }}
 .meta {{ color: {b.muted}; font-size: .86rem; }}
+.tagline {{ color: {b.primary}; font-size: .9rem; font-weight: 600; margin: 0 0 4px; }}
 .logo {{ max-height: 34px; margin-bottom: 6px; display: block; }}
 .hero {{ font-size: 1.3rem; font-weight: 700; line-height: 1.45; margin: 14px 0 4px; }}
 .hero .n {{ color: {b.accent}; }}
@@ -164,6 +165,7 @@ def build(ctx: dict, brand: Brand = None) -> str:
         f'<tr><td>{i}</td><td>{_esc(lab)}</td><td>{_esc(how)}</td><td class="r">{_esc(eff)}</td></tr>'
         for i, (lab, how, eff) in enumerate(ctx["actions"], 1))
     logo = (f'<img src="{_esc(b.logo_url)}" alt="{_esc(b.name)}" class="logo">' if b.logo_url else "")
+    tagline = (f'<div class="tagline">{_esc(b.tagline)}</div>' if b.tagline else "")
     act_block = (f'<h2>지금 할 수 있는 일 — 효과가 큰 순서</h2><table>'
                  f'<tr><th>순위</th><th>무엇을</th><th>어떻게</th><th class="r">기본 생활 지킬 가능성</th></tr>'
                  f'{acts}</table>') if ctx["actions"] else ""
@@ -175,6 +177,7 @@ def build(ctx: dict, brand: Brand = None) -> str:
 <style>{css(b)}</style></head><body>
 <div class="page">
   {logo}<h1>{_esc(b.name)} 노후 점검 리포트</h1>
+  {tagline}
   <div class="meta">{_esc(ctx['client'])} 님 · 작성 {_esc(ctx['date'])}{_esc(ctx['advisor_line'])}</div>
   <div class="hero">{ctx['hero']}</div>
   <div class="gap"><div class="eq">{ctx['gap_eq']}</div><div class="big">{ctx['gap_big']}</div></div>
