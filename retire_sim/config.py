@@ -65,10 +65,16 @@ class NPSRules:
     basic_amount: float = 34.97         # 월, 만원 (오늘 가치, 물가연동)
     basic_limit_single: float = 247.0
     basic_limit_couple: float = 395.2
-    basic_base_asset: float = 13500.0   # 대도시 기본재산액(만원)
+    basic_region: str = "대도시"         # 기본재산액 공제 지역: 대도시 | 중소도시 | 농어촌
+    basic_base_assets: tuple = (13500.0, 8500.0, 7250.0)   # (대도시, 중소도시, 농어촌) 기본재산액(만원, 2026)
     basic_fin_deduct: float = 2000.0    # 금융재산 공제(만원)
     basic_conv_rate: float = 0.04       # 재산의 소득환산율(연)
     basic_couple_cut: float = 0.20      # 부부 모두 수급 시 각 20% 감액
+
+    def base_asset(self) -> float:
+        """거주 지역의 기본재산액 공제(만원). 대도시=특별시·광역시, 중소도시=도의 시, 농어촌=도의 군."""
+        idx = {"대도시": 0, "중소도시": 1, "농어촌": 2}.get(self.basic_region, 0)
+        return self.basic_base_assets[idx]
 
 
 @dataclass
@@ -176,5 +182,10 @@ class SimConfig:
     risk_aversion: float = 3.0            # (v27) CRRA 위험회피계수 — 확실성등가 계산용
     longevity_sigma_level: float = 0.05   # (v30) 사망률 수준 불확실성 (로그 표준편차)
     longevity_sigma_trend: float = 0.005  # (v30) 사망률 개선 속도 불확실성 (연, 표준편차)
-    widow_excess: tuple = (0.30, 0.15)    # (v30) 사별 직후 생존 배우자 초과 사망 위험 (남, 여). (0,0)이면 끔
-    widow_tau: float = 3.0                # (v30) 사별 효과 감쇠 시간(년)
+    # (v32) 사별 효과 — Moon et al.(2011) PLOS ONE 메타분석(226만 명, 전향 코호트 15편, 연령·성별 보정)
+    #   성별 상대위험: 남 1.22, 여 1.03(여성은 통계적으로 유의하지 않음)
+    #   시간 패턴: 사별 6개월 미만 1.41, 6개월 이상 1.14 → 초기 급등 배수 2.0, 감쇠 0.5년
+    #   초과위험(s년 뒤) = widow_excess[성별] × (1 + widow_spike·exp(−s/widow_tau))
+    widow_excess: tuple = (0.22, 0.03)    # 장기 초과 사망 위험 (남, 여). (0,0)이면 끔
+    widow_spike: float = 2.0              # 사별 직후 추가 배수
+    widow_tau: float = 0.5                # 급등 부분의 감쇠 시간(년)

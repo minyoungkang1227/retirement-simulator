@@ -199,20 +199,50 @@ def test_survivor_rules():
 
 
 def test_basic_pension_rules():
-    from retire_sim.pension import basic_pension_annual
+    """기초연금 산정: 자격 판정 → 연계감액 → 부부감액 → 소득역전방지."""
+    from retire_sim.pension import basic_pension_annual, basic_pension_one
     from retire_sim.config import NPSRules
-    r = NPSRules(); one = np.ones(1); z = np.zeros(1)
-    # 단독 수급, 재산 없음, 국민연금 없음 → 월 34.97만원 × 12
-    a = basic_pension_annual(z, z, z, [one > 0], [z], [one < 0], r, one)
-    assert abs(a[0] - 34.97 * 12) < 1e-6
-    # 부부 모두 수급 → 각 20% 감액
-    b = basic_pension_annual(z, z, z, [one > 0, one > 0], [z, z], [one < 0, one < 0], r, one)
-    assert abs(b[0] - 2 * 34.97 * 0.8 * 12) < 1e-6
-    # 소득인정액이 선정기준액(단독 247만) 초과 → 0
-    c = basic_pension_annual(np.array([300.0]), z, z, [one > 0], [z], [one < 0], r, one)
-    assert c[0] == 0
-    # 64세는 대상 아님
-    assert basic_pension_annual(z, z, z, [one < 0], [z], [one < 0], r, one)[0] == 0
+    r = NPSRules(); one = np.ones(1); z = np.zeros(1); B = r.basic_amount
+    yes, no = one > 0, one < 0
+
+    def call(income=0.0, n=1, nps=0.0, a=0.0, sv=False, asset=0.0, fin=0.0, rules=r):
+        inc = np.array([float(income)])
+        return basic_pension_annual(inc, np.array([float(asset)]), np.array([float(fin)]),
+                                    [yes] * n, [np.array([float(nps)])] * n, [np.array([float(a)])] * n,
+                                    [sv * one > 0] * n, rules, one)[0]
+
+    assert abs(call() - B * 12) < 1e-6                                   # 단독·국민연금 없음 → 기준연금액
+    assert abs(call(n=2) - 2 * B * 0.8 * 12) < 1e-6                      # 부부 모두 수급 → 각 20% 감액
+    assert call(income=300.0) == 0                                       # 선정기준액(단독 247만) 초과 → 0
+    assert basic_pension_annual(z, z, z, [no], [z], [z], [no], r, one)[0] == 0   # 64세는 대상 아님
+
+    # 연계감액: 국민연금이 기준연금액의 150% 이하면 A급여와 무관하게 전액
+    assert basic_pension_one(np.array([1.5 * B]), np.array([3 * B]), B)[0] == B
+    # A급여가 0이면 산식②가 기준연금액을 넘어 상한에 걸리므로 국민연금이 아무리 많아도 감액 없음
+    assert basic_pension_one(np.array([5 * B]), np.array([0.0]), B)[0] == B
+    # 두 산식 중 큰 값: A=1.2B, 국민연금=1.9B → 산식① 0.6B, 산식② 0.7B → 0.7B
+    mid = basic_pension_one(np.array([1.9 * B]), np.array([1.2 * B]), B)[0]
+    assert abs(mid - 0.7 * B) < 1e-9 and 0.5 * B < mid < B
+    # 하한은 부가연금액(기준연금액의 50%)
+    assert abs(basic_pension_one(np.array([5 * B]), np.array([5 * B]), B)[0] - 0.5 * B) < 1e-9
+    assert call(nps=5 * B, a=5 * B, sv=True) == B * 12                   # 유족연금 수급자는 연계감액 없음
+
+    # 지역별 기본재산액: 공제가 작은 농어촌은 같은 재산이라도 소득인정액이 커져 탈락할 수 있다
+    # 재산 8.5억: 대도시는 (8.5 − 1.35)억 환산 월 238만 < 247만 → 수급, 농어촌은 (8.5 − 0.725)억 → 259만 → 탈락
+    assert call(asset=85000.0) > 0
+    assert call(asset=85000.0, rules=NPSRules(basic_region="농어촌")) == 0
+    assert call(asset=85000.0, rules=NPSRules(basic_region="중소도시")) == 0
+
+
+def test_a_benefit_and_region():
+    from retire_sim.pension import a_benefit_monthly, NPS_A, NPS_C
+    from retire_sim.config import NPSRules
+    assert a_benefit_monthly(Person(65, "M", nps_years=9)) == 0                  # 10년 미만은 0
+    assert abs(a_benefit_monthly(Person(65, "M", nps_years=20)) - NPS_C * NPS_A / 12) < 1e-9
+    assert a_benefit_monthly(Person(65, "M", nps_years=40)) > a_benefit_monthly(Person(65, "M", nps_years=20))
+    assert a_benefit_monthly(Person(65, "M", nps_years=50)) == a_benefit_monthly(Person(65, "M", nps_years=40))
+    assert (NPSRules().base_asset(), NPSRules(basic_region="중소도시").base_asset(),
+            NPSRules(basic_region="농어촌").base_asset()) == (13500.0, 8500.0, 7250.0)
 
 
 def test_v28_directions():

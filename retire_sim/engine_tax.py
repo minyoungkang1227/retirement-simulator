@@ -37,7 +37,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     if k == 2:                                                  # (v30) 사별 효과
         alive, incare, severe = mortality.apply_widowhood(alive, incare, severe, [qx_table[m.sex] for m in hh.members],
                                                           [m.age for m in hh.members], [m.sex for m in hh.members],
-                                                          cfg.widow_excess, cfg.widow_tau, cfg.mortality_improvement, cfg.seed, qmult)
+                                                          cfg.widow_excess, cfg.widow_tau, cfg.mortality_improvement, cfg.seed,
+                                                          qmult, getattr(cfg, 'widow_spike', 0.0))
     hh_alive = alive.sum(0) > 0
     own = np.array(tc.ownership if tc.ownership else [1 / k] * k, float)
     hown = np.array(house.owner_share if house.owner_share else [1.0] + [0.0] * (k - 1), float)
@@ -264,8 +265,10 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 inc_m = (nps.sum(0) + surv.sum(0) + priv.sum(0) + rent + bz.sum(0)) / 12
                 fin_now = np.maximum(Wt + Wi + Wp + S + D - debt, 0)
                 gross = np.maximum(official - np.where(rm_on, rm_bal, 0.0) - mort_bal, 0)
+                a_m = [pension.a_benefit_monthly(m) * cpi[:, t] for m in hh.members]      # A급여액(명목)
                 basic_inc = pension.basic_pension_annual(inc_m, gross, fin_now, elig,
-                                                         [(nps[i] + surv[i]) / 12 for i in range(k)], surv_flag, cfg.nps, cpi[:, t]) * live
+                                                         [(nps[i] + surv[i]) / 12 for i in range(k)],
+                                                         a_m, surv_flag, cfg.nps, cpi[:, t]) * live
 
         # 2) 증여 전략 (10년마다)
         realized = np.zeros(n); gift_tax_now = np.zeros(n)

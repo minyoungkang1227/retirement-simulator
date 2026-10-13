@@ -157,9 +157,10 @@ def longevity_multiplier(n: int, T: int, sigma_level: float, sigma_trend: float,
     return np.exp(eta[:, None] - eps[:, None] * t - 0.5 * var)
 
 
-def apply_widowhood(alive, incare, severe, qx_list, ages, sexes, excess, tau, improve, seed, qmult=None):
+def apply_widowhood(alive, incare, severe, qx_list, ages, sexes, excess, tau, improve, seed, qmult=None, spike=0.0):
     """사별 후 생존 배우자의 사망 위험 상승(애도·돌봄 상실 등). 2인 가구에만 적용.
-    alive: (2, n, T+1). 사별 s년 뒤 추가 사망률 = q_t × excess × exp(−s/τ). 먼저 사망한 사람은 영향 없음(순서 보존).
+    alive: (2, n, T+1). 사별 s년 뒤 추가 사망률 = q_t × excess × (1 + spike·exp(−s/τ)).
+    먼저 사망한 사람은 영향 없음(순서 보존).
     sexes: 구성원별 "M"/"F", excess: (남성, 여성) 초과 위험 — 구성원의 성별로 고른다."""
     if alive.shape[0] != 2 or (excess[0] <= 0 and excess[1] <= 0):
         return alive, incare, severe
@@ -175,7 +176,7 @@ def apply_widowhood(alive, incare, severe, qx_list, ages, sexes, excess, tau, im
             q = project_qx(qx_list[i], t)[x] if improve else qx_list[i][x]
             if qmult is not None: q = q * qmult[:, t]
             s_ = np.maximum(since[:, t] - 1, 0)
-            qe = np.minimum(q * ex * np.exp(-s_ / tau), 1.0) * (since[:, t] > 0)
+            qe = np.minimum(q * ex * (1.0 + spike * np.exp(-s_ / tau)), 1.0) * (since[:, t] > 0)
             d = r.random(n) < qe
             out[i, d, t + 1:] = False
     inc2 = incare & out if incare is not None else None

@@ -10,7 +10,7 @@ import pandas as pd
 import altair as alt
 import streamlit as st
 
-from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShock, AddOns
+from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShock, AddOns, NPSRules
 from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality, optimize
 from retire_sim.tax import TaxConfig, HouseConfig
@@ -80,7 +80,7 @@ if "p" not in ss:
                 deposit=1.5, invest=2.0, ret_acct=1.5, other=0.0, saving=150, salary=0, s_salary=0, save_mode="월 금액", save_rate=15, wage_g=1.0, ret_contrib=False, nps_auto=False, nps_years=10, s_nps_years=10,
                 essential=217, lifestyle=1000, nps=110, s_nps=50, nps_start=65,
                 priv=0, priv_start=60, priv_years=20, legacy=1.0, children=2, profile="균형형",
-                h_official=0.0, h_market=0.0, h_n=1, h_joint=False, h_years=10, h_hi=0.0, rent=0,
+                region="대도시", h_official=0.0, h_market=0.0, h_n=1, h_joint=False, h_years=10, h_hi=0.0, rent=0,
                 biz=0, biz_until=65, biz_work=False, rm_age=0, ds_age=0, ds_ratio=50, events=[], ev_ltv=60, ev_loan_years=30, ev_jeonse=0.0, ev_rent=0, overseas=20, own_equal=True, survivor=70,
                 enhanced=True, paths=10000)
     ss.step = 0
@@ -144,7 +144,8 @@ def build(p: dict, v: dict):
     if v.get("care_mult"):
         care = CareMarkov(incidence=tuple((a, x * v["care_mult"]) for a, x in CareMarkov().incidence)) \
             if p["enhanced"] else CareShock(lam=0.03 * v["care_mult"])
-    cfg = SimConfig(n_paths=v.get("paths", p["paths"]), seed=42, care=care)
+    cfg = SimConfig(n_paths=v.get("paths", p["paths"]), seed=42, care=care,
+                    nps=NPSRules(basic_region=p.get("region", "대도시")))
     ekw = dict(v.get("eco", {}))
     for key in ("stock_shocks", "infl_shocks"):
         if key in ekw: ekw[key] = {int(t): x for t, x in ekw[key].items()}
@@ -480,6 +481,10 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 h_joint = c1.checkbox("부부 공동명의", value=p["h_joint"])
                 h_years = c2.number_input("보유 기간 (년)", 0, 60, p["h_years"])
                 h_hi = c3.number_input("건보료 재산분 (월, 만 원)", 0.0, 500.0, p["h_hi"], help="공단 '지역보험료 모의계산'에서 소득 0, 재산만 넣은 값")
+                region = st.radio("사시는 곳", ["대도시", "중소도시", "농어촌"],
+                                  index=["대도시", "중소도시", "농어촌"].index(p.get("region", "대도시")), horizontal=True,
+                                  help="기초연금 재산 공제가 지역마다 다릅니다. 대도시 1억 3,500만 원, 중소도시 8,500만 원, 농어촌 7,250만 원까지 재산에서 빼고 계산합니다. "
+                                       "대도시 = 특별시·광역시, 중소도시 = 도의 '시', 농어촌 = 도의 '군'입니다.")
                 rent = st.number_input("연 임대수입 (만 원)", 0, 100000, p["rent"])
                 st.markdown("주택 활용 계획 (선택)")
                 c1, c2, c3 = st.columns(3)
@@ -540,7 +545,7 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 paths = st.select_slider("시나리오 수", [2000, 5000, 10000], value=p["paths"])
             back, nxt = nav(i, "s7")
             if nxt or back:
-                p.update(h_official=h_off, h_market=h_mkt, h_n=int(h_n), h_joint=bool(h_joint), h_years=int(h_years),
+                p.update(region=region, h_official=h_off, h_market=h_mkt, h_n=int(h_n), h_joint=bool(h_joint), h_years=int(h_years),
                          h_hi=float(h_hi), rent=int(rent), rm_age=int(rm_age), ds_age=int(ds_age), ds_ratio=int(ds_ratio), events=new_ev, ev_ltv=int(ltv), ev_loan_years=int(lyr), ev_jeonse=float(jb), ev_rent=int(er), biz=int(biz), biz_until=int(biz_until), biz_work=bool(biz_work),
                          overseas=int(overseas), own_equal=bool(own_equal), survivor=int(survivor), floor=floor,
                          enhanced=bool(enhanced), paths=int(paths)); go(1 if nxt else -1)
@@ -944,7 +949,7 @@ with tab5:
 - 목표는 **기본생활 → 여행·취미 → 남길 자산** 순으로 지킵니다. 매년 '기본생활비를 끝까지 내려면 남겨둘 돈'을 먼저 따로 두고, 그보다 많을 때만 여행·취미 예산을 씁니다. (균형형: 실제 수명 가능성과 연금 개시를 반영해 계산, 조금 더 오래 산다고 보수적으로 가정 / 안심형: 95세까지 지금 부족분이 계속된다고 가정)
 - 국민연금, 사적연금 분리과세, 금융소득종합과세, 건강보험료, 재산세·종부세, 상속·증여세를 반영합니다.
 - **유족연금**: 배우자가 먼저 돌아가시면 '유족연금(고인 연금의 60%, 가입 20년 이상 가정)'과 '내 국민연금 + 유족연금의 30%' 중 더 큰 쪽을 받는 것으로 계산합니다.
-- **기초연금(2026, 월 약 35만 원)**: 65세 이상이면 소득·재산을 합친 '소득인정액'이 기준(단독 247만 원, 부부 395.2만 원) 이하일 때 받는 것으로 계산합니다. 부부 모두 받으면 각 20% 감액, 국민연금이 많으면 일부 감액(근사). 기본생활 보호선에는 넣지 않았습니다(자격이 바뀔 수 있어 보수적으로 처리).
+- **기초연금(2026, 월 약 35만 원)**: 65세 이상이면 소득·재산을 합친 '소득인정액'이 기준(단독 247만 원, 부부 395.2만 원) 이하일 때 받는 것으로 계산합니다. 부부 모두 받으면 각 20% 감액하고, 국민연금이 많으면 법에 정해진 산식대로 깎습니다(기준연금액의 50%가 하한). 재산 공제는 사시는 곳(대도시·중소도시·농어촌)에 따라 다릅니다. 기본생활 보호선에는 넣지 않았습니다(자격이 바뀔 수 있어 보수적으로 처리).
 - 주택연금(한국주택금융공사 2026 월지급금표)과 집 줄이기(매도 비용·양도세·취득세)를 선택지로 비교할 수 있습니다.
 - 집값도 오르내립니다. 물가 대비 연 1.25%씩 오르되 해마다 ±10% 정도 흔들리는 것으로 계산합니다(한국부동산원 2013~2026 자료 기준).
 - **오래 살 위험**: 앞으로 수명이 얼마나 늘지 모른다는 점(사망률 불확실성)과, 배우자를 먼저 보낸 뒤 생존자의 사망 위험이 잠시 높아지는 점(사별 효과)을 넣었습니다. 후자는 해외 연구 기반 가정입니다.

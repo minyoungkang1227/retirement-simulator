@@ -61,21 +61,59 @@ def survivor_split(own, S, overlap: float):
     return np.where(only_s, 0.0, own), np.where(only_s, S, overlap * S)
 
 
-def basic_pension_annual(income_m, asset_gross, fin, elig, own_nps_m, survivor_flag, r, cpi):
+def a_benefit_monthly(p: Person, r=None) -> float:
+    """기초연금 연계감액에 쓰는 A급여액(소득재분배급여) 월액 근사, 만원.
+
+    기본연금액 ≈ c(A + B)(1 + 0.05(n − 20)) 중 전체 가입자 평균소득(A)에서 나오는 몫만 떼어낸 값:
+    A급여 ≈ c·A·(1 + 0.05(n − 20)) / 12.  가입 10년 미만은 0.
+    실제 값은 국민연금공단에서 조회할 수 있고, 여기서는 가입기간만으로 추정한다."""
+    if p.nps_years < 10:
+        return 0.0
+    return NPS_C * NPS_A * (1 + 0.05 * (min(p.nps_years, 40) - 20)) / 12
+
+
+def basic_pension_one(nps_m, a_m, B):
+    """1인 기초연금액(월, 명목). 국민연금 연계감액까지 반영한 법정 산식. 배열 가능.
+
+      · 국민연금 급여액 ≤ 기준연금액 150%  → 기준연금액 전액
+      · 그 밖에는  min(기준연금액, max(산식①, 산식②))
+          산식① = 기준연금액 × 250% − 국민연금 급여액
+          산식② = max(기준연금액 − ⅔ × A급여액, 0) + 부가연금액(기준연금액의 ½)
+    두 산식 모두 하한이 부가연금액이라 연계감액만으로는 기준연금액의 50% 아래로 내려가지 않는다."""
+    import numpy as np
+    nps_m = np.asarray(nps_m, float); a_m = np.asarray(a_m, float)
+    f1 = 2.5 * B - nps_m
+    f2 = np.maximum(B - 2.0 / 3.0 * a_m, 0.0) + 0.5 * B
+    cut = np.minimum(B, np.maximum(f1, f2))
+    return np.where(nps_m <= 1.5 * B, B, cut)
+
+
+def basic_pension_annual(income_m, asset_gross, fin, elig, own_nps_m, a_m, survivor_flag, r, cpi):
     """기초연금 가구 합계(연, 명목 만원), 경로별 벡터.
-    income_m: 월 소득평가액(명목), asset_gross: 부동산 등 일반재산(명목, 부채 차감 후), fin: 금융재산(명목),
-    elig: 구성원별 수급연령(65+) 생존 마스크 리스트, own_nps_m: 구성원별 월 국민연금(명목) 리스트,
-    survivor_flag: 구성원별 유족연금 수급 여부 리스트. 기준액은 cpi로 명목화."""
+
+    income_m   : 월 소득평가액(명목)
+    asset_gross: 부동산 등 일반재산(명목, 주택연금·주담대 차감 후)
+    fin        : 금융재산(명목)
+    elig       : 구성원별 '65세 이상 생존' 마스크 리스트
+    own_nps_m  : 구성원별 월 국민연금 급여액(명목)      a_m: 구성원별 A급여액(명목)
+    survivor_flag: 유족연금 수급 여부 — 유족연금은 연계감액 대상이 아니라 기준연금액 전액
+
+    순서: ① 소득인정액으로 자격 판정 → ② 1인별 산정(연계감액) → ③ 부부 동시수급 20% 감액
+          → ④ 소득역전방지 감액(소득인정액 + 기초연금이 선정기준액을 넘는 만큼 깎되 최저선 유지)"""
     import numpy as np
     n_elig = sum(e.astype(int) for e in elig)
-    prop = np.maximum(asset_gross - r.basic_base_asset * cpi, 0) + np.maximum(fin - r.basic_fin_deduct * cpi, 0)
-    inc_m = income_m + prop * r.basic_conv_rate / 12
+    prop = np.maximum(asset_gross - r.base_asset() * cpi, 0) + np.maximum(fin - r.basic_fin_deduct * cpi, 0)
+    inc_m = income_m + prop * r.basic_conv_rate / 12                 # 소득인정액(월)
     lim = np.where(n_elig >= 2, r.basic_limit_couple, r.basic_limit_single) * cpi
     ok = (inc_m <= lim) & (n_elig > 0)
     B = r.basic_amount * cpi
     tot = np.zeros_like(income_m)
-    for e, nm, sf in zip(elig, own_nps_m, survivor_flag):
-        red = np.clip(nm - 1.5 * B, 0, 0.5 * B)                      # 국민연금 연계감액(근사)
-        tot += np.where(e, np.where(sf, B, B - red), 0.0)
-    tot = np.where(n_elig >= 2, tot * (1 - r.basic_couple_cut), tot)
+    for e, nm, am, sf in zip(elig, own_nps_m, a_m, survivor_flag):
+        amt = np.where(sf, B, basic_pension_one(nm, am, B))          # ②
+        tot += np.where(e, amt, 0.0)
+    couple = n_elig >= 2
+    tot = np.where(couple, tot * (1 - r.basic_couple_cut), tot)      # ③
+    floor = np.where(couple, 0.2 * B, 0.1 * B) * n_elig              # ④ 최저연금액(수급자 수만큼)
+    over = np.maximum(inc_m + tot - lim, 0.0)
+    tot = np.maximum(tot - over, np.minimum(tot, floor))
     return np.where(ok, tot, 0.0) * 12
