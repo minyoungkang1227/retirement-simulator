@@ -83,11 +83,6 @@ def health_premium(nps_list, fin_list, tc: TaxConfig, rent_list=None, prop_base_
     return np.where(ok, 0, base * tc.hi_rate * (1 + tc.ltc_ratio) + prop_monthly * 12)
 
 
-def estate_tax(estate, has_spouse):
-    """상속세 (금융재산 기준). 배우자 생존 시 배우자공제 최소 5억 추가."""
-    fin_ded = np.where(estate <= 2000, estate, np.where(estate <= 10000, 2000, np.minimum(estate * .2, 20000)))
-    ded = 50000 + fin_ded + np.where(has_spouse, 50000, 0)
-    return progressive(estate - ded, ESTATE)
 
 
 # ───────────── v7: 부동산·임대·해외주식·증여 (근사, 2026-09 기준) ─────────────

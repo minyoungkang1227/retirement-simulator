@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 40          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 41          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL

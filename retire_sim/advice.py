@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 
-import numpy as np
 
 from . import engine_tax, metrics
 from .economy_v2 import EconomyV2

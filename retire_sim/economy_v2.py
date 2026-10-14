@@ -84,13 +84,6 @@ CALIBRATED_2026_08 = dict(
 )
 
 
-def _ou_step(x, theta, kappa, sigma, z):
-    """OU 정확 이산화 (dt=1)."""
-    e = np.exp(-kappa)
-    sd = sigma * np.sqrt((1 - e**2) / (2 * kappa))
-    return theta + (x - theta) * e + sd * z
-
-
 def vasicek_price(tau, r, e: EconomyV2, theta=None):
     k, s = e.r_kappa, e.r_sigma
     th = e.r_theta if theta is None else theta
