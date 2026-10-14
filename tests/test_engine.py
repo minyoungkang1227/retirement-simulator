@@ -859,3 +859,81 @@ def test_app_product_tab_shows_choice_spread():
     assert not at.exception, [e.value for e in at.exception]
     md = " ".join(m.value for m in at.markdown)
     assert "상품을 잘 고르는 것" in md and "보험연구원" in md
+
+
+def test_sources_doc_matches_registry():
+    """docs/SOURCES.md 는 retire_sim/sources.py 에서 만든다 — 손으로 고쳐 어긋나면 안 된다.
+
+    실패하면: python scripts/make_sources_doc.py
+    """
+    import importlib.util
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("_mk", root / "scripts" / "make_sources_doc.py")
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    out = root / "docs" / "SOURCES.md"
+    assert out.exists(), "docs/SOURCES.md 가 없습니다 — python scripts/make_sources_doc.py"
+    assert out.read_text() == mod.build(), "docs/SOURCES.md 가 오래됐습니다 — python scripts/make_sources_doc.py"
+
+
+def test_every_source_entry_is_complete():
+    """출처 항목에 빈칸이 있으면 갱신할 때 어디서 뭘 받아야 할지 알 수 없다."""
+    from retire_sim.sources import SOURCES
+    assert len(SOURCES) >= 10
+    for s in SOURCES:
+        for f in ("name", "org", "used_for", "as_of", "cycle", "where", "how", "stale"):
+            assert getattr(s, f).strip(), f"{s.key} 의 {f} 가 비었습니다"
+        # 갱신 절차는 '어디를 고치면 되는지'가 들어 있어야 쓸모가 있다
+        assert any(k in s.how for k in ("retire_sim/", "scripts/", "config.", "노트북", "앱의")), \
+            f"{s.key} 의 갱신 방법에 고칠 대상이 없습니다: {s.how!r}"
+    keys = [s.key for s in SOURCES]
+    assert len(keys) == len(set(keys)), "출처 key 가 중복됩니다"
+
+
+def test_docs_do_not_contradict_mortality_default():
+    """README가 '미래 수명 연장 미반영'이라고 적혀 있었는데 모델은 기본으로 반영한다.
+
+    출처·가정을 여러 문서에 베껴 쓰면 생기는 어긋남이라, 이 한 건만이라도 고정한다.
+    (자료 출처 자체는 retire_sim/sources.py 한 곳에서만 관리한다.)
+    """
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    if not SimConfig().mortality_improvement:
+        pytest.skip("기본값이 바뀌었으면 이 검사도 바뀌어야 한다")
+    stale = ["미래 수명 연장 미반영", "미래 사망률 개선 미반영",
+             "no future improvement", "period life table (no"]
+    for f in ("README.md", "README.en.md", "docs/MODEL.md", "docs/MODEL.en.md"):
+        path = root / f
+        if not path.exists():
+            continue
+        text = path.read_text()
+        hit = [x for x in stale if x in text]
+        assert not hit, f"{f} 가 모델 기본값(코호트 개선 반영)과 어긋납니다: {hit}"
+
+
+def test_app_explanation_tabs_are_customer_and_advisor_facing():
+    """'이 계산에 대하여'(고객용)와 '설명하기'(설계사용)가 모두 그려지고,
+    자료 출처 표가 레지스트리에서 나온다."""
+    at = _app(); at.run()
+    [b for b in at.button if "60대" in b.label][0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    for k in ("이 계산은 무엇을 하나요", "자료는 어디서 가져왔나요",
+              "고객에게 설명하실 때", "하지 마셔야 할 말"):
+        assert k in md, f"'{k}' 가 화면에 없습니다"
+    from retire_sim.sources import SOURCES
+    joined = " ".join(str(d.value.to_dict()) for d in at.dataframe)
+    assert SOURCES[0].org in joined, "자료 출처 표가 레지스트리에서 나오지 않았습니다"
+
+
+def test_explanation_tabs_avoid_jargon():
+    """설명 화면에서 어려운 전문용어를 쓰지 않는다 (50~60대 독자 기준)."""
+    import pathlib
+    import re
+    src = (pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py").read_text()
+    m = re.search(r"with tab5:(.*?)\nwith tab7:", src, re.S)
+    assert m, "'이 계산에 대하여' 탭을 찾지 못했습니다"
+    banned = ["확실성등가", "위험회피계수", "CRRA", "소득인정액", "연계감액", "코호트",
+              "수지상등", "역선택", "기간프리미엄", "몬테카를로", "백분위"]
+    found = [b for b in banned if b in m.group(1)]
+    assert not found, f"고객용 설명에 어려운 말이 있습니다: {found}"

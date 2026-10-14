@@ -107,7 +107,9 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 - House prices: Korea Real Estate Board index via ECOS (2013 onwards) — smoothing-corrected volatility 10%, real growth 1.25% ± 1.18pp
 - Rates and inflation estimated from ECOS monthly data 2000-01 to 2026-08 (inflation long-run mean 2.47% ±1.02pp, real rate 0.73% ±0.74pp)
 - Paired-difference CIs for comparisons (±1.38pp under independence → ±0.44pp)
-- 15 regression tests run on every commit (headline ranges, directional checks, theoretical values, life table, care model, reverse-mortgage table)
+- 77 tests run on every commit (headline ranges, directional checks, theoretical values, life table, care model,
+  reverse-mortgage table, pure helper functions, brand fields reaching the report, notebook/module sync, app smoke tests)
+- Data sources and their as-of dates live in one place: **[docs/SOURCES.md](docs/SOURCES.md)** (generated from `retire_sim/sources.py`)
 
 ## Structure
 
@@ -167,7 +169,7 @@ See [CHANGELOG.md](CHANGELOG.md) and [docs/MODEL.en.md](docs/MODEL.en.md) for de
 
 ## Limitations
 
-- Mortality uses the Statistics Korea 2024 period life table (no future improvement yet); rates and inflation are estimated from ECOS 2000–2026 data. Long-term care is calibrated to national statistics and equities to KOSPI data. No placeholders remain, but the **equity risk premium is uncertain** (±1.4pp). Focus on **differences between choices**.
+- Data sources and their as-of dates live in one place: **[docs/SOURCES.md](docs/SOURCES.md)**. No placeholder values remain. Mortality uses the Statistics Korea 2024 complete life table **with cohort improvement applied by default** (turning it off raises the headline probability by 7–9pp). The largest uncertainty is the equity risk premium (1σ span 13.7pp) — read ranges, not point estimates, and compare options rather than absolute levels.
 - Tax rules are simplified (Korea, as of 2026-09). **Not investment or tax advice.**
 - Web-app inputs are used only for calculation and are not stored.
 
