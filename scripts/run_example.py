@@ -6,7 +6,6 @@ import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..")
 화면(Streamlit) 없이 엔진만 돌려 보고 싶을 때 여기서 시작하면 된다.
 README 그림은 scripts/make_readme_images.py 가 따로 만든다.
 """
-import numpy as np
 from retire_sim.config import Person, Household, SimConfig, CareMarkov
 from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality

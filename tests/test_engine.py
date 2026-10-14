@@ -937,3 +937,25 @@ def test_explanation_tabs_avoid_jargon():
               "수지상등", "역선택", "기간프리미엄", "몬테카를로", "백분위"]
     found = [b for b in banned if b in m.group(1)]
     assert not found, f"고객용 설명에 어려운 말이 있습니다: {found}"
+
+
+def test_no_nan_leaks_into_results():
+    """결과 배열에 NaN·무한대가 섞이면 요약값이 조용히 망가진다.
+
+    '해당 경로에 그 사건이 없었다'는 뜻으로 일부러 NaN 을 두는 배열만 예외로 둔다.
+    (예: 상속세는 아무도 돌아가시지 않은 경로에서 NaN)
+    """
+    res = _run(couple_60())
+    by_design = {"estate_tax_real", "transfer_real", "estate_real",
+                 "life_ratio", "stock_ret", "port_ret", "debt_retire"}
+    bad = {k: int((~np.isfinite(v)).sum()) for k, v in res.items()
+           if isinstance(v, np.ndarray) and v.dtype.kind == "f"
+           and k not in by_design and not np.isfinite(v).all()}
+    assert not bad, f"NaN/inf 가 섞인 결과 배열: {bad}"
+    # 일부러 둔 NaN 도 '정말 그 사건이 없는 경로'에서만 나와야 한다
+    nan_at = ~np.isfinite(res["estate_real"])
+    if nan_at.any():
+        assert res["hh_alive"][nan_at, -1].all(), \
+            "상속세가 NaN 인데 가구가 이미 사망한 경로가 있습니다 — 계산이 빠진 자리입니다"
+    for k, v in engine_tax.summarize(res).items():
+        assert not (isinstance(v, float) and not np.isfinite(v)), f"요약값 {k} 가 {v}"
