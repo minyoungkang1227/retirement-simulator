@@ -167,7 +167,8 @@ retire_sim/inputs.py    입력 → 엔진 설정 변환과 검증 (앱·API 공�
 retire_sim/advice.py    선택지 순위, 가정의 폭
 retire_sim/reporting.py 상담 리포트 조립
 retire_sim/branding.py  화이트라벨 (기관 이름·색·로고)
-scripts/           검증·민감도 스크립트 (benchmark_analytic.py 해석해 대조, ablate.py 구성요소 영향도,
+scripts/           검증·생성 스크립트 (check.py 작업 후 일괄 점검, benchmark_analytic.py 해석해 대조,
+                   ablate.py 구성요소 영향도,
                    sync_notebook.py 노트북↔모듈 동기화, make_sources_doc.py 자료 출처 문서,
                    make_readme_images.py 문서 그림 재생성,
                    product_spread.py 상품 선택 vs 개시 나이,
@@ -191,6 +192,7 @@ CHANGELOG.md       버전별 변경 내역 (무엇을 / 어떻게 / 전과 무�
   streamlit run streamlit_app.py      # 웹 앱
   python -m pytest -q                 # 이론값 검증 포함 전체 테스트
 
+  PYTHONPATH=. python scripts/check.py              # 오류 검증 + 최적화 점검 한 번에
   PYTHONPATH=. python scripts/run_example.py        # 화면 없이 엔진만 돌려 보기
   PYTHONPATH=. python scripts/make_readme_images.py # 이 문서의 그림 다시 만들기
   PYTHONPATH=. python scripts/make_sources_doc.py   # 자료 출처 문서 다시 만들기
