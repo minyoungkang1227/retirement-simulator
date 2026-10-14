@@ -27,7 +27,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -266,3 +266,34 @@ def compare_vehicles(prod: AnnuityProduct, members, qx_table, eco, stock_weight:
         "낸 돈(명목 중앙값)": float(np.median(ins["paid"].sum(1))),
         "사업비(명목 중앙값)": float(np.median(ins["cost"].sum(1))),
     }
+
+
+# 보험연구원 「변액연금 최저보증 및 사업비 부과 현황 조사」의 월납 사업비 범위 (2026-10 확인).
+# 실명 상품을 모으지 않고도 '상품 선택의 폭'을 잴 수 있게, 공시된 범위의 양 끝을 쓴다.
+COST_RANGE = {"싼 쪽": (0.056, 0.042), "비싼 쪽": (0.069, 0.090)}   # (계약체결비용, 계약관리비용)
+
+
+def choice_spread(prod: AnnuityProduct, members, qx_table, eco, stock_weight: float = 0.5,
+                  start_ages=(60, 65, 70, 75), improve: bool = True) -> dict:
+    """'어떤 상품을 고르느냐'와 '언제부터 받느냐' 중 무엇이 더 큰 선택인지 같은 시나리오에서 잰다.
+
+    상품 쪽은 공시된 사업비 범위의 양 끝(가장 싼 상품 / 가장 비싼 상품)으로 잡는다.
+    실명 상품을 모으지 않고 공시 통계만으로 재는 방법이라, 비교광고 소지 없이 같은 질문에 답할 수 있다.
+    개시 나이 쪽은 같은 상품에서 개시만 옮긴다.
+
+    개시 나이는 **납입이 끝난 뒤**만 비교한다. 개시하면 납입도 멈추므로, 납입 중에 개시하면
+    '늦게 받는 효과'에 '덜 내는 효과'가 섞여 폭이 부풀려진다(실제로 그렇게 나와서 바로잡았다).
+
+    반환: {"상품 선택": {라벨: 첫해 연금액}, "개시 나이": {나이: 첫해 연금액}, "폭": {...}}
+    """
+    first = lambda p: compare_vehicles(p, members, qx_table, eco, stock_weight,
+                                       improve=improve)["연금보험 첫해 연금액"][1]
+    by_cost = {}
+    for lab, (acq, admin) in COST_RANGE.items():
+        by_cost[lab] = first(replace(prod, acq_rate_early=acq, acq_rate_late=acq / 2, admin_rate_pay=admin))
+    paid_up = members[0].age + prod.pay_years                       # 납입이 끝나는 나이
+    by_age = {int(a): first(replace(prod, start_age=int(a)))
+              for a in start_ages if a >= paid_up}
+    span = lambda d: (max(d.values()) / min(d.values()) - 1) if len(d) > 1 and min(d.values()) > 0 else 0.0
+    return {"상품 선택": by_cost, "개시 나이": by_age,
+            "폭": {"상품 선택": span(by_cost), "개시 나이": span(by_age)}}

@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 38          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 39          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -628,6 +628,9 @@ def product_compare(p_json: str, spec_json: str) -> dict:
     out = product.compare_vehicles(prod, me, qx, eco, stock_weight=PROFILES[pp["profile"]])
     out["보증가치"] = product.guarantee_value(prod, me, qx, eco["rate"], eco["cpi"])
     out["상한"] = T - (out["개시 나이"] - me[0].age)
+    # 상품을 잘 고르는 것과 늦게 받기 시작하는 것, 어느 쪽이 더 큰 선택인가 (같은 시나리오)
+    ages = [a for a in (60, 65, 70, 75) if me[0].age < a <= 85]
+    out["선택의 폭"] = product.choice_spread(prod, me, qx, eco, PROFILES[pp["profile"]], ages)
     return out
 
 
@@ -959,6 +962,22 @@ with tab6:
                         f'<b>최저보증이율</b>은 금리가 낮게 흘러간 경우에만 값을 합니다. 평균으로는 연 {g["평균 연금액 증가"]:.0f}만 원이지만 '
                         f'나쁜 쪽 10% 경우에는 연 {g["하위 10% 경로에서 증가"]:.0f}만 원입니다.</div>',
                         unsafe_allow_html=True)
+            sp_ = o.get("선택의 폭")
+            if sp_ and len(sp_["개시 나이"]) >= 2:      # 비교할 개시 나이가 둘 이상일 때만 (납입 종료 후만 센다)
+                cost, age = sp_["폭"]["상품 선택"], sp_["폭"]["개시 나이"]
+                rows = [{"무엇을 바꾸나": f"상품 선택 — 사업비가 {k} 상품", "첫해 연금 (만 원)": f"{v:,.0f}"}
+                        for k, v in sp_["상품 선택"].items()]
+                rows += [{"무엇을 바꾸나": f"개시 나이 — {k}세부터 받기", "첫해 연금 (만 원)": f"{v:,.0f}"}
+                         for k, v in sp_["개시 나이"].items()]
+                st.markdown("**상품을 잘 고르는 것 vs 늦게 받기 시작하는 것**")
+                st.dataframe(pd.DataFrame(rows), hide_index=True)
+                st.markdown(f'<div class="tip">사업비가 가장 싼 상품과 가장 비싼 상품의 차이는 <b>{cost * 100:.0f}%</b>인데, '
+                            f'받기 시작하는 나이를 옮기면 <b>{age * 100:.0f}%</b> 달라집니다. '
+                            f'<b>어느 상품을 고르느냐보다 언제부터 받느냐가 훨씬 큰 결정</b>입니다. '
+                            f'대신 늦게 받으면 그 사이 생활비를 다른 데서 대야 하니, \'바꿔보기\'에서 함께 확인하세요.<br>'
+                            f'<span style="color:{MUTED}">사업비 범위는 보험연구원 「변액연금 최저보증 및 사업비 부과 현황 조사」의 '
+                            f'월납 기준(계약체결 5.6~6.9%, 계약관리 4.2~9%)입니다. 특정 회사 상품이 아니라 공시된 시장 범위입니다.</span></div>',
+                            unsafe_allow_html=True)
             st.caption("특정 상품의 가입 권유가 아닙니다. 상품설명서의 숫자를 직접 넣어 비교해 보는 도구입니다. "
                        "실제 상품에는 사망보장·중도인출·연금전환 옵션 등 여기 반영되지 않은 조건이 있습니다.")
 

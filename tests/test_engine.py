@@ -814,3 +814,48 @@ def test_changelog_covers_current_version():
     assert heads, "CHANGELOG에 '## vNN' 항목이 없습니다"
     assert int(float(heads[0])) == int(__version__), (
         f"CHANGELOG 맨 위가 v{heads[0]} 인데 모델은 v{__version__} — CHANGELOG.md 에 이번 버전 항목을 추가하세요")
+
+
+# ── v39 상품 선택 vs 개시 나이: 실명 상품 없이 공시 범위로 재는 비교 ──
+
+def _spread_setup(age=45, pay_years=20):
+    from retire_sim.economy_v2 import generate
+    from retire_sim.product import AnnuityProduct
+    ec = ECO
+    eco = generate(ec, 60, 3000, np.random.default_rng(42))
+    prod = AnnuityProduct(monthly_premium=50, pay_years=pay_years, start_age=65,
+                          credit_spread=0.023 - (ec.q0 + ec.pi0), guarantee_years=10)
+    return prod, [Person(age=age, sex="M")], mortality.default_qx(), eco
+
+
+def test_choice_spread_compares_only_ages_after_premiums_end():
+    """개시 나이 비교는 납입이 끝난 뒤만. 납입 중에 개시하면 '덜 내는 효과'가 섞인다."""
+    from retire_sim import product as prod_mod
+    prod, me, qx, eco = _spread_setup(age=45, pay_years=20)       # 납입 종료 65세
+    out = prod_mod.choice_spread(prod, me, qx, eco, 0.4, start_ages=(60, 65, 70, 75))
+    assert set(out["개시 나이"]) == {65, 70, 75}, "납입 중(60세) 개시가 섞이면 폭이 부풀려진다"
+    assert all(out["개시 나이"][a] < out["개시 나이"][b]
+               for a, b in ((65, 70), (70, 75))), "늦게 받을수록 연금액이 커야 한다"
+
+
+def test_cheaper_product_pays_more_but_start_age_matters_far_more():
+    """사업비가 싼 상품이 더 주지만, 그 폭보다 개시 나이의 폭이 훨씬 크다 — 이 모델의 핵심 메시지."""
+    from retire_sim import product as prod_mod
+    prod, me, qx, eco = _spread_setup()
+    out = prod_mod.choice_spread(prod, me, qx, eco, 0.4, start_ages=(65, 70, 75))
+    assert out["상품 선택"]["싼 쪽"] > out["상품 선택"]["비싼 쪽"]
+    cost, age = out["폭"]["상품 선택"], out["폭"]["개시 나이"]
+    assert 0 < cost < 0.15, f"공시 사업비 범위의 폭이 비현실적입니다: {cost:.1%}"
+    assert age > 3 * cost, f"개시 나이 폭 {age:.1%} vs 상품 선택 폭 {cost:.1%}"
+
+
+def test_app_product_tab_shows_choice_spread():
+    """'상품 추가' 탭에서 상품 비교를 돌리면 '상품 선택 vs 개시 나이' 블록이 그려진다."""
+    at = _app(); at.run()
+    [b for b in at.button if "30대" in b.label][0].click().run()
+    btn = [b for b in at.button if b.key == "pr_go"]
+    assert btn, "상품 비교 버튼을 찾지 못했습니다"
+    btn[0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert "상품을 잘 고르는 것" in md and "보험연구원" in md
