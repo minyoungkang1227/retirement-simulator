@@ -73,6 +73,10 @@ def test_economy_moments():
     e = EconomyV2.enhanced()
     assert abs(d["rate"][:, -1].mean() - (e.q_theta + e.pi_theta)) < 0.004
     assert abs(d["infl"][:, -1].mean() - e.pi_theta) < 0.004
+    # 장기 표준편차도 OU 정상분포 이론값 σ/√(2κ)와 맞아야 한다 (전에는 scripts/validate.py 가 보던 몫)
+    for key, sig, kap in (("infl", e.pi_sigma, e.pi_kappa), ("q", e.q_sigma, e.q_kappa)):
+        if key in d:
+            assert abs(d[key][:, -1].std() - sig / np.sqrt(2 * kap)) < 0.004, key
 
 
 def test_bond_price_reduces_to_vasicek():
@@ -756,3 +760,39 @@ def test_disabling_taxes_only_removes_taxes_not_the_pension_account():
     on = engine_tax.summarize(_run(hh))["기본생활 유지 확률"]
     off = engine_tax.summarize(_run(hh, tc=TaxConfig(overseas_share=0.2, enabled=False)))["기본생활 유지 확률"]
     assert off > on, "세금을 끄면 좋아져야 한다 (연금계좌가 함께 잠기면 안 된다)"
+
+
+# ── v38 앱 연기 테스트: 앱을 실제로 돌려 본다 ──
+# 지금까지 앱은 '버전이 맞는가'만 검사했다. 그래서 배포한 뒤에야 깨진 걸 알았다(NPSRules 사고).
+
+def _app():
+    pytest.importorskip("streamlit")
+    from streamlit.testing.v1 import AppTest
+    import pathlib
+    return AppTest.from_file(str(pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"),
+                             default_timeout=600)
+
+
+def test_app_runs_and_example_household_reaches_results():
+    """앱이 끝까지 돌고, '예시 가구로 보기'가 결과 화면까지 간다."""
+    at = _app(); at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    btn = [b for b in at.button if "60대" in b.label]
+    assert btn, "예시 가구 버튼이 없습니다"
+    btn[0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert "지금 계획대로면" in md
+
+
+def test_app_whatif_draws_the_ab_comparison_chart():
+    """'바꿔보기'에서 조건을 바꾸면 지금 계획 vs 바꾼 뒤 그래프가 그려진다."""
+    at = _app(); at.run()
+    [b for b in at.button if "60대" in b.label][0].click().run()
+    p = at.session_state.get("p", {})
+    at.session_state["tweak"] = dict(rd=0, sd=0, sm=-10, ns=p.get("nps_start", 65),
+                                     pf=p.get("profile", "균형형"))
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert "<svg" in md and "지금 계획" in md, "A/B 비교 그래프가 그려지지 않았습니다"

@@ -8,7 +8,7 @@ import numpy as np
 from .config import Household, SimConfig, AddOns, CareMarkov
 from . import mortality, pension
 from .economy_v2 import EconomyV2, generate
-from .tax import (reverse_mortgage_monthly, acquisition_tax_rate, one_house_cgt, TaxConfig, HouseConfig, income_tax_person, private_pension_tax, health_premium, estate_tax,
+from .tax import (reverse_mortgage_monthly, acquisition_tax_rate, one_house_cgt, TaxConfig, HouseConfig, income_tax_person, private_pension_tax, health_premium,
                   property_tax, comprehensive_property_tax, rent_tax, gift_tax)
 
 

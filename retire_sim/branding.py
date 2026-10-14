@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, fields
 
 _HEX = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 _ENV = "RETIRE_BRAND"

@@ -17,8 +17,9 @@ from .session import calc_id
 from . import __version__
 
 
-def _fan_rows(res, upto_age: int = 100) -> list:
-    """나이별 (운 좋을 때, 보통, 나쁠 때) 실질자산 — 억 원. 생존 경로가 적은 구간은 뺀다."""
+def fan_rows(res, upto_age: int = 100) -> list:
+    """나이별 (나이, 운 좋을 때, 보통, 나쁠 때) 실질자산 — 억 원. 생존 경로가 적은 구간은 뺀다.
+    앱의 그래프와 리포트의 그래프가 같은 숫자를 쓰도록 여기 한 곳에서만 계산한다."""
     W, alive = res["W_real"], res["hh_alive"]
     base_age = res["youngest_age"]
     rows = []
@@ -31,7 +32,7 @@ def _fan_rows(res, upto_age: int = 100) -> list:
     return rows
 
 
-def _post_retirement_average(res, p: dict, key: str) -> float:
+def post_retirement_average(res, p: dict, key: str) -> float:
     """은퇴 후 '살아 있는 해'의 평균 (세금·건보료·보유세). 20년 합계를 나누면 은퇴 전이 섞인다."""
     t0 = max(0, min(p.get("retire_age", 0) - p["age"], res["T"]))
     live = res["hh_alive"][:, t0:res["T"]]
@@ -75,9 +76,9 @@ def build_report(p: dict, client_name: str = "", advisor: str = "", brand: Brand
             for lab, how, g, _ in actions[:3]]
 
     flow = [("연금 수입", pension * 12), ("생활비", -(p["essential"] * 12 + p["lifestyle"])),
-            ("세금", -_post_retirement_average(res, p, "tax_y")),
-            ("건보료", -_post_retirement_average(res, p, "hi_y"))]
-    prop = _post_retirement_average(res, p, "prop_y")
+            ("세금", -post_retirement_average(res, p, "tax_y")),
+            ("건보료", -post_retirement_average(res, p, "hi_y"))]
+    prop = post_retirement_average(res, p, "prop_y")
     if prop > 0:
         flow.append(("보유세", -prop))
 
@@ -100,6 +101,6 @@ def build_report(p: dict, client_name: str = "", advisor: str = "", brand: Brand
         gap_big=(f"매달 {short:.0f}만 원을 모아둔 돈에서 꺼내 써야 합니다" if short > 0
                  else "연금만으로 생활비가 충분합니다"),
         band=band_txt, actions=acts,
-        fan_svg=report.line_chart_svg(_fan_rows(res), brand=b),
+        fan_svg=report.line_chart_svg(fan_rows(res), brand=b),
         flow_svg=report.waterfall_svg(flow, brand=b),
         assumptions=assume), brand=b)

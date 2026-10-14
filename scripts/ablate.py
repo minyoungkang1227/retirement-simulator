@@ -7,13 +7,11 @@ import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..")
 """
 from dataclasses import replace
 
-import numpy as np
-
 from retire_sim import engine_tax, metrics, mortality
 from retire_sim.config import CareMarkov, CareShock, Household, NPSRules, Person, SimConfig
 from retire_sim.economy_v2 import EconomyV2
 from retire_sim.pension import estimate_nps_monthly
-from retire_sim.tax import HouseConfig, TaxConfig
+from retire_sim.tax import TaxConfig
 
 ECO, TC = EconomyV2.enhanced(), TaxConfig(overseas_share=0.2)
 BASE_CFG = SimConfig(care=CareMarkov())

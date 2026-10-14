@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 37          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 38          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -30,17 +30,15 @@ if not _model_ok:
     st.stop()
 # ───────────────────────────────────────────────────────────────────────────
 
-from retire_sim.config import Person, Household, SimConfig, CareMarkov, CareShock, AddOns, NPSRules
+from retire_sim.config import Person
 from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality, optimize, report, product
 from retire_sim.session import calc_id, save_blob, load_blob
 from retire_sim.inputs import (PROFILES, AVG_SPEND, DEFAULTS, build_case,
                               total_assets, nps_values, monthly_saving, income_gap)
-from retire_sim.advice import ERP_SD, action_ranking as _action_ranking, assumption_band as _assumption_band
-from retire_sim.reporting import build_report
+from retire_sim.advice import action_ranking as _action_ranking, assumption_band as _assumption_band
+from retire_sim.reporting import build_report, fan_rows
 from retire_sim.branding import Brand
-from retire_sim.tax import TaxConfig, HouseConfig
-from retire_sim.pension import estimate_nps_monthly
 
 # 화이트라벨: RETIRE_BRAND 환경변수나 Streamlit Secrets 의 [brand] 로 기관 설정을 받는다
 def _load_brand() -> Brand:
@@ -139,27 +137,17 @@ def simulate(p_json: str, v_json: str) -> dict:
     hh, cfg, eco, tc, house, biz, q, ad = build_case(p, v)
     res = engine_tax.run(hh, cfg, e=eco, tc=tc, house=house, qx_table=q, biz=biz, addons=ad)
     s = engine_tax.summarize(res)
-    d = res["depleted_at"]; y = res["youngest_age"]; ages = np.arange(res["T"] + 1) + y
+    d = res["depleted_at"]; y = res["youngest_age"]
     W, alive = res["W_real"], res["hh_alive"]
-    fan = [[ages[t], *np.percentile(W[alive[:, t], t], [5, 25, 50, 75, 95])]
-           for t in range(W.shape[1]) if alive[:, t].sum() > 200]
-    curve = [(int(ages[t]), float(((d >= 0) & (d <= t)).mean())) for t in range(res["T"] + 1)]
+    fan = fan_rows(res)                       # 앱 그래프와 리포트 그래프가 같은 숫자를 쓰도록 라이브러리에서 계산
     t85 = max(0, min(85 - y, res["T"]))
     w85 = W[alive[:, t85], t85]
     corr = None
     if np.any(~np.isnan(res["stock_ret"])):
         sr, pr = res["stock_ret"].ravel(), res["port_ret"].ravel(); ok = ~np.isnan(sr)
         corr = float(np.corrcoef(sr[ok], pr[ok])[0, 1])
-    # 은퇴 후 '살아 있는 해'의 평균 세금·건보료·보유세 (리포트의 1년 흐름용, 실질)
-    r_age = p.get("retire_age", 0)
-    t0 = max(0, min(r_age - p["age"], res["T"]))
-    live = res["hh_alive"][:, t0:res["T"]]
-    def _avg(key):
-        v = res[key][:, t0:res["T"]]
-        return float(v[live].mean()) if live.any() else 0.0
-    post = {"세금": _avg("tax_y"), "건보료": _avg("hi_y"), "보유세": _avg("prop_y")}
-    return {"s": s, "post": post, "dep": (d >= 0), "anti": bool(res.get("antithetic")),
-            "dep_age": float(np.median(d[d >= 0] + y)) if (d >= 0).any() else None, "fan": fan, "curve": curve,
+    return {"s": s, "dep": (d >= 0), "anti": bool(res.get("antithetic")),
+            "dep_age": float(np.median(d[d >= 0] + y)) if (d >= 0).any() else None, "fan": fan,
             "p50_85": float(np.percentile(w85, 50)) if w85.size else 0.0, "annuity_pay": res.get("annuity_pay", 0.0),
             "care_premium": res.get("care_premium", 0.0), "stock_corr": corr,
             "rm_monthly": res.get("rm_monthly", 0.0), "ds_cash": res.get("ds_cash", 0.0),
@@ -604,9 +592,9 @@ with tab1:
                    + (f" · 은퇴 때 갚을 빚이 남는 경우 10번 중 {ds_ * 10:.0f}번" if ds_ > 0.05 else ""))
 
     # 5) 나이별 남는 돈 (3개 선)
-    fan = pd.DataFrame(base["fan"], columns=["나이", "p5", "p25", "p50", "p75", "p95"])
-    lines_df = pd.concat([pd.DataFrame({"나이": fan["나이"], "억 원": fan[c] / 10000, "경우": lab})
-                          for c, lab in (("p75", "운이 좋을 때"), ("p50", "보통일 때"), ("p25", "운이 나쁠 때"))])
+    fan = pd.DataFrame(base["fan"], columns=["나이", "좋을 때", "보통", "나쁠 때"])
+    lines_df = pd.concat([pd.DataFrame({"나이": fan["나이"], "억 원": fan[c], "경우": lab})
+                          for c, lab in (("좋을 때", "운이 좋을 때"), ("보통", "보통일 때"), ("나쁠 때", "운이 나쁠 때"))])
     st.markdown("**나이별로 남는 돈** (오늘 돈 가치)")
     st.altair_chart(alt.Chart(lines_df).mark_line(strokeWidth=3).encode(
         x=alt.X("나이:Q", title="나이"),
@@ -748,6 +736,15 @@ with tab2:
                 st.caption(f"변화({-dlt * 100:+.1f}%p)가 계산 오차 범위(±{ci * 100:.1f}%p) 안이라 사실상 차이가 없습니다.")
             else:
                 st.caption(f"계산 오차 범위 ±{ci * 100:.1f}%p를 넘는 변화라, 이 선택의 실제 효과로 볼 수 있습니다.")
+
+            # 나이별 남는 돈을 나란히 — 확률 한 숫자보다 '언제 바닥나는지'가 눈에 들어온다
+            label_b = desc[0] if len(desc) == 1 else "바꾼 뒤"
+            st.markdown("**나이별로 남는 돈** (오늘 돈 가치)")
+            st.markdown(report.compare_chart_svg(base["fan"], r["fan"], "지금 계획", label_b,
+                                                 brand=BRAND), unsafe_allow_html=True)
+            st.markdown('<div class="legend">실선 = 보통일 때, 점선 = 운이 나쁠 때(하위 25%). '
+                        '선이 0에 닿는 때가 모아둔 돈을 다 쓰는 때예요. 집은 포함하지 않았어요.</div>',
+                        unsafe_allow_html=True)
 
     st.divider()
     if st.checkbox("변화 곡선 보기 (조건을 조금씩 바꿨을 때 확률이 어떻게 움직이는지)", key="curves"):

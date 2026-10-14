@@ -171,7 +171,7 @@ All tax figures live in `retire_sim/tax.py` and need annual updates. **This is n
 | Crash jumps (Merton) | 0.1 jumps per year, log jump N(−15%, 10%), compensator $-\lambda k$ keeps the mean return | Mean return preserved (7.17% → 7.16%); worst 1% annual return −30.8% → −33.7% |
 | Antithetic variates | Half of the paths use $-Z$; standard errors computed from pair means | 95% CI ±0.98pp → ±0.82pp |
 
-Validation (`scripts/validate_v10.py`): the two-factor formula reduces to Vasicek in the one-factor case (0.877060); two-factor 5-year bond price closed form 0.87553 vs Monte Carlo 0.87518; long-run nominal rate 3.00% (theory 3.00%).
+Validation (`tests/test_engine.py`): the two-factor formula reduces to Vasicek in the one-factor case (0.877060); two-factor 5-year bond price closed form 0.87553 vs Monte Carlo 0.87518; long-run nominal rate 3.00% (theory 3.00%).
 With the v10 settings the overall depletion probability is 49.1% (74.6% with the tax engine). The default `EconomyV2()` reproduces the original v2 results.
 
 ## 14. v11 mathematical refinements

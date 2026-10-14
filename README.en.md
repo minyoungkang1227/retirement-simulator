@@ -134,7 +134,7 @@ CHANGELOG.md       version history (what / how / what changed)
 ```bash
 pip install -r requirements.txt
 streamlit run streamlit_app.py      # web app
-python scripts/validate_v11.py      # theory checks
+python -m pytest -q                 # full suite, incl. theory checks
 pytest -q                           # regression tests
 ```
 

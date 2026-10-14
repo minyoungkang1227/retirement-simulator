@@ -52,12 +52,6 @@ def project_qx(qx: np.ndarray, years_ahead: float, scale=None) -> np.ndarray:
     return np.clip(out, 0, 1)
 
 
-def cohort_qx(qx: np.ndarray, start_age: int, T: int, calendar_offset: float = 0.0) -> np.ndarray:
-    """코호트 사망률 행렬 (T+1, len(qx)): t년 뒤에 적용할 사망률 벡터.
-    start_age에서 t년 뒤면 달력연도도 t년 흐르므로 개선율을 t+offset년치 적용."""
-    return np.stack([project_qx(qx, t + calendar_offset) for t in range(T + 1)])
-
-
 def default_qx(max_age: int = 110) -> dict:
     """기본 사망률: 통계청 2024 완전생명표(0~99세) + 100~109세 Gompertz 외삽. 파일이 없으면 임시 Gompertz."""
     if os.path.exists(_DEFAULT_TABLE):
