@@ -796,3 +796,21 @@ def test_app_whatif_draws_the_ab_comparison_chart():
     assert not at.exception, [e.value for e in at.exception]
     md = " ".join(m.value for m in at.markdown)
     assert "<svg" in md and "지금 계획" in md, "A/B 비교 그래프가 그려지지 않았습니다"
+
+
+def test_changelog_covers_current_version():
+    """CHANGELOG 맨 위 항목이 현재 모델 버전이어야 한다.
+
+    v37·v38에서 README만 쓰고 CHANGELOG를 빠뜨려, 저장소의 변경 내역이 v36에 멈춰 있었다.
+    버전을 올릴 때 기록도 같이 올리도록 여기서 막는다.
+    """
+    import pathlib
+    import re
+    from retire_sim import __version__
+    path = pathlib.Path(__file__).resolve().parent.parent / "CHANGELOG.md"
+    if not path.exists():
+        pytest.skip("CHANGELOG 없는 배포")
+    heads = re.findall(r"^## v(\d+(?:\.\d+)?)", path.read_text(), re.M)
+    assert heads, "CHANGELOG에 '## vNN' 항목이 없습니다"
+    assert int(float(heads[0])) == int(__version__), (
+        f"CHANGELOG 맨 위가 v{heads[0]} 인데 모델은 v{__version__} — CHANGELOG.md 에 이번 버전 항목을 추가하세요")
