@@ -69,7 +69,8 @@ def human_life_value(hh: Household, cfg: SimConfig, e: EconomyV2 = None, qx_tabl
     qx_table = qx_table or mortality.default_qx(cfg.max_age)
     m = hh.members[member]
     r = hh.floor_real_rate if real_rate is None else real_rate
-    years = max(hh.retire_age - m.age, 0)
+    # 이미 은퇴했으면 retire_age 가 None 이다 — 앞으로 벌 소득이 없으니 생애가치는 0.
+    years = 0 if hh.retire_age is None else max(hh.retire_age - m.age, 0)
     if years == 0 or not m.salary:
         return {"필요액": 0.0, "남은 근로기간": 0, "방법": "생애가치법"}
 

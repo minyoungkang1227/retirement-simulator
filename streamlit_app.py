@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 42          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 43          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -147,6 +147,7 @@ def simulate(p_json: str, v_json: str) -> dict:
         sr, pr = res["stock_ret"].ravel(), res["port_ret"].ravel(); ok = ~np.isnan(sr)
         corr = float(np.corrcoef(sr[ok], pr[ok])[0, 1])
     return {"s": s, "dep": (d >= 0), "anti": bool(res.get("antithetic")),
+            "death_t": res["death_t"].astype(np.int16),   # (구성원, 경로) 사망 연도 — 보장설계의 조건부 비교용
             "dep_age": float(np.median(d[d >= 0] + y)) if (d >= 0).any() else None, "fan": fan,
             "p50_85": float(np.percentile(w85, 50)) if w85.size else 0.0, "annuity_pay": res.get("annuity_pay", 0.0),
             "care_premium": res.get("care_premium", 0.0), "stock_corr": corr,
@@ -162,6 +163,28 @@ def stock_lookup(code: str):
     except Exception:
         key = None
     return stock_stats(code, years=10, ecos_key=key)
+
+
+@st.cache_data(ttl=600, max_entries=32, show_spinner=False)
+def protection_need(p_json: str, member: int = 0) -> dict:
+    """필요 사망보장액 — 니즈분석법과 생애가치법을 나란히. 계산은 protection 모듈이 한다."""
+    from retire_sim import protection
+    pp = json.loads(p_json)
+    hh, cfg, eco, tc, house, biz, q, ad = build_case(pp, {})
+    if len(hh.members) < 2:
+        return {}
+    out = protection.compare_methods(hh, cfg, e=eco, house=house, qx_table=q, member=member)
+    out["보험료"] = {b: protection.term_life_premium(hh, cfg, qx_table=q, member=member,
+                                                   benefit=b, term_years=_term_years(pp))
+                   for b in (10_000, 30_000, 50_000, 100_000)}
+    return out
+
+
+def _term_years(pp: dict) -> int:
+    """보장기간 기본값: 은퇴할 때까지 (그 뒤엔 소득이 없어 대체할 것도 없다).
+    이미 은퇴한 가구는 최소값만 둔다."""
+    ra = pp.get("retire_age")
+    return max(int(ra) - int(pp["age"]), 5) if ra else 5
 
 
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
@@ -833,6 +856,18 @@ with tab6:
                                help="일찍 돌아가셔도 이 기간까지는 유족에게 지급됩니다. 길수록 받는 금액이 줄어듭니다.")
         a_esc = c3.selectbox("체증형", ["없음 (정액)", "연 2% 증액", "연 3% 증액"],
                              help="물가를 따라가도록 매년 늘어나는 방식. 처음 받는 금액은 적습니다.")
+        st.markdown("**정기보험 (사망보장)**")
+        _need = protection_need(json.dumps(p, sort_keys=True)) if p["spouse"] else {}
+        if _need:
+            st.caption(f"이 가구에 필요한 보장은 **{_need['니즈분석법']/10000:.1f}억 ~ {_need['생애가치법']/10000:.1f}억** "
+                       f"입니다(아래에서 두 방법의 차이를 설명합니다). 보장기간은 은퇴까지 {_term_years(p)}년으로 잡았습니다.")
+        c1, c2 = st.columns(2)
+        _dft = round(_need["니즈분석법"] / 10000, 1) if _need else 0.0
+        t_ben = c1.number_input("사망보험금 (억 원)", 0.0, 30.0, 0.0, step=0.5,
+                                help=f"비워 두면 계산하지 않습니다. 권장값 {_dft:.1f}억" if _need else "배우자가 있어야 의미가 있습니다",
+                                disabled=not p["spouse"])
+        t_who = c2.radio("피보험자", ["본인", "배우자"], horizontal=True, key="t_who",
+                         disabled=not p["spouse"])
         st.markdown("**간병보험**")
         c1, c2 = st.columns(2)
         c_ben = c1.number_input("간병 시 연 보장액 (만 원)", 0, 10000, 0, step=100)
@@ -871,6 +906,17 @@ with tab6:
                            "annuity_survivor_ratio": a_sr / 100, "annuity_guarantee_years": int(a_gt), "annuity_escalation": esc}))
         if c_ben > 0: items.append((f"간병보험 연 {c_ben:,}만 원 ({c_who})", {"care_benefit": float(c_ben), "care_member": 0 if c_who == "본인" else 1,
                                                                     "care_trigger": "severe" if c_trig.startswith("중증") else "any"}))
+        if t_ben > 0 and p["spouse"]:
+            tm = 0 if t_who == "본인" else 1
+            ty = _term_years(p)
+            from retire_sim import protection as _prot
+            _hh, _cfg, _e, _tc, _hc, _bz, _q, _ad = build_case(p, {})
+            t_prem = _prot.term_life_premium(_hh, _cfg, qx_table=_q, member=tm,
+                                             benefit=t_ben * 10000, term_years=ty)
+            info["term"] = {"benefit": t_ben * 10000, "member": tm, "years": ty, "premium": t_prem}
+            items.append((f"정기보험 {t_ben:.1f}억 ({ty}년, {t_who})",
+                          {"death_benefit": t_ben * 10000, "death_member": tm,
+                           "death_term_years": ty, "death_premium": t_prem}))
         if pc > 0: items.append((f"연금저축 월 {pc}만 원", {"pension_contrib_annual": float(pc * 12)}))
         if not items:
             st.info("추가할 상품의 금액을 하나 이상 입력하세요.")
@@ -895,6 +941,63 @@ with tab6:
             st.caption("가장 나쁜 30%의 부족액: 결과가 나쁜 쪽 30% 경우만 모아 평균 낸 부족액(오늘 가치) — 작을수록 최악의 경우가 덜 심각합니다. "
                        "안정적 생활 수준: 들쭉날쭉한 미래를 '매달 똑같이 이만큼 쓰는 것과 같다'로 환산한 금액 — 클수록 좋습니다. "
                        "연금·보험은 확률보다 이 두 지표에서 가치가 드러납니다.")
+            if "term" in info:
+                ti = info["term"]
+                r = next(v for k, v in results.items() if k.startswith("정기보험"))
+                dt = base["death_t"][ti["member"]]
+                died = (dt >= 0) & (dt < ti["years"])
+                who = "본인" if ti["member"] == 0 else "배우자"
+                if died.sum() < 30:
+                    st.caption(f"{who}가 보장기간 안에 돌아가시는 경우가 너무 적어 따로 보여드리기 어렵습니다.")
+                else:
+                    ok = lambda res: float((~res["dep"][died]).mean())
+                    ok_live = lambda res: float((~res["dep"][~died]).mean())
+                    st.markdown("**보험금이 실제로 쓰이는 경우만 따로 보기**")
+                    st.dataframe(pd.DataFrame([
+                        {"구성": "지금 계획", "전체": pct(base["s"]["기본생활 유지 확률"]),
+                         f"{who} 사망 시": pct(ok(base)), f"{who} 생존 시": pct(ok_live(base))},
+                        {"구성": f"정기보험 {ti['benefit']/10000:.1f}억", "전체": pct(r["s"]["기본생활 유지 확률"]),
+                         f"{who} 사망 시": pct(ok(r)), f"{who} 생존 시": pct(ok_live(r))},
+                    ]), hide_index=True, width="stretch")
+                    st.markdown(
+                        f'<div class="tip"><b>보험은 평균으로 보면 손해로 보입니다</b><br>'
+                        f'보험료는 <b>모든 경우</b>에 나가는데 보험금은 {died.mean()*100:.1f}%의 경우에만 들어옵니다. '
+                        f'그래서 전체 확률은 {(r["s"]["기본생활 유지 확률"]-base["s"]["기본생활 유지 확률"])*100:+.1f}%p로 내려갑니다.<br>'
+                        f'대신 <b>{who}가 먼저 돌아가신 경우</b>에는 {pct(ok(base))} → <b>{pct(ok(r))}</b>로 오릅니다. '
+                        f'보험이 하는 일은 평균을 올리는 게 아니라 <b>가장 나쁜 경우를 막는 것</b>입니다.<br>'
+                        f'<span style="color:{MUTED}">연 보험료 {ti["premium"]:,.0f}만 원(월 {ti["premium"]/12:,.1f}만 원)은 '
+                        f'수지상등으로 계산한 기준선입니다. 실제 상품은 이보다 비쌉니다.</span></div>',
+                        unsafe_allow_html=True)
+            if _need and p["spouse"]:
+                with st.expander("필요한 보장이 얼마인지 — 두 가지 방법"):
+                    st.markdown(f"""
+설계 현장에서 쓰는 두 가지 방법입니다. **답이 다르게 나오는 게 정상**이라, 작은 쪽을 하한, 큰 쪽을 상한으로 봅니다.
+
+| 방법 | 어떻게 계산하나 | 이 가구 |
+| --- | --- | --- |
+| 니즈분석법 | 남은 가족이 **쓸 돈** − **이미 가진 것**. 유족연금을 빼고 계산합니다 | **{_need['니즈분석법']/10000:.1f}억** |
+| 생애가치법 | 고인이 **앞으로 벌었을 돈** 중 가족 몫의 현재가치 | **{_need['생애가치법']/10000:.1f}억** |
+""")
+                    rows_n = _need["나이별 필요액"]
+                    ages, need = rows_n["ages"], rows_n["need"]
+                    step = max(len(ages) // 8, 1)
+                    df = pd.DataFrame({"나이": ages[::step][:9], "필요보장액 (억)": [v/10000 for v in need[::step][:9]]})
+                    st.markdown("**나이가 들수록 필요한 보장은 줄어듭니다**")
+                    st.altair_chart(alt.Chart(df).mark_line(point=True, strokeWidth=3, color=TEAL).encode(
+                        x=alt.X("나이:Q", title="나이"),
+                        y=alt.Y("필요보장액 (억):Q", title="억 원"),
+                        tooltip=["나이", alt.Tooltip("필요보장액 (억):Q", format=".1f")]
+                    ).properties(height=230), width="stretch")
+                    st.caption("남은 기간이 짧아지고 모아둔 돈이 늘기 때문입니다. "
+                               "그래서 평생 같은 금액을 보장하는 종신보험보다, 필요할 때 크고 나중에 줄어드는 "
+                               "**체감형 정기보험**이 이 곡선에 더 맞습니다.")
+                    pr = _need.get("보험료", {})
+                    if pr:
+                        st.markdown("**보장액별 연 보험료 (수지상등 기준선)**")
+                        st.dataframe(pd.DataFrame([{"보장액": f"{b/10000:.0f}억", "연 보험료": f"{v:,.0f}만 원",
+                                                    "월": f"{v/12:,.1f}만 원"} for b, v in pr.items()]),
+                                     hide_index=True)
+                        st.caption("실제 상품은 해지·선택효과·이익마진이 붙어 이보다 비쌉니다. 비교용 기준선입니다.")
             if "stock" in info:
                 stt = info["stock"]; r = next(v for k, v in results.items() if k.startswith("주식"))
                 st.markdown(f"**종목 {stt['name']} 통계**" + (f" ({stt.get('start','')} ~ {stt.get('end','')}, {stt.get('months','')}개월)" if "months" in stt else ""))
@@ -1158,14 +1261,35 @@ with tab7:
 올리면 평균은 좋아지지만 **나쁜 쪽도 같이 나빠집니다.**
 '위기 상황' 탭에서 은퇴 직후 폭락을 보여 주시면 바로 이해하십니다.
 
-#### 4) 하지 마셔야 할 말
+#### 4) 보장설계를 설명하실 때
+
+**"보험 넣으니까 확률이 오히려 떨어지는데요?"**
+맞습니다. 그리고 **그게 정상**이라고 먼저 말씀해 주세요.
+보험료는 모든 경우에 나가는데 보험금은 몇 %의 경우에만 들어옵니다.
+**"보험은 평균을 올리는 게 아니라 가장 나쁜 경우를 막는 것"**이라고 말씀하시고,
+'상품 추가' 탭의 **사망 시 / 생존 시** 표를 보여 주세요. 거기서 숫자가 뒤집힙니다.
+
+**"얼마나 들어야 합니까?"**
+두 가지 방법을 같이 보여 주세요. 니즈분석법은 *남은 가족이 쓸 돈에서 가진 걸 뺀 것*,
+생애가치법은 *고인이 앞으로 벌었을 돈 중 가족 몫*입니다.
+답이 다른 게 정상이고, 작은 쪽이 하한, 큰 쪽이 상한입니다.
+
+**"종신보험이 낫지 않습니까?"**
+필요한 보장은 **나이가 들수록 줄어듭니다**(남은 기간이 짧아지고 모아둔 돈이 늘어서).
+그 곡선을 보여 주시면 **체감형 정기보험**이 왜 맞는지 한눈에 들어옵니다.
+
+**"보험료가 생각보다 싼데요?"**
+화면의 보험료는 **수지상등으로 계산한 기준선**입니다.
+실제 상품은 해지·선택효과·이익마진이 붙어 더 비쌉니다. 그대로 쓰시면 안 됩니다.
+
+#### 5) 하지 마셔야 할 말
 
 - ❌ "이러면 **됩니다**" → ⭕ "이렇게 하면 10번 중 몇 번이 몇 번으로 **바뀝니다**"
 - ❌ "이 상품이 **좋습니다**" → ⭕ "이 상품은 **오래 사는 위험**을 막아 주고, 대신 모으는 데는 불리합니다"
 - ❌ "**보장**됩니다" → ⭕ "최저보증이율은 **금리가 낮게 흘러간 경우에만** 값을 합니다"
 - ❌ "세금이 **얼마 나옵니다**" → ⭕ "단순화한 계산이라 **실제와 다를 수 있습니다**"
 
-#### 5) 설명하실 때 쓰실 수 있는 근거
+#### 6) 설명하실 때 쓰실 수 있는 근거
 
 - **"추측한 숫자는 없습니다."** 자료 출처는 '이 계산에 대하여' 탭에 전부 적혀 있습니다.
 - **"같은 입력이면 언제 해도 같은 결과입니다."** 리포트의 계산 ID로 확인됩니다.

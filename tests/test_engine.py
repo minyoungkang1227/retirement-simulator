@@ -1055,3 +1055,38 @@ def test_compare_methods_brackets_the_answer():
     assert lo <= out["니즈분석법"] <= hi and lo <= out["생애가치법"] <= hi
     assert out["생애가치법"] > out["니즈분석법"], "연 7천 외벌이면 생애가치법이 더 크다"
     assert len(out["나이별 필요액"]["need"]) > 1
+
+
+def test_app_term_life_shows_conditional_not_just_average():
+    """'상품 추가'에서 정기보험을 넣으면 **사망 시 / 생존 시**를 따로 보여 준다.
+
+    평균만 보여주면 보험이 손해로만 보인다 — 조건부 표가 이 기능의 핵심이다.
+    """
+    at = _app(); at.run()
+    [b for b in at.button if "30대" in b.label][0].click().run()
+    box = [x for x in at.number_input if "사망보험금" in (x.label or "")]
+    assert box, "정기보험 입력칸이 없습니다"
+    box[0].set_value(5.0)
+    before = len(at.get("vega_lite_chart"))
+    [b for b in at.button if b.label == "비교하기"][0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert "보험금이 실제로 쓰이는 경우만" in md, "조건부 표가 없습니다"
+    assert "보험은 평균으로 보면 손해" in md, "왜 전체 확률이 내려가는지 설명이 없습니다"
+    assert "니즈분석법" in md and "생애가치법" in md, "두 산출법 비교가 없습니다"
+    assert len(at.get("vega_lite_chart")) > before, "나이별 필요보장액 곡선이 없습니다"
+
+
+def test_protection_handles_already_retired_household():
+    """이미 은퇴한 가구는 retire_age 가 None 이다 — 생애가치법이 터지면 안 된다.
+
+    v43에서 실제로 터졌다(60대 예시 가구를 열자마자 앱 전체가 죽었다).
+    앞으로 벌 소득이 없으니 생애가치는 0이고, 니즈분석법은 그대로 나와야 한다.
+    """
+    from retire_sim import protection
+    hh = couple_60()
+    assert hh.retire_age is None, "이 검정은 이미 은퇴한 가구를 전제한다"
+    hlv = protection.human_life_value(hh, CFG, e=ECO, qx_table=mortality.default_qx())
+    assert hlv["필요액"] == 0.0 and hlv["남은 근로기간"] == 0
+    out = protection.compare_methods(hh, CFG, e=ECO, qx_table=mortality.default_qx())
+    assert out["니즈분석법"] >= 0
