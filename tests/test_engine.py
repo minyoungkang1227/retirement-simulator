@@ -959,3 +959,99 @@ def test_no_nan_leaks_into_results():
             "상속세가 NaN 인데 가구가 이미 사망한 경로가 있습니다 — 계산이 빠진 자리입니다"
     for k, v in engine_tax.summarize(res).items():
         assert not (isinstance(v, float) and not np.isfinite(v)), f"요약값 {k} 가 {v}"
+
+
+# ── v42 보장설계: 필요 사망보장액과 정기보험 ──
+
+def _earner_hh(**kw):
+    """35세 외벌이 + 33세 배우자 — 보장설계의 전형적 사례."""
+    base = dict(members=[Person(35, "M", nps_monthly=estimate_nps_monthly(7000, 5, 35, 60), salary=7000),
+                         Person(33, "F", nps_monthly=estimate_nps_monthly(0, 0, 33, 58), salary=0)],
+                liquid_assets=15000, stock_weight=0.5, annual_spending=3600,
+                essential=3000, lifestyle=600, retire_age=60, saving_rate=0.25, legacy_target=0)
+    return Household(**{**base, **kw})
+
+
+def test_needs_analysis_falls_with_age_and_with_more_assets():
+    """필요보장액은 나이가 들수록 줄고(남은 기간이 짧다), 자산이 많으면 줄고, 음수가 되지 않는다."""
+    from retire_sim import protection
+    hh = _earner_hh()
+    r = protection.needs_analysis(hh, CFG, e=ECO, qx_table=mortality.default_qx())
+    need = np.array(r["need"])
+    assert np.all(need >= 0)
+    assert need[0] > need[10] > need[20], "남은 기간이 짧아지면 필요액도 줄어야 한다"
+    rich = protection.needs_analysis(_earner_hh(liquid_assets=60000), CFG, e=ECO,
+                                     qx_table=mortality.default_qx())
+    assert rich["need"][0] < r["need"][0]
+
+
+def test_needs_analysis_shrinks_when_survivor_pension_is_larger():
+    """배우자가 받을 유족연금이 크면 필요보장액이 줄어든다 — 보호선이 이미 연금을 차감하기 때문."""
+    from retire_sim import protection
+    qx = mortality.default_qx()
+    small = protection.needs_analysis(_earner_hh(), CFG, e=ECO, qx_table=qx)["need"][0]
+    big_hh = _earner_hh()
+    big_hh.members[0].nps_monthly *= 2                      # 고인의 연금이 크면 유족연금도 크다
+    big = protection.needs_analysis(big_hh, CFG, e=ECO, qx_table=qx)["need"][0]
+    assert big < small
+
+
+def test_term_life_premium_is_actuarially_ordered():
+    """정기보험료: 보장액에 비례, 사업비율에 비례, 나이가 많거나 기간이 길면 비싸다."""
+    from retire_sim import protection
+    qx = mortality.default_qx()
+    p = lambda **kw: protection.term_life_premium(_earner_hh(), CFG, qx_table=qx, **kw)
+    base = p(benefit=10000, term_years=20)
+    assert base > 0
+    assert p(benefit=20000, term_years=20) == pytest.approx(base * 2, rel=1e-9)
+    assert p(benefit=10000, term_years=20, loading=0.5) == pytest.approx(base / 1.25 * 1.5, rel=1e-9)
+    assert p(benefit=10000, term_years=30) > base            # 오래 보장할수록 비싸다
+    old = _earner_hh()
+    old.members[0].age = 55
+    assert protection.term_life_premium(old, CFG, qx_table=qx, benefit=10000, term_years=20) > base
+
+
+def test_death_benefit_helps_only_where_it_is_needed():
+    """정기보험의 값은 **평균이 아니라 조건부**에서 나온다.
+
+    보험료는 모든 경로에서 나가므로 전체 확률은 내려가고, 가장이 보장기간 안에 사망한
+    경로에서만 크게 올라간다. 평균만 보면 보험을 구조적으로 과소평가하게 된다.
+    """
+    from retire_sim import protection
+    hh = _earner_hh()
+    qx = mortality.default_qx()
+    term, benefit = 25, 50_000
+    base = _run(hh, qx_table=qx)
+    dt = base["death_t"][0]
+    died = (dt >= 0) & (dt < term)
+    assert died.any(), "보장기간 안에 사망하는 경로가 하나도 없으면 검정이 성립하지 않는다"
+    prem = protection.term_life_premium(hh, CFG, qx_table=qx, benefit=benefit, term_years=term)
+    with_ = _run(hh, qx_table=qx, addons=AddOns(death_benefit=benefit, death_term_years=term,
+                                                death_premium=prem))
+    ok = lambda r, m: float((r["depleted_at"][m] < 0).mean())
+    assert ok(with_, died) > ok(base, died) + 0.03, "사망 경로에서 뚜렷이 좋아져야 한다"
+    assert ok(with_, ~died) < ok(base, died), "생존 경로에서는 보험료만큼 나빠진다"
+
+
+def test_death_t_agrees_with_household_survival():
+    """death_t(구성원별 사망 연도)가 가구 생존 여부와 앞뒤가 맞아야 한다."""
+    res = _run(_earner_hh())
+    dt, alive = res["death_t"], res["hh_alive"]
+    both = (dt[0] >= 0) & (dt[1] >= 0)
+    last = np.maximum(dt[0], dt[1])
+    idx = np.where(both)[0][:300]
+    assert not alive[idx, last[idx]].any(), "둘 다 떠난 해에는 가구가 살아 있으면 안 된다"
+    survive = (dt[0] < 0) | (dt[1] < 0)
+    assert alive[survive, -1].all(), "끝까지 산 사람이 있으면 마지막 해에 가구가 살아 있어야 한다"
+
+
+def test_compare_methods_brackets_the_answer():
+    """두 산출법을 나란히 내고, 권장 범위가 둘을 감싸야 한다.
+    소득이 높은 가구에서는 생애가치법이 니즈분석법보다 크게 나오는 것이 정상이다."""
+    from retire_sim import protection
+    out = protection.compare_methods(_earner_hh(), CFG, e=ECO, qx_table=mortality.default_qx())
+    lo, hi = out["권장 범위"]
+    assert lo <= hi
+    assert lo <= out["니즈분석법"] <= hi and lo <= out["생애가치법"] <= hi
+    assert out["생애가치법"] > out["니즈분석법"], "연 7천 외벌이면 생애가치법이 더 크다"
+    assert len(out["나이별 필요액"]["need"]) > 1

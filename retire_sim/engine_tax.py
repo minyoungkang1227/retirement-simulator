@@ -424,7 +424,15 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             i0 = ad.care_member
             ci_ben = ad.care_benefit * trig[i0, :, t]
             ci_cost = ci_prem * (a[i0] & ~incare[i0, :, t] & (hh.members[i0].age + t < ad.care_pay_until))
-        income_all = nps.sum(0) + surv.sum(0) + basic_inc + priv.sum(0) + rent + bz.sum(0) + ann_inc + ci_ben + rm_inc
+        # (v42) 정기보험: 보장기간 안에 피보험자가 사망한 바로 그 해에 보험금, 그 전까지는 보험료
+        dl_ben = np.zeros(n); dl_cost = np.zeros(n)
+        if ad.death_benefit > 0 and ad.death_member < k and t < ad.death_term_years:
+            j = ad.death_member
+            died_now = alive[j, :, t - 1] & ~a[j] if t > 0 else ~a[j]
+            dl_ben = ad.death_benefit * died_now * live      # 남은 가족이 있어야 쓸 수 있다
+            dl_cost = ad.death_premium * a[j]
+        income_all = (nps.sum(0) + surv.sum(0) + basic_inc + priv.sum(0) + rent + bz.sum(0)
+                      + ann_inc + ci_ben + dl_ben + rm_inc)
         if retired:
             # 목표 우선순위: 기본생활(Essential) 보호선을 먼저 지키고, 남는 만큼만 여행·취미(Lifestyle) 지출
             if floor_tab is not None:
@@ -464,7 +472,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 pc = ad.pension_contrib_annual * cpi[:, t] * live
                 credit = np.minimum(pc, 900) * ad.pension_credit_rate
                 Wp += pc; saving = saving - pc + credit
-        need = spend + care + ci_cost + ev_cost - income_all - saving
+        need = spend + care + ci_cost + dl_cost + ev_cost - income_all - saving
         pw = np.zeros(n); pw_taxable = np.zeros(n)
         pen_self = ad.pension_contrib_annual > 0 or hh.pension_balance > 0 or hh.retirement_contrib
         # 세금을 끄는 것(tc.enabled=False)은 '세금을 안 매긴다'는 뜻이어야 한다.
@@ -588,7 +596,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     return {"depleted_at": dep_at, "youngest_age": youngest, "T": T, "antithetic": eco.get("antithetic", False), "erp_path": eco.get("erp_path"), "tax_y": tax_y, "hi_y": hi_y, "prop_y": prop_y,
             "estate_real": estate_real, "life_ratio": life_ratio, "stock_ret": stock_ret, "port_ret": port_ret, "short_real": short_real, "cons_u": cons_u, "cons_a": cons_a, "risk_aversion": gamma,
             "floor_tab": floor_tab, "debt_retire": debt_retire_real, "rm_monthly": rm_monthly_real, "ds_cash": ds_cash_real, "annuity_pay": float(np.median(ann_pay[ann_pay > 0])) if (ann_pay > 0).any() else 0.0, "care_premium": ci_prem, "legacy_target": hh.legacy_target, "estate_tax_real": etax_real, "transfer_real": transfer_real,
-            "W_nominal": W_hist, "W_real": W_hist / cpi, "hh_alive": hh_alive,
+            "W_nominal": W_hist, "W_real": W_hist / cpi, "death_t": np.where(alive.all(2), -1, alive.argmin(2)),   # (구성원, 경로) 사망 연도, 끝까지 생존이면 -1
+            "hh_alive": hh_alive,
             "last_alive_t": hh_alive.sum(1) - 1, "cpi": cpi}
 
 

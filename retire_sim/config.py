@@ -120,6 +120,11 @@ class AddOns:
     care_loading: float = 0.3        # 부가보험료율
     care_rate: float = 0.03
     care_trigger: str = "severe"     # 지급 조건: "severe"(1~2등급 중증) / "any"(모든 장기요양 등급)
+    # 정기보험 (사망 시 일시금. 보장설계 — protection.py 가 필요보장액과 보험료를 낸다)
+    death_benefit: float = 0.0       # 사망보험금(명목 정액, 만원)
+    death_member: int = 0            # 피보험자 (0=본인, 1=배우자)
+    death_term_years: int = 20       # 보장기간(년). 이 기간 안에 사망해야 지급
+    death_premium: float = 0.0       # 연 보험료. 0이면 보험료 없이 보장만 — 효과만 볼 때
     # 연금저축·IRP 추가 납입 (은퇴 전, 세액공제 후 연금계좌로)
     pension_contrib_annual: float = 0.0
     pension_credit_rate: float = 0.132
