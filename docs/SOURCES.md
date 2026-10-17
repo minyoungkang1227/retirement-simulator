@@ -1,6 +1,6 @@
 # 자료 출처와 갱신
 
-모델 v43 기준. **이 파일은 `retire_sim/sources.py` 에서 자동으로 만듭니다** — 직접 고치지 마시고 그 파일을 고친 뒤 `python scripts/make_sources_doc.py` 를 돌리세요.
+모델 v44 기준. **이 파일은 `retire_sim/sources.py` 에서 자동으로 만듭니다** — 직접 고치지 마시고 그 파일을 고친 뒤 `python scripts/make_sources_doc.py` 를 돌리세요.
 
 이 계산기는 추측한 숫자를 쓰지 않습니다. 아래가 바깥에서 가져온 자료 전부입니다.
 

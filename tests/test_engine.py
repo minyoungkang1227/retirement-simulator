@@ -1090,3 +1090,162 @@ def test_protection_handles_already_retired_household():
     assert hlv["필요액"] == 0.0 and hlv["남은 근로기간"] == 0
     out = protection.compare_methods(hh, CFG, e=ECO, qx_table=mortality.default_qx())
     assert out["니즈분석법"] >= 0
+
+
+# ── v44 세금 원시 함수 직접 검증 ────────────────────────────────────────
+# 세금은 영향도 3위(대표 가구 8~10%p)인데, 지금까지 엔진 전체의 회귀 범위(65~75%)로만
+# 간접 확인됐다. 구간이나 공제액이 틀려도 그 범위 안에서 조용히 지나간다.
+# 아래는 코드를 다시 돌려 맞추는 게 아니라, 세법 구간에서 **손으로 산출한 값**과 대조한다.
+
+def test_progressive_tables_are_continuous_at_every_boundary():
+    """누진공제가 맞으면 구간 경계에서 세액이 이어져야 한다.
+
+    경계에서 값이 튀면 공제액이 틀린 것이다 — 이 검정 하나가 공제액 표 전체를 검증한다.
+    """
+    from retire_sim.tax import BRACKETS, ESTATE, progressive
+    for name, tbl in (("소득세", BRACKETS), ("상속·증여세", ESTATE)):
+        for hi, _, _ in tbl[:-1]:
+            lo_side = float(progressive(np.array([hi]), tbl)[0])
+            hi_side = float(progressive(np.array([hi + 1e-6]), tbl)[0])
+            assert lo_side == pytest.approx(hi_side, abs=1e-3), f"{name} {hi}만원 경계에서 끊긴다"
+
+
+@pytest.mark.parametrize("base,want", [
+    (0, 0.0),
+    (1000, 1000 * 0.06),                      # 1구간
+    (3000, 3000 * 0.15 - 126),                # 2구간
+    (10000, 10000 * 0.35 - 1544),             # 4구간
+    (200000, 200000 * 0.45 - 6594),           # 최고구간
+])
+def test_progressive_income_tax_matches_hand_calculation(base, want):
+    """소득세 누진 계산을 손계산과 대조 (지방세 제외, 과세표준 기준)."""
+    from retire_sim.tax import BRACKETS, progressive
+    assert float(progressive(np.array([base], float), BRACKETS)[0]) == pytest.approx(want)
+
+
+def test_pension_deduction_is_continuous_and_capped():
+    """연금소득공제: 구간 경계에서 이어지고, 900만원에서 멈춘다."""
+    from retire_sim.tax import pension_deduction
+    d = lambda x: float(pension_deduction(np.array([x], float))[0])
+    assert d(350) == pytest.approx(350)
+    assert d(700) == pytest.approx(350 + 0.4 * 350)        # 490
+    assert d(1400) == pytest.approx(490 + 0.2 * 700)       # 630
+    for b in (350, 700, 1400):
+        assert d(b) == pytest.approx(d(b + 1e-6), abs=1e-3), f"{b}만원 경계에서 끊긴다"
+    assert d(4100) == pytest.approx(900)                   # 630 + 0.1×2700 = 900
+    assert d(100000) == pytest.approx(900), "한도를 넘어선 안 된다"
+
+
+def test_private_pension_rate_falls_with_age():
+    """사적연금 분리과세율은 나이가 많을수록 낮다 (55~69세 5.5% / 70대 4.4% / 80세 이상 3.3%)."""
+    from retire_sim.tax import private_pension_rate
+    r = lambda a: float(private_pension_rate(np.array([a]))[0])
+    assert r(65) == pytest.approx(0.055)
+    assert r(75) == pytest.approx(0.044)
+    assert r(85) == pytest.approx(0.033)
+    assert r(69) > r(70) and r(70) == r(79) and r(79) > r(80)   # 70대는 같은 4.4%
+
+
+def test_private_pension_tax_has_an_intentional_cliff_at_1500():
+    """사적연금 1,500만원을 넘으면 **전액** 16.5%로 넘어간다 — 법이 그래서 의도된 절벽이다."""
+    from retire_sim.tax import private_pension_tax
+    f = lambda x: float(private_pension_tax(np.array([x], float), np.array([65]))[0])
+    assert f(1500) == pytest.approx(1500 * 0.055)
+    assert f(1501) == pytest.approx(1501 * 0.165)
+    assert f(1501) > f(1500) * 2, "절벽이 사라졌다면 분리과세 한도 처리가 바뀐 것"
+
+
+def test_one_house_cgt_is_free_below_12eok():
+    """1세대 1주택 양도세: 12억 이하 비과세, 초과분 비율만 과세, 장기보유공제 최대 80%."""
+    from retire_sim.tax import one_house_cgt
+    assert float(one_house_cgt(np.array([110000.0]), 50000, 10)[0]) == 0.0
+    assert float(one_house_cgt(np.array([120000.0]), 50000, 10)[0]) == 0.0
+    t15 = float(one_house_cgt(np.array([200000.0]), 50000, 15)[0])
+    t5 = float(one_house_cgt(np.array([200000.0]), 50000, 5)[0])
+    assert 0 < t15 < t5, "오래 보유할수록 세금이 적어야 한다"
+    gain = (200000 - 50000) * (200000 - 120000) / 200000   # 12억 초과분 비율만
+    assert t15 == pytest.approx(gain * (1 - 0.8) * 0.385)  # 공제 80% 한도
+
+
+def test_acquisition_tax_brackets():
+    """취득세율: 6억 이하 1.1% / 9억 이하 2.2% / 초과 3.3%."""
+    from retire_sim.tax import acquisition_tax_rate
+    r = lambda p: float(acquisition_tax_rate(np.array([p], float))[0])
+    assert r(50000) == pytest.approx(0.011) and r(60000) == pytest.approx(0.011)
+    assert r(60001) == pytest.approx(0.022) and r(90000) == pytest.approx(0.022)
+    assert r(90001) == pytest.approx(0.033)
+
+
+def test_comprehensive_property_tax_deduction_and_elderly_relief():
+    """종부세: 1주택 12억·그 외 9억 공제, 1주택은 고령자·장기보유 세액공제(합산 80% 한도)."""
+    from retire_sim.tax import comprehensive_property_tax as cjs
+    z = lambda **kw: float(cjs(np.array([kw.pop("official")], float), **kw)[0])
+    assert z(official=110000, n_houses=1, age=60, years_held=10) == 0.0, "12억 이하 1주택은 0"
+    assert z(official=100000, n_houses=2, age=60, years_held=10) > 0, "2주택은 9억 공제라 과세"
+    young = z(official=200000, n_houses=1, age=55, years_held=3)
+    old = z(official=200000, n_houses=1, age=70, years_held=15)
+    assert 0 < old < young, "고령·장기보유면 줄어야 한다"
+    assert old == pytest.approx(young * (1 - 0.8)), "공제 합산 80% 한도"
+
+
+def test_rent_tax_separates_below_2000():
+    """주택임대소득: 2,000만원 이하 분리과세(필요경비 50%·기본공제 200), 초과분은 종합과세로 넘긴다."""
+    from retire_sim.tax import rent_tax
+    sep, comb = rent_tax(np.array([1000.0]), np.array([0.0]))
+    assert float(comb[0]) == 0.0
+    assert float(sep[0]) == pytest.approx(max(1000 * 0.5 - 200, 0) * 0.14 * 1.1)
+    sep2, comb2 = rent_tax(np.array([3000.0]), np.array([0.0]))
+    assert float(sep2[0]) == 0.0 and float(comb2[0]) == pytest.approx(1500.0)
+    _, c3 = rent_tax(np.array([1000.0]), np.array([5000.0]))   # 다른 소득이 많으면 기본공제 없음
+    s3, _ = rent_tax(np.array([1000.0]), np.array([5000.0]))
+    assert float(s3[0]) == pytest.approx(1000 * 0.5 * 0.14 * 1.1)
+
+
+def test_gift_tax_uses_the_estate_table():
+    """증여세는 공제 후 금액에 상속세 세율표를 적용한다 (1억 이하 10%)."""
+    from retire_sim.tax import gift_tax
+    assert float(gift_tax(np.array([0.0]))[0]) == 0.0
+    assert float(gift_tax(np.array([5000.0]))[0]) == pytest.approx(500.0)
+    assert float(gift_tax(np.array([20000.0]))[0]) == pytest.approx(20000 * 0.2 - 1000)
+
+
+def test_income_tax_person_compares_separate_and_combined():
+    """금융소득 2,000만원을 넘으면 분리과세와 종합과세 중 **큰 쪽**을 낸다(비교과세).
+
+    넘기 전까지는 14% 분리과세 그대로이고, 넘는 순간 종합과세가 끼어들 수 있다.
+    """
+    from retire_sim.tax import TaxConfig, income_tax_person
+    tc = TaxConfig()
+    f = lambda nps, fin, age=65: float(income_tax_person(
+        np.array([nps], float), np.array([fin], float), np.array([age]), tc)[0])
+    assert f(0, 1000) == pytest.approx(1000 * 0.14 * 1.1), "2천 이하면 14% 분리과세(지방세 포함)"
+    assert f(0, 3000) >= f(0, 2000), "금융소득이 늘면 세금이 줄어들 수 없다"
+    assert f(3000, 0) > 0 and f(0, 0) == 0.0
+    assert f(5000, 0, age=65) >= f(5000, 0, age=75), "70세 이상 경로우대공제로 세금이 더 크지 않다"
+
+
+def test_health_premium_dependent_rules():
+    """건보료 피부양자: 소득 2,000만원·재산과표 기준을 넘으면 자격을 잃고 지역가입자가 된다."""
+    from retire_sim.tax import TaxConfig, health_premium
+    one = lambda v: [np.array([v], float)]
+    dep = TaxConfig(dependent_possible=True)
+    free = float(health_premium(one(500), one(0), dep, one(0), one(0))[0])
+    assert free == 0.0, "소득이 적으면 피부양자로 0원"
+    lost = float(health_premium(one(2500), one(0), dep, one(0), one(0))[0])
+    assert lost > 0, "소득 2,000만원을 넘으면 자격 상실"
+    rich_prop = float(health_premium(one(500), one(0), dep, one(0), one(100000))[0])
+    assert rich_prop > 0, "재산과표 9억 초과면 자격 상실"
+    reg = TaxConfig(dependent_possible=False)
+    assert float(health_premium(one(500), one(0), reg, one(0), one(0))[0]) > 0, "지역가입자는 소득분 부과"
+
+
+def test_health_premium_property_component_scales():
+    """재산분 건보료는 공단 모의계산값(월)을 그대로 연 12배로 더한다 — 넣은 만큼 늘어야 한다."""
+    from retire_sim.tax import TaxConfig, health_premium
+    one = lambda v: [np.array([v], float)]
+    tc = TaxConfig()
+    base = float(health_premium(one(1000), one(0), tc, one(0), one(0), prop_monthly=0.0)[0])
+    p15 = float(health_premium(one(1000), one(0), tc, one(0), one(0), prop_monthly=15.0)[0])
+    p30 = float(health_premium(one(1000), one(0), tc, one(0), one(0), prop_monthly=30.0)[0])
+    assert p15 - base == pytest.approx(15 * 12)
+    assert p30 - base == pytest.approx(30 * 12)
