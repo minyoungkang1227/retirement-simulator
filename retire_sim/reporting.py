@@ -40,6 +40,22 @@ def post_retirement_average(res, p: dict, key: str) -> float:
     return float(v[live].mean()) if live.any() else 0.0
 
 
+def money_flow(res, p: dict, pension: float = None):
+    """은퇴 후 평균 1년의 돈 흐름 — [(항목, 연 금액)]. 들어오는 돈은 +, 나가는 돈은 −.
+
+    리포트의 폭포 그래프와 앱 결과 탭이 같은 숫자를 쓰도록 여기 한 곳에서 만든다.
+    """
+    if pension is None:
+        pension = income_gap(p)[1]
+    flow = [("연금 수입", pension * 12), ("생활비", -(p["essential"] * 12 + p["lifestyle"])),
+            ("세금", -post_retirement_average(res, p, "tax_y")),
+            ("건보료", -post_retirement_average(res, p, "hi_y"))]
+    prop = post_retirement_average(res, p, "prop_y")
+    if prop > 0:
+        flow.append(("보유세", -prop))
+    return flow
+
+
 def build_report(p: dict, client_name: str = "", advisor: str = "", brand: Brand = None,
                  res=None, actions=None, band=None, today: date = None) -> str:
     """상담 리포트 HTML. res·actions·band 를 주면 다시 계산하지 않는다(앱은 이미 가진 것을 넘긴다)."""
@@ -75,12 +91,7 @@ def build_report(p: dict, client_name: str = "", advisor: str = "", brand: Brand
     acts = [(lab, how, f"{ok * 100:.0f}% → {min(ok + g, 1) * 100:.0f}% ({g * 100:+.0f}%p)")
             for lab, how, g, _ in actions[:3]]
 
-    flow = [("연금 수입", pension * 12), ("생활비", -(p["essential"] * 12 + p["lifestyle"])),
-            ("세금", -post_retirement_average(res, p, "tax_y")),
-            ("건보료", -post_retirement_average(res, p, "hi_y"))]
-    prop = post_retirement_average(res, p, "prop_y")
-    if prop > 0:
-        flow.append(("보유세", -prop))
+    flow = money_flow(res, p, pension)
 
     assume = ("· 금리·물가·주가가 서로 연결되어 움직이는 1만 가지 미래를 계산했습니다(한국은행 ECOS 2000~2026, KOSPI).<br>"
               "· 수명은 통계청 2024 완전생명표에 앞으로의 수명 연장을 반영했고, 간병은 건강보험공단 장기요양 통계로 추정했습니다.<br>"

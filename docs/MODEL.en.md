@@ -153,7 +153,7 @@ pension income → gifts → account transfers → spending → pension-account 
 | Financial-income taxation | Comparative taxation when interest and dividends exceed KRW 20M per year |
 | Private pensions | 3.3–5.5% up to KRW 15M per year, 16.5% above |
 | Foreign-equity capital gains | Cost basis tracked, 22% above a KRW 2.5M annual deduction (paid the following year) |
-| Health-insurance premiums | Regional: 50% of public pensions + financial income (fully counted above KRW 10M) + rental/business income + property component (user input) / Workplace (business owner): business income + other income above KRW 20M / dependent income and property tests |
+| Health-insurance premiums | Regional: 50% of public pensions + financial income (fully counted above KRW 10M) + rental/business income + **property component** (statutory 60-grade score table in Enforcement Decree Annex 4 x KRW 211.5 per point, KRW 100M basic deduction - computed automatically) / Workplace (business owner): business income + other income above KRW 20M / dependent income and property tests |
 | Property and comprehensive real-estate taxes | Fair-market-value ratios, progressive rates, comprehensive tax assessed per person (KRW 900M deduction each), senior and long-holding credits for single-home owners (80% cap) |
 | Inheritance and gift taxes | At the second death; lump-sum and financial-asset deductions; gifts within 10 years added back; KRW 50M gift deduction per 10 years |
 | Tax strategies | ISA (KRW 20M per year, 100M total), pension accounts (KRW 18M per year transferred, withdrawals up to 15M per year after 5 years), ownership splitting, 10-year gifting cycles |

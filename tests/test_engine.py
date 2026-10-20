@@ -1249,3 +1249,105 @@ def test_health_premium_property_component_scales():
     p30 = float(health_premium(one(1000), one(0), tc, one(0), one(0), prop_monthly=30.0)[0])
     assert p15 - base == pytest.approx(15 * 12)
     assert p30 - base == pytest.approx(30 * 12)
+
+
+# ───────────── v45: 재산분 건보료 법정 산식 ─────────────
+def test_hi_property_grade_table_shape():
+    """별표 4 등급표 자체의 형태 — 60등급, 상한·점수 모두 단조증가, 마지막은 상한 없음."""
+    from retire_sim.tax import HI_PROPERTY_GRADES
+    assert len(HI_PROPERTY_GRADES) == 60, "재산등급은 60등급"
+    caps = [c for c, _ in HI_PROPERTY_GRADES]
+    pts = [p for _, p in HI_PROPERTY_GRADES]
+    assert caps == sorted(caps) and pts == sorted(pts), "구간 상한과 점수는 등급 순으로 증가"
+    assert caps[-1] == np.inf, "60등급은 상한 없음"
+    assert pts[0] == 22 and pts[-1] == 2341, "1등급 22점 · 60등급 2341점 (별표 4)"
+
+
+def test_hi_property_points_hand_calculated():
+    """점수표를 손으로 짚은 값과 대조 — 기본공제 1억원을 뺀 금액에 등급을 적용한다."""
+    from retire_sim.tax import hi_property_points
+    f = lambda v: float(hi_property_points(np.array([float(v)]))[0])
+    assert f(0) == 0 and f(10_000) == 0, "재산과표가 기본공제(1억원) 이하면 부과점수 0"
+    assert f(10_450) == 22, "공제후 450만원 = 1등급 22점"
+    assert f(10_451) == 44, "450만원을 넘으면 2등급 44점"
+    assert f(10_900) == 44 and f(10_901) == 66, "2→3등급 경계"
+    assert f(11_800) == 97, "공제후 1,800만원 = 4등급 97점"
+    assert f(20_000) == 439, "공제후 1억원 = 18등급 439점"
+    assert f(30_000) == 586, "공제후 2억원 = 24등급 586점"
+    assert f(1_000_000) == 2341, "공제후 78억 초과 = 60등급 2341점"
+
+
+def test_hi_property_points_monotone_and_stepwise():
+    """단조증가하고, 등급 안에서는 같은 값(계단식)이어야 한다."""
+    from retire_sim.tax import hi_property_points
+    xs = np.linspace(0, 900_000, 4001)
+    pts = hi_property_points(xs)
+    assert np.all(np.diff(pts) >= 0), "재산이 늘면 점수가 줄어들 수는 없다"
+    assert float(hi_property_points(np.array([12_000.0]))[0]) == \
+           float(hi_property_points(np.array([12_200.0]))[0]), "같은 등급 안에서는 같은 점수"
+
+
+def test_hi_property_monthly_matches_point_value():
+    """월 보험료 = 점수 × 점수당 금액 ÷ 10,000 × (1 + 장기요양비율)."""
+    from retire_sim.tax import HI_POINT_VALUE, TaxConfig, hi_property_monthly, hi_property_points
+    tc = TaxConfig()
+    for base in (20_000.0, 50_000.0, 150_000.0):
+        pts = float(hi_property_points(np.array([base]))[0])
+        got = float(hi_property_monthly(np.array([base]), tc)[0])
+        assert got == pytest.approx(pts * HI_POINT_VALUE / 10000 * (1 + tc.ltc_ratio))
+    # 과세표준 2억원(공제후 1억원, 439점)이면 건강보험 재산분만 월 9.3만원 수준
+    only_health = 439 * HI_POINT_VALUE / 10000
+    assert only_health == pytest.approx(9.285, abs=0.01)
+    assert float(hi_property_monthly(np.array([9_000.0]), tc)[0]) == 0.0, "공제 이하면 0원"
+
+
+def test_hi_property_not_inflation_indexed():
+    """기본공제·등급표는 물가연동되지 않는다 — 명목 재산이 오르면 등급이 올라가야 한다."""
+    from retire_sim.tax import TaxConfig, hi_property_monthly
+    tc = TaxConfig()
+    now = float(hi_property_monthly(np.array([30_000.0]), tc)[0])
+    later = float(hi_property_monthly(np.array([30_000.0 * 1.5]), tc)[0])
+    assert later > now, "명목 집값이 50% 오르면 재산분도 올라간다(조용한 증세)"
+
+
+def test_engine_auto_property_premium_is_used_and_overridable():
+    """엔진 통합: hi_property_monthly=None 이면 자동 계산이 붙고, 0.0 이면 끌 수 있다."""
+    from retire_sim import engine_tax, mortality
+    from retire_sim.config import Household, Person, SimConfig
+    from retire_sim.economy_v2 import EconomyV2
+    from retire_sim.tax import HouseConfig, TaxConfig
+    hh = Household(members=[Person(62, "M", nps_monthly=110), Person(60, "F", nps_monthly=50)],
+                   liquid_assets=40_000, annual_spending=3600, essential=3000)
+    cfg = SimConfig(n_paths=400)
+    E, Q = EconomyV2.enhanced(), mortality.default_qx()
+    kw = dict(e=E, tc=TaxConfig(), qx_table=Q)
+    base = HouseConfig(official=70_000, market=95_000, n_houses=1, years_held=20)
+    off = engine_tax.run(hh, cfg, house=HouseConfig(**{**base.__dict__, "hi_property_monthly": 0.0}), **kw)
+    auto = engine_tax.run(hh, cfg, house=HouseConfig(**{**base.__dict__, "hi_property_monthly": None}), **kw)
+    hi_off = off["hi_y"][:, :20].sum(1).mean()
+    hi_auto = auto["hi_y"][:, :20].sum(1).mean()
+    assert hi_auto > hi_off * 1.5, "공시 7억 1주택이면 재산분이 소득분을 넘볼 정도로 커야 한다"
+    fixed = engine_tax.run(hh, cfg, house=HouseConfig(**{**base.__dict__, "hi_property_monthly": 12.0}), **kw)
+    assert fixed["hi_y"][:, :20].sum(1).mean() > hi_off, "입력값을 주면 그 값이 쓰인다"
+
+
+def test_app_results_tab_shows_money_flow_waterfall():
+    """결과 탭에 '돈이 어디로 가나' 폭포 그래프가 리포트와 같은 숫자로 그려진다."""
+    at = _app(); at.run()
+    [b for b in at.button if "60대" in b.label][0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert "돈이 어디로 가나" in md, "결과 탭에 폭포 그래프 제목이 없습니다"
+    assert "은퇴 후 1년 돈의 흐름" in md, "폭포 그래프 SVG가 그려지지 않았습니다"
+
+
+def test_money_flow_is_shared_by_app_and_report():
+    """앱 결과 탭과 리포트가 같은 money_flow() 를 쓴다 — 숫자가 갈라지지 않도록."""
+    import inspect
+    import pathlib
+    from retire_sim import reporting
+    src = inspect.getsource(reporting.build_report)
+    assert "money_flow(" in src, "리포트가 money_flow() 를 쓰지 않습니다"
+    app = pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"
+    assert "reporting.money_flow(" in app.read_text(), "앱이 money_flow() 를 쓰지 않습니다"
+    assert "waterfall_svg" in app.read_text(), "앱이 폭포 그래프를 그리지 않습니다"

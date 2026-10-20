@@ -105,6 +105,17 @@ SOURCES = (
         how="retire_sim/tax.py 의 BRACKETS·ESTATE·요율 교체",
         stale="세금 전체를 빼면 대표 가구에서 8~10%p 움직인다. 세법 개정 때 확인."),
     Source(
+        key="hi_property", name="재산보험료부과점수 등급표 60등급, 점수당 금액 211.5원, 재산 기본공제 1억 원",
+        org="국민건강보험법 시행령 [별표 4] (개정 2024. 5. 7.) · 시행령 제44조제2항",
+        used_for="지역가입자 재산분 건보료 — 자가 보유 가구의 은퇴 후 고정비",
+        as_of="2026", cycle="점수당 금액은 연 1회(고시), 등급표는 개정 시",
+        where="law.go.kr 「국민건강보험법 시행령」 별표 4 · 공단 보험료 고시",
+        how="retire_sim/tax.py 의 HI_PROPERTY_GRADES·HI_POINT_VALUE·HI_PROPERTY_DEDUCT 교체 "
+            "→ scripts/measure_hi_property.py 로 손검산 재확인",
+        stale="공시 5~14억 1주택 가구에서 기본생활 유지 확률을 6~7%p 낮춘다. 20년 건보료가 "
+              "1,500만 원에서 4,100~5,600만 원으로 늘어나므로, 재산분을 빼면 은퇴 후 고정비를 "
+              "크게 과소평가한다. 점수당 금액 고시가 바뀌면 바로 갱신."),
+    Source(
         key="widowhood", name="사별 후 사망위험 메타분석 (남 RR 1.22 / 여 1.03, 6개월 이내 1.41)",
         org="Moon et al. (2011) PLOS ONE — 226만 명, 전향 코호트 15편, 연령·성별 보정",
         used_for="배우자 사별 직후 생존자의 사망위험 상승",

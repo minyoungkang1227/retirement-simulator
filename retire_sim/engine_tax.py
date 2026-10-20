@@ -9,7 +9,7 @@ from .config import Household, SimConfig, AddOns, CareMarkov
 from . import mortality, pension
 from .economy_v2 import EconomyV2, generate
 from .tax import (reverse_mortgage_monthly, acquisition_tax_rate, one_house_cgt, TaxConfig, HouseConfig, income_tax_person, private_pension_tax, health_premium,
-                  property_tax, comprehensive_property_tax, rent_tax, gift_tax)
+                  property_tax, comprehensive_property_tax, rent_tax, gift_tax, hi_property_monthly)
 
 
 def glide_path(hh: Household, T):
@@ -512,7 +512,11 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 else:
                     cjs = per_person
                 prop = (prop + cjs) * live
-            pm = (house.hi_property_monthly or 0) * hscale * hidx[:, t] * cpi[:, t]
+            # 재산분 건보료: 입력값이 있으면 그 값(명목으로 환산), 없으면 별표4 점수표로 자동 계산.
+            # 자동 계산은 명목 과세표준에 바로 등급을 적용하므로 따로 물가 환산을 하지 않는다.
+            pm = (house.hi_property_monthly * hscale * hidx[:, t] * cpi[:, t]
+                  if house.hi_property_monthly is not None
+                  else hi_property_monthly(sum(prop_base), tc))
             rate = tc.hi_rate * (1 + tc.ltc_ratio)
             any_work = work.any(0)
             # 직장가입자(사업장 대표): 사업소득 전액(대표자 전액 부담) + 보수 외 소득 2,000만원 초과분

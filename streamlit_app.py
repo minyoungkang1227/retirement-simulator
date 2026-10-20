@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 44          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 45          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -37,6 +37,7 @@ from retire_sim.session import calc_id, save_blob, load_blob
 from retire_sim.inputs import (PROFILES, AVG_SPEND, DEFAULTS, build_case,
                               total_assets, nps_values, monthly_saving, income_gap)
 from retire_sim.advice import action_ranking as _action_ranking, assumption_band as _assumption_band
+from retire_sim import reporting
 from retire_sim.reporting import build_report, fan_rows
 from retire_sim.branding import Brand
 
@@ -152,7 +153,8 @@ def simulate(p_json: str, v_json: str) -> dict:
             "p50_85": float(np.percentile(w85, 50)) if w85.size else 0.0, "annuity_pay": res.get("annuity_pay", 0.0),
             "care_premium": res.get("care_premium", 0.0), "stock_corr": corr,
             "rm_monthly": res.get("rm_monthly", 0.0), "ds_cash": res.get("ds_cash", 0.0),
-            "debt_share": float(np.mean(np.nan_to_num(res.get("debt_retire", np.zeros(1))) > 1))}
+            "debt_share": float(np.mean(np.nan_to_num(res.get("debt_retire", np.zeros(1))) > 1)),
+            "flow": reporting.money_flow(res, p)}        # 은퇴 후 1년 돈 흐름 — 결과 탭 폭포 그래프
 
 
 @st.cache_data(ttl=86400, max_entries=64, show_spinner=False)
@@ -421,7 +423,10 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 c1, c2, c3 = st.columns(3)
                 h_joint = c1.checkbox("부부 공동명의", value=p["h_joint"])
                 h_years = c2.number_input("보유 기간 (년)", 0, 60, p["h_years"])
-                h_hi = c3.number_input("건보료 재산분 (월, 만 원)", 0.0, 500.0, p["h_hi"], help="공단 '지역보험료 모의계산'에서 소득 0, 재산만 넣은 값")
+                h_hi = c3.number_input("건보료 재산분 (월, 만 원)", 0.0, 500.0, p["h_hi"],
+                                       help="0으로 두면 국민건강보험법 시행령 별표4 점수표로 자동 계산합니다 "
+                                            "(재산세 과세표준 − 기본공제 1억 원 → 등급별 점수 × 211.5원). "
+                                            "공단 '지역보험료 모의계산' 값을 직접 넣으면 그 값을 씁니다.")
                 region = st.radio("사시는 곳", ["대도시", "중소도시", "농어촌"],
                                   index=["대도시", "중소도시", "농어촌"].index(p.get("region", "대도시")), horizontal=True,
                                   help="기초연금 재산 공제가 지역마다 다릅니다. 대도시 1억 3,500만 원, 중소도시 8,500만 원, 농어촌 7,250만 원까지 재산에서 빼고 계산합니다. "
@@ -580,6 +585,15 @@ with tab1:
         big = "매달 연금으로 생활비가 충분해요"
     st.markdown(f'<div class="gap"><div class="eq">필요한 생활비 <b>월 {need:.0f}만 원</b><br>받는 연금 <b>월 {pension:.0f}만 원</b> (오늘 돈 가치 기준)</div>'
                 f'<div class="big">{big}</div><div class="eq">{fill}</div></div>', unsafe_allow_html=True)
+
+    # 2-2) 은퇴 후 1년, 돈이 어디로 가나 — 리포트와 같은 숫자로 그린 폭포 그래프
+    wf = report.waterfall_svg(base.get("flow") or [], brand=BRAND)
+    if wf:
+        st.markdown("**은퇴 후 1년, 돈이 어디로 가나** (살아 있는 해의 평균, 오늘 돈 가치)")
+        st.markdown(wf, unsafe_allow_html=True)
+        st.markdown('<div class="legend">연금으로 들어온 돈에서 생활비·세금·건보료·보유세가 빠지고, 남는 부족분을 '
+                    '모아둔 돈에서 꺼내 씁니다. 건보료는 지역가입자 소득분과 재산분을 모두 반영한 금액이에요.</div>',
+                    unsafe_allow_html=True)
 
     # 3) 목표별 결과: 기본 / 여행·취미 / 자녀
     cards = [("🏠 기본 생활", "먹고 사는 데 꼭 필요한 돈", f'10번 중 <span class="hl">{n_ok}번</span> 끝까지 가능해요')]
