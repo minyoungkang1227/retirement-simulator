@@ -131,3 +131,71 @@ def test_app_and_library_share_one_builder():
     assert "from retire_sim.inputs import" in src
     assert not re.search(r"^def build\(p", src, re.M)
     assert not re.search(r"^def total_assets\(", src, re.M)
+
+
+# ── 사용 기록 (종량 과금 · 상담 로그) ──
+@pytest.fixture()
+def usage_env(monkeypatch, tmp_path):
+    """두 기관, 로그 파일 켜기."""
+    log = tmp_path / "usage.jsonl"
+    monkeypatch.setenv("RETIRE_API_KEYS", "기관A:keyA,기관B:keyB")
+    monkeypatch.setenv("RETIRE_USAGE_LOG", str(log))
+    import importlib
+
+    from retire_sim import api, usage
+    usage.reset_for_tests()
+    importlib.reload(api)
+    return TestClient(api.app), log
+
+
+def test_usage_counts_calls_and_engine_runs(usage_env):
+    c, log = usage_env
+    A = {"X-API-Key": "keyA"}
+    r1 = c.post("/simulate", json={"inputs": {"paths": 800}}, headers=A)
+    r2 = c.post("/compare", json={"inputs": {"paths": 800}, "variants": [{"retire_age": 62}, {"saving": 50}]}, headers=A)
+    assert r1.status_code == 200 and r2.status_code == 200
+    u = c.get("/usage", headers=A).json()
+    # simulate 는 엔진 1번, compare 는 기준 + 선택지 2개 = 3번
+    assert u["by_endpoint"]["simulate"] == {"calls": 1, "engine_runs": 1}
+    assert u["by_endpoint"]["compare"] == {"calls": 1, "engine_runs": 3}
+    assert u["persistent"] is True
+
+
+def test_usage_is_isolated_per_client(usage_env):
+    c, _ = usage_env
+    c.post("/simulate", json={"inputs": {"paths": 800}}, headers={"X-API-Key": "keyA"})
+    b = c.get("/usage", headers={"X-API-Key": "keyB"}).json()
+    assert b["calls"] == 0, "다른 기관의 사용량이 보이면 안 된다"
+    assert c.get("/usage").status_code == 401
+
+
+def test_usage_log_has_no_personal_data(usage_env):
+    c, log = usage_env
+    c.post("/report", json={"inputs": {"paths": 800}, "client_name": "김비밀", "advisor": "이상담"},
+           headers={"X-API-Key": "keyA"})
+    text = log.read_text(encoding="utf-8")
+    assert "김비밀" not in text and "이상담" not in text, "고객 이름·상담자는 로그에 남기지 않는다"
+    row = json.loads(text.strip().splitlines()[-1])
+    assert set(row) == {"ts", "client", "endpoint", "calc_id", "model_version", "units"}
+    assert row["client"] == "기관A" and row["endpoint"] == "report" and row["model_version"] == __version__
+
+
+def test_usage_month_filter_and_bad_month(usage_env):
+    c, _ = usage_env
+    from retire_sim import usage
+    from datetime import datetime, timezone
+    usage.record("기관A", "simulate", "X1", __version__, now=datetime(2026, 9, 3, tzinfo=timezone.utc))
+    usage.record("기관A", "simulate", "X2", __version__, now=datetime(2026, 10, 3, tzinfo=timezone.utc))
+    H = {"X-API-Key": "keyA"}
+    assert c.get("/usage?month=2026-09", headers=H).json()["calls"] == 1
+    assert c.get("/usage?month=2026-10", headers=H).json()["calls"] == 1
+    assert c.get("/usage?month=oct", headers=H).status_code == 422
+
+
+def test_usage_log_failure_does_not_break_calculation(monkeypatch, tmp_path):
+    """로그 파일에 쓸 수 없어도 계산 응답은 나가고, 실패 횟수는 센다."""
+    from retire_sim import usage
+    usage.reset_for_tests()
+    monkeypatch.setenv("RETIRE_USAGE_LOG", str(tmp_path / "없는폴더" / "u.jsonl"))
+    usage.record("기관A", "simulate", "X", __version__)
+    assert usage.summary("기관A")["log_write_failures"] == 1

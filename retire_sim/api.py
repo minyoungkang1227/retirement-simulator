@@ -12,10 +12,12 @@
     POST /compare             여러 선택지를 **같은 난수**로 비교 (차이의 신뢰구간 포함)
     POST /report              상담 리포트 HTML
     POST /product/compare     연금보험 vs 펀드 vs 예금
+    GET  /usage               우리 기관의 호출 수·엔진 실행 수 (?month=2026-10). 종량 과금과 상담 로그의 근거
 
 설계 원칙
   · 계산 로직은 하나도 여기 없다. 앱과 **같은** `inputs.build_case` 를 쓰므로 둘이 어긋날 수 없다.
   · 응답에 calc_id 와 model_version 을 넣는다. 나중에 "그때 그 숫자"를 그대로 재현할 수 있어야 한다.
+  · 호출마다 (시각·기관·기능·계산 ID·모델 버전·실행 수)를 남긴다. 고객 이름·입력값은 남기지 않는다 (usage.py).
   · 인증은 API 키 한 줄. 키를 설정하지 않으면 **로컬 개발용으로만** 열린다(기동 시 경고).
 """
 from __future__ import annotations
@@ -26,7 +28,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from . import __version__, engine_tax, metrics
+from . import __version__, engine_tax, metrics, usage
 from .branding import Brand
 from .inputs import build_case, defaults, fill
 from .session import calc_id
@@ -126,6 +128,7 @@ def get_defaults(_: str = Depends(client)):
 def simulate(req: Case, who: str = Depends(client)):
     p = fill(req.inputs)
     res = _run(p, req.variant)
+    usage.record(who, "simulate", calc_id(p), __version__, units=1)
     return {"model_version": __version__, "calc_id": calc_id(p), "client": who,
             "summary": _summary(res),
             "depletion_age_median": (lambda d: float(d.mean()) if len(d) else None)(
@@ -147,6 +150,7 @@ def compare(req: CompareRequest, who: str = Depends(client)):
         rows.append({"label": lab, "summary": _summary(r),
                      "diff": -c["차이"], "ci": c["±"], "significant": c["유의"],
                      "note": "diff 는 '기본생활을 지킬 확률'의 변화(+가 좋음), ci 는 짝지은 95% 신뢰구간"})
+    usage.record(who, "compare", calc_id(p), __version__, units=1 + len(req.variants))
     return {"model_version": __version__, "calc_id": calc_id(p), "client": who, "results": rows}
 
 
@@ -157,6 +161,7 @@ def report_html(req: ReportRequest, who: str = Depends(client)):
     p = fill(req.inputs)
     html = build_report(p, client_name=req.client_name, advisor=req.advisor,
                         brand=Brand.from_dict(req.brand))
+    usage.record(who, "report", calc_id(p), __version__, units=1)
     return {"model_version": __version__, "calc_id": calc_id(p), "client": who,
             "content_type": "text/html", "html": html}
 
@@ -186,4 +191,13 @@ def product_compare(req: ProductRequest, who: str = Depends(client)):
     out = prod_mod.compare_vehicles(pr, me, qx, eco, stock_weight=PROFILES[p["profile"]])
     out["guarantee"] = prod_mod.guarantee_value(pr, me, qx, eco["rate"], eco["cpi"])
     out["horizon_cap_years"] = T - (out["개시 나이"] - me[0].age)
+    usage.record(who, "product_compare", calc_id(p), __version__, units=1)
     return {"model_version": __version__, "client": who, "result": out}
+
+
+@app.get("/usage")
+def get_usage(month: Optional[str] = None, who: str = Depends(client)):
+    """우리 기관의 사용량. month 는 '2026-10' 형식. 다른 기관 것은 볼 수 없다."""
+    if month is not None and not (len(month) == 7 and month[4] == "-" and month[:4].isdigit() and month[5:].isdigit()):
+        raise HTTPException(status_code=422, detail="month 는 2026-10 같은 형식이어야 합니다.")
+    return usage.summary(who, month)

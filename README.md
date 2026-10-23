@@ -153,7 +153,8 @@ retire_sim/          모델 패키지
   report.py          리포트 HTML·SVG 그래프
   session.py         고객 입력 저장·복원, 재현용 계산 ID
   branding.py        화이트라벨 (기관 이름·색·로고)
-  api.py             HTTP API (FastAPI) — /simulate, /compare, /report, /product/compare
+  api.py             HTTP API (FastAPI) — /simulate, /compare, /report, /product/compare, /usage
+  usage.py           API 호출 기록 (종량 집계 · 상담 로그, 고객 입력은 남기지 않음)
 notebooks/           Colab 분석 노트북
 scripts/             검증·생성 스크립트
   check.py             작업 후 오류 검증 + 최적화 점검을 한 번에

@@ -130,7 +130,8 @@ retire_sim/          model package
   report.py          report HTML and SVG charts
   session.py         saving/restoring client inputs, reproducible calculation ID
   branding.py        white-label (institution name, colors, logo)
-  api.py             HTTP API (FastAPI) — /simulate, /compare, /report, /product/compare
+  api.py             HTTP API (FastAPI) — /simulate, /compare, /report, /product/compare, /usage
+  usage.py           API call log (metering and consultation log; client inputs are never stored)
 notebooks/           Colab analysis notebook
 scripts/             validation and generation scripts (check.py, benchmark_analytic.py, ablate.py, error_budget.py,
                      readme_numbers.py, make_readme_images.py, make_sources_doc.py, sync_notebook.py, product_*.py,
