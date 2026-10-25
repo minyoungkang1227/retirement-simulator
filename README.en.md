@@ -73,7 +73,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 | Housing strategy | Essential success | Lifestyle funding | KRW 300M legacy | Note |
 |---|---|---|---|---|
 | Keep as is | 17% | 28% | 95% | — |
-| Reverse mortgage now (63) | 74% (+57.3pp) | 95% | 65% | KRW 1.65M/month |
+| Reverse mortgage now (63) | 74% (+57.2pp) | 95% | 65% | KRW 1.65M/month |
 | Reverse mortgage at 70 | 81% (+64.7pp) | 87% | 69% | KRW 2.25M/month (today's value) |
 | Downsize to half price at 70 | 74% (+56.8pp) | 85% | 85% | KRW 350M released |
 
