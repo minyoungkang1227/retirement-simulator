@@ -82,7 +82,7 @@ def build_report(p: dict, client_name: str = "", advisor: str = "", brand: Brand
 
     lo, hi = band if band is not None else assumption_band(p)
     pct = lambda x: f"{x * 100:.0f}%"
-    band_txt = (f"주식이 앞으로 얼마나 오를지는 아무도 모릅니다. 과거 자료로 추정한 범위 안에서만 봐도 위 "
+    band_txt = (f"주식 수익률·수명·간병 발생률은 아무도 정확히 모릅니다. 세 가정을 각각 추정 폭만큼만 움직여도 위 "
                 f"<b>{pct(ok)}</b>는 <b>{pct(lo)} ~ {pct(hi)}</b> 사이에서 움직입니다. "
                 f"계산을 더 많이 해도 이 폭은 줄지 않으니, 숫자 하나보다 <b>선택을 바꿨을 때의 차이</b>를 보셔야 합니다.")
 

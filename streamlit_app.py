@@ -462,7 +462,7 @@ if ss.step < len(STEPS) and not ss.get("done"):
                                         float(p.get("care_growth", 1.0)), step=0.5,
                                         help="간병은 사람이 하는 일이라 비용이 임금을 따라갑니다. "
                                              "장기요양 수가는 2022~2026년 평균 4.05%, 같은 기간 물가는 3.02%로 연 1.0%p 빨랐습니다.")
-                behaviour = st.checkbox("사람답게 행동한다고 가정 (폭락장에 주식을 줄이고, 지출을 바로 못 줄임)",
+                behaviour = st.checkbox("폭락장에 주식을 줄인다고 가정 (패닉 매도 · 지출을 바로 못 줄이는 경직성은 기본 반영)",
                                         value=bool(p.get("behaviour")),
                                         help="켜면 주가가 25% 빠진 다음 해에 주식을 절반으로 줄이고 천천히 돌아오며, "
                                              "여행·취미 지출을 한 해에 30%까지만 줄입니다. 끄면 규칙대로 움직이는 가구가 됩니다.")
@@ -607,7 +607,7 @@ with tab1:
     # 3-2) 가정의 불확실성 — 난수를 늘려도 줄지 않는 폭
     with st.spinner("가정이 달라질 때의 폭을 계산 중"):
         lo, hi = assumption_band(json.dumps(p, sort_keys=True))
-    st.markdown(f'<div class="legend">주식이 앞으로 얼마나 오를지는 아무도 모릅니다. 과거 자료로 추정한 범위 안에서만 봐도 '
+    st.markdown(f'<div class="legend">주식 수익률·수명·간병 발생률은 아무도 정확히 모릅니다. 세 가정을 각각 추정 폭만큼만 움직여도 '
                 f'위 <b>{pct(ok)}</b>는 <b>{pct(lo)} ~ {pct(hi)}</b> 사이에서 움직입니다. '
                 f'계산을 더 많이 해도 이 폭은 줄지 않으니, <b>숫자 하나보다 선택을 바꿨을 때의 차이</b>를 보세요.</div>',
                 unsafe_allow_html=True)
