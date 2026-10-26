@@ -423,6 +423,18 @@ def test_report_html_is_self_contained():
     assert wf.count("<rect") == 3 and "모아둔 돈에서" in wf
     assert report.waterfall_svg([("연금", 4000), ("생활비", -3600)]).count("<rect") == 2   # 남으면 안 붙는다
     assert report.waterfall_svg([]) == ""
+    # (v50.5) 두 줄 막대: 모자라면 '모아둔 돈에서 꺼냄'이 위 줄에, 남으면 '남아서 모음'이 아래 줄에 붙어 두 줄 길이가 같다
+    import re as _re
+    def widths(svg):
+        ws = [float(x) for x in _re.findall(r'<rect x="[^"]+" y="[^"]+" width="([^"]+)"', svg)]
+        return ws
+    bal = report.balance_svg([("연금 수입", 2400), ("생활비", -3600), ("세금", -240)])
+    assert "모아둔 돈에서 꺼냄" in bal and len(widths(bal)) == 4
+    w = widths(bal); assert abs((w[0] + w[1]) - (w[2] + w[3])) < 3        # 막대 사이 2px 틈만큼만 차이
+    assert "남아서 모음" in report.balance_svg([("연금 수입", 4000), ("생활비", -3600)])
+    assert report.balance_svg([]) == "" and report.balance_sentence([]) == ""
+    txt = report.balance_sentence([("연금 수입", 2400), ("생활비", -3600), ("세금", -240)])
+    assert "연금 200만 원" in txt and "모자라는" in txt and "120만 원" in txt          # 한 달 금액(÷12)
 
     h = report.build(dict(client="김<철>수", advisor_line="", date="2026년 10월 13일", calc_id="ABC1234567",
                           version="33", hero="테스트", goals=[("A", "B", "C")], gap_eq="x", gap_big="y",
@@ -902,7 +914,7 @@ def test_app_tier_choice_and_tier1_flow():
     assert any(b.label.startswith("더 정확하게") for b in at.button)
     # (v49.1) 다른 계산기에서 가져온 것: 은퇴 가능 나이, 진행률 막대, 수익률 직접 정해 보기, 공유 카드
     assert "에 은퇴하면 기본생활을" in md or "늦춰도 10번 중 9번에는" in md
-    assert "10번 중 9번까지 얼마나 왔나" in md
+    assert "10번 중 9번 지키려면 얼마가 필요할까" in md
     assert "<svg" in md and any(d.label.startswith("결과 카드") for d in at.get("download_button"))
     assert any(e.label.startswith("수익률을 직접 정해서") for e in at.expander)
 
@@ -1484,7 +1496,7 @@ def test_money_flow_is_shared_by_app_and_report():
     assert "money_flow(" in src, "리포트가 money_flow() 를 쓰지 않습니다"
     app = pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"
     assert "reporting.money_flow(" in app.read_text(), "앱이 money_flow() 를 쓰지 않습니다"
-    assert "waterfall_svg" in app.read_text(), "앱이 폭포 그래프를 그리지 않습니다"
+    assert "balance_svg" in app.read_text(), "앱이 돈의 흐름(들어오는 돈 = 나가는 돈) 그래프를 그리지 않습니다"
 
 
 # ───────────── v48.1: 검증 장부 — 화면과 테스트가 같은 목록을 읽는다 ─────────────
