@@ -182,7 +182,7 @@ python -m pytest -q                 # full suite, incl. theory checks
 | Equity returns from real data v18: KOSPI volatility, crash jumps, rate correlation, Bayesian risk premium | Done |
 | Long-term-care model from real data v17: two severity levels calibrated to national LTC recognition rates and grade mix, 2026 out-of-pocket and caregiver costs | Done |
 | Actuarial essential floor v16: survival-weighted present value reflecting pension start and couple survival states | Done |
-| Add-on products v15: stocks by ticker (beta, correlation, rate sensitivity), deposits, life annuities, long-term-care insurance, pension contributions | Done |
+| Add-on products v15: deposits, life annuities, long-term-care insurance, term life, pension contributions (single-stock-by-ticker removed from the screen in v50.6) | Done |
 | ECOS rate/inflation estimation (v14) | Done |
 | Institutional precision v28·v32·v45: survivor pension, statutory Basic Pension offset, 60-grade property score for health premiums | Done |
 | Longevity risk and option search v29·v30: stochastic mortality, widowhood effect, equity glide path, pension start age, withdrawal order | Done |

@@ -914,7 +914,7 @@ def test_app_tier_choice_and_tier1_flow():
     assert any(b.label.startswith("더 정확하게") for b in at.button)
     # (v49.1) 다른 계산기에서 가져온 것: 은퇴 가능 나이, 진행률 막대, 수익률 직접 정해 보기, 공유 카드
     assert "에 은퇴하면 기본생활을" in md or "늦춰도 10번 중 9번에는" in md
-    assert "10번 중 9번 지키려면 얼마가 필요할까" in md
+    assert "10번 중 9번 지키려면 얼마가 더 필요할까" in md
     assert "<svg" in md and any(d.label.startswith("결과 카드") for d in at.get("download_button"))
     assert any(e.label.startswith("수익률을 직접 정해서") for e in at.expander)
 

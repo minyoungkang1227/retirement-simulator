@@ -83,10 +83,6 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
 .sec {{ font-size: 1.2rem; font-weight: 800; color: {INK}; margin: 1.9rem 0 .7rem; padding-top: 1.1rem; border-top: 1px solid #E3EAEC; }}
 .goal.tier {{ min-height: 15.5rem; margin-bottom: .5rem; }}
 [data-testid="stForm"] [data-testid="stHorizontalBlock"] {{ align-items: flex-end; }}
-.need {{ border: 1px solid #CBD7DB; border-radius: 12px; padding: .8rem 1rem; margin: .5rem 0; background: white; }}
-.need .t {{ font-weight: 700; }}
-.need .v {{ font-size: 1.05rem; margin-top: .15rem; }}
-.need .s {{ color: {MUTED}; font-size: .88rem; margin-top: .35rem; }}
 .wf {{ overflow-x: auto; }} .wf svg {{ min-width: 540px; }}
 .sec span {{ font-size: .86rem; font-weight: 400; color: {MUTED}; margin-left: .3rem; }}
 [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {{ color: #4F6164; font-size: .9rem; line-height: 1.6; }}
@@ -171,16 +167,6 @@ def simulate(p_json: str, v_json: str) -> dict:
             "rm_monthly": res.get("rm_monthly", 0.0), "ds_cash": res.get("ds_cash", 0.0),
             "debt_share": float(np.mean(np.nan_to_num(res.get("debt_retire", np.zeros(1))) > 1)),
             "flow": reporting.money_flow(res, p)}        # 은퇴 후 1년 돈 흐름 — 결과 탭 폭포 그래프
-
-
-@st.cache_data(ttl=86400, max_entries=64, show_spinner=False)
-def stock_lookup(code: str):
-    from retire_sim.market_data import stock_stats
-    try:
-        key = st.secrets.get("ECOS_AUTH_KEY", None)
-    except Exception:
-        key = None
-    return stock_stats(code, years=10, ecos_key=key)
 
 
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
@@ -329,17 +315,14 @@ def share_card_svg(p: dict, ok: float, band: tuple, ret_age, cid: str, life: flo
 
 
 def progress_bar(label: str, cur: float, need: float, unit: str, fmt: str = "{:.1f}") -> str:
-    """(v50.5) '지금 얼마 → 얼마면 되나' 한 칸. 막대는 필요한 만큼 중 지금 몇 %인지.
-    v49.1의 '5.0억 / 필요 7.2억 (70%)'는 무엇이 무엇의 70%인지 읽히지 않았다."""
+    """(v50.6) 지금 ↔ 목표 막대. 양 끝에 '지금 5.0억'·'목표 8.9억'을 붙여 무엇이 무엇의 몇 %인지 바로 보이게."""
     frac = 0.0 if need <= 0 else min(cur / need, 1.0)
-    done = cur >= need
-    color = TEAL if done else CORAL
-    more = "" if done else f" — <b>{fmt.format(need - cur)}{unit} 더</b>"
-    return (f'<div class="need"><div class="t">{label}</div>'
-            f'<div class="v">지금 {fmt.format(cur)}{unit} → <b>{fmt.format(need)}{unit}</b>이면 돼요{more}</div>'
-            f'<div style="background:#E6EDEF;border-radius:8px;height:12px;margin-top:8px">'
-            f'<div style="width:{frac * 100:.1f}%;background:{color};height:12px;border-radius:8px"></div></div>'
-            f'<div class="s">필요한 만큼의 {frac * 100:.0f}%를 갖고 있어요</div></div>')
+    color = TEAL if cur >= need else CORAL
+    return (f'<div style="margin:.5rem 0 .2rem">' + (f'<div style="font-weight:700">{label}</div>' if label else "")
+            + f'<div style="background:#E6EDEF;border-radius:8px;height:14px">'
+            f'<div style="width:{frac * 100:.1f}%;background:{color};height:14px;border-radius:8px"></div></div>'
+            f'<div style="display:flex;justify-content:space-between;font-size:.88rem;color:{MUTED};margin-top:4px">'
+            f'<span>지금 {fmt.format(cur)}{unit}</span><span>목표 {fmt.format(need)}{unit}</span></div></div>')
 
 
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
@@ -989,16 +972,24 @@ with tab1:
         with st.spinner("필요한 자산을 계산 중"):
             req_a, _ = required_assets(json.dumps(p, sort_keys=True))
             req_s = required_saving(json.dumps(p, sort_keys=True))[0] if p["age"] < p["retire_age"] else None
-        bars = ""
+        # (v50.6) 막대·'방법 1/2' 상자 대신 한 문장씩. 이미 은퇴한 가구는 저축 방법이 없는데도
+        # '둘 중 하나'라고 써서 헷갈렸다 — 실제로 있는 방법의 수에 맞춰 문장을 만든다.
+        cur_a, cur_s = total_assets(p), monthly_saving(p)
+        parts = []
         if req_a:
-            bars += progress_bar("방법 1 · 모아둔 돈을 늘린다면", total_assets(p), req_a, "억 원")
+            parts.append(f'지금 모아둔 돈 <b>{cur_a:.1f}억 원</b>이면 10번 중 {n_ok}번 끝까지 버텨요. '
+                         f'<b>{req_a:.1f}억 원</b>이 있으면 <b>10번 중 9번</b>이 돼요 — '
+                         f'<b style="color:{CORAL}">{req_a - cur_a:.1f}억 원</b>이 더 필요해요.'
+                         + progress_bar("", cur_a, req_a, "억"))
         if req_s:
-            bars += progress_bar("방법 2 · 은퇴 전까지 매달 저축을 늘린다면", monthly_saving(p), req_s, "만 원", "{:.0f}")
-        if bars:
-            st.markdown(sec("10번 중 9번 지키려면 얼마가 필요할까", "기본생활 유지 확률 90% 기준")
-                        + '<div class="legend">지금은 10번 중 ' + str(n_ok) + '번이에요. 9번으로 올리려면 아래 둘 중 <b>하나</b>만 하면 됩니다.</div>'
-                        + bars, unsafe_allow_html=True)
-            st.caption("두 금액은 '그것 하나만 바꿀 때' 기준이에요. 은퇴를 늦추거나 생활비를 줄이는 것과 섞으면 각각 덜 필요해요 — 위의 '바꿔보기' 탭에서 섞어 볼 수 있어요.")
+            lead = "또는 돈을 더 모아 두는 대신, " if req_a else ""
+            parts.append(f'{lead}은퇴 전까지 매달 저축을 <b>{cur_s:.0f}만 원 → {req_s:.0f}만 원</b>으로 '
+                         f'<b style="color:{CORAL}">{req_s - cur_s:.0f}만 원</b> 늘려도 10번 중 9번이 돼요.')
+        if parts:
+            st.markdown(sec("10번 중 9번 지키려면 얼마가 더 필요할까") + "".join(f'<p>{x}</p>' for x in parts),
+                        unsafe_allow_html=True)
+            st.caption(("둘 중 하나만 하면 돼요. " if len(parts) == 2 else "")
+                       + "은퇴를 늦추거나 생활비를 줄이는 것과 섞으면 훨씬 덜 필요해요 — 위의 '바꿔보기' 탭에서 섞어 볼 수 있어요.")
 
     # 4-2) 무엇부터 하면 되나 — 효과 순위
     if n_ok < 9:
@@ -1280,27 +1271,19 @@ with tab2:
                        "단, 국민연금을 늦게 받는 것은 그만큼 건강·자산 여건이 받쳐줘야 하고, 주식 비중은 마음의 편안함도 중요합니다.")
 
 with tab6:
-    st.markdown("주식·예금·연금·보험을 **더했을 때** 목표 달성과 위험이 어떻게 바뀌는지 봅니다. "
-                "주식·예금·연금 일시납은 지금 금융자산에서 옮기는 것으로 계산합니다. **매수·가입 권유가 아닙니다.**")
+    st.markdown("예금·연금·보험을 **더했을 때** 목표 달성과 위험이 어떻게 바뀌는지 봅니다. "
+                "예금·연금 일시납은 지금 금융자산에서 옮기는 것으로 계산합니다. **가입 권유가 아닙니다.**")
+    # (v50.6) 개별 주식(종목코드) 비교는 뺐다 — 한 종목의 변동성이 커서 결과가 예측처럼 읽히고,
+    # 이 화면의 목적(보장·연금 상품이 노후를 어떻게 바꾸나)과도 맞지 않았다. 엔진의 addons 기능은 남겨 둔다.
     with st.form("addons"):
-        st.markdown("**주식 (종목코드)**")
-        c1, c2 = st.columns(2)
-        code = c1.text_input("종목코드 6자리", value=ss.get("ad_code", ""), placeholder="예: 005930")
-        s_amt = c2.number_input("투자 금액 (억 원)", 0.0, 100.0, float(ss.get("ad_samt", 0.0)), step=0.1)
-        with st.expander("종목 통계를 직접 입력 (자동 조회가 안 될 때)"):
-            c1, c2, c3 = st.columns(3)
-            m_beta = c1.number_input("시장 베타", -1.0, 3.0, 1.0, step=0.1)
-            m_idio = c2.number_input("고유 변동성 (%)", 0.0, 100.0, 25.0, step=1.0)
-            m_rate = c3.number_input("금리 +1%p 때 수익률 변화 (%)", -20.0, 20.0, 0.0, step=0.5)
-            manual = st.checkbox("직접 입력값 사용")
         st.markdown("**예금**")
         d_amt = st.number_input("예금으로 옮길 금액 (억 원)", 0.0, 100.0, 0.0, step=0.1)
         st.markdown("**연금보험 (일시납)**")
         c1, c2, c3 = st.columns(3)
-        a_amt = c1.number_input("일시납 보험료 (억 원, 오늘 가치)", 0.0, 50.0, 0.0, step=0.1)
+        a_amt = c1.number_input("일시납 보험료 (억 원)", 0.0, 50.0, 0.0, step=0.1, help="오늘 돈 가치 기준")
         a_age = c2.number_input("받기 시작할 나이", max(p["age"], 45), 95, max(p["age"], 65),
                                 help="늦게 받을수록 같은 돈으로 받는 금액이 커집니다. 80세부터 받는 '거치형'은 오래 사는 위험만 막는 방식입니다.")
-        a_joint = c3.checkbox("부부형 (한 명이라도 살아있으면 지급)", disabled=not p["spouse"])
+        a_joint = c3.checkbox("부부형", disabled=not p["spouse"], help="한 명이라도 살아 있으면 계속 지급")
         c1, c2, c3 = st.columns(3)
         a_sr = c1.slider("한 명 사망 후 지급 비율 (%)", 50, 100, 100, step=10, disabled=not a_joint,
                          help="부부형에서 한 분이 돌아가신 뒤 받는 비율. 낮출수록 평소 받는 금액이 커집니다.")
@@ -1310,7 +1293,7 @@ with tab6:
                              help="물가를 따라가도록 매년 늘어나는 방식. 처음 받는 금액은 적습니다.")
         st.markdown("**정기보험 (사망보장)**")
         _need = protection_need(json.dumps(p, sort_keys=True)) if p["spouse"] else {}
-        if _need:
+        if _need and _need["생애가치법"] > 0:
             st.caption(f"이 가구에 필요한 보장은 **{_need['니즈분석법']/10000:.1f}억 ~ {_need['생애가치법']/10000:.1f}억** "
                        f"입니다(아래에서 두 방법의 차이를 설명합니다). 보장기간은 은퇴까지 {_term_years(p)}년으로 잡았습니다.")
         c1, c2 = st.columns(2)
@@ -1332,23 +1315,7 @@ with tab6:
         go_cmp = st.form_submit_button("비교하기", type="primary", width="stretch")
 
     if go_cmp:
-        ss.ad_code, ss.ad_samt = code.strip(), s_amt
         items, info = [], {}
-        if s_amt > 0:
-            if manual or not code.strip():
-                stt = {"beta": m_beta, "idio_sigma": m_idio / 100, "rate_beta": m_rate, "name": "직접 입력"}
-            else:
-                try:
-                    with st.spinner("종목 데이터 조회 중"):
-                        stt = stock_lookup(code.strip())
-                    stt["name"] = code.strip()
-                except Exception as ex:
-                    st.error(f"종목 데이터를 가져오지 못했습니다: {ex} — '직접 입력값 사용'으로 계산할 수 있습니다.")
-                    stt = None
-            if stt:
-                info["stock"] = stt
-                items.append((f"주식 {stt['name']} {s_amt:.1f}억", {"stock_amount": s_amt * 10000, "stock_beta": stt["beta"],
-                              "stock_idio_sigma": stt["idio_sigma"], "stock_rate_beta": stt["rate_beta"]}))
         if d_amt > 0: items.append((f"예금 {d_amt:.1f}억", {"deposit_amount": d_amt * 10000}))
         if a_amt > 0:
             esc = {"없음 (정액)": 0.0, "연 2% 증액": 0.02, "연 3% 증액": 0.03}[a_esc]
@@ -1450,16 +1417,6 @@ with tab6:
                                                     "월": f"{v/12:,.1f}만 원"} for b, v in pr.items()]),
                                      hide_index=True)
                         st.caption("실제 상품은 해지·선택효과·이익마진이 붙어 이보다 비쌉니다. 비교용 기준선입니다.")
-            if "stock" in info:
-                stt = info["stock"]; r = next(v for k, v in results.items() if k.startswith("주식"))
-                st.markdown(f"**종목 {stt['name']} 통계**" + (f" ({stt.get('start','')} ~ {stt.get('end','')}, {stt.get('months','')}개월)" if "months" in stt else ""))
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("시장 베타", f"{stt['beta']:.2f}")
-                c2.metric("기존 자산과 상관", f"{r['stock_corr']:.2f}" if r["stock_corr"] is not None else "—")
-                c3.metric("연 변동성", f"{stt.get('sigma', np.sqrt(stt['beta']**2*0.18**2+stt['idio_sigma']**2)) * 100:.0f}%")
-                c4.metric("금리 +1%p 때", f"{stt['rate_beta']:+.1f}%" if abs(stt["rate_beta"]) > 1e-9 else "자료 없음")
-                st.caption("기대수익은 과거 수익률이 아니라 '금리 + 베타 × 위험프리미엄'으로 계산합니다. "
-                           "금리 민감도는 ECOS 키가 설정된 경우에만 추정됩니다.")
             for k, r in results.items():
                 if k.startswith("연금보험") and r["annuity_pay"] > 0:
                     st.caption(f"{k}: 예상 연금액 연 약 {r['annuity_pay']:,.0f}만 원 (처음 받는 금액, 사업비 5% 가정)")
