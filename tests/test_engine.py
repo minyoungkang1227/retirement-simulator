@@ -857,6 +857,36 @@ def test_severance_v49():
     assert abs(np.median(db10["sev_real"]) / 1e4 - est) / est < 0.05
 
 
+def test_earned_income_rules_v50():
+    """(v50) 근로소득공제(소득세법 47조) 손검산과 근로소득세액공제(59조) 한도."""
+    from retire_sim.tax import earned_income_deduction as d, earned_income_credit as c
+    assert float(d(400)) == 280                       # 500만 이하 70%
+    assert float(d(1200)) == 630                      # 350 + 700×40%
+    assert float(d(2400)) == 885                      # 750 + 900×15%
+    assert float(d(6000)) == 1275                     # 1,200 + 1,500×5%
+    assert float(d(100000)) == 2000                   # 한도
+    assert abs(float(c(100, 2400)) - 55) < 1e-9       # 130만 이하 55%
+    assert float(c(300, 5000)) == 66                  # 한도 max(74 − 1,700×0.008, 66)
+    assert float(c(500, 9000)) == 50
+
+
+def test_v50_spending_work_jeonse():
+    """(v50) 나이에 따른 지출 변화·은퇴 후 근로·전월세 보증금이 각자 맞는 방향으로 움직인다."""
+    from retire_sim import advice
+    from retire_sim.inputs import defaults
+    p = defaults(); p.update(paths=2000)
+    run = lambda **kw: advice.run_case({**p, **kw})
+    prob = lambda r: advice.essential_prob(r)
+    flat, life, allp = run(spend_profile="flat"), run(spend_profile="lifestyle"), run(spend_profile="all")
+    assert prob(flat) < prob(life) <= prob(allp)
+    work = run(spend_profile="flat", post_inc=200, post_until=65)
+    assert prob(work) > prob(flat) + 0.03
+    j = run(spend_profile="flat", jeonse=3.0)
+    assert np.nanmedian(j["estate_real"]) > np.nanmedian(flat["estate_real"]) + 10000      # 보증금은 상속재산(상속세·기초연금 손실 뒤에도 1억 넘게)
+    assert j["hi_y"].sum(1).mean() > flat["hi_y"].sum(1).mean()                            # 건보 재산분(30%)
+    assert prob(j) <= prob(flat)                                                            # 기초연금 재산에도 잡힌다
+
+
 def test_app_tier_choice_and_tier1_flow():
     """(v48) 첫 화면에서 단계를 고르고, 1단계(빠른 진단)는 5화면 만에 결과까지 가며 가정한 값을 보여준다."""
     at = _app(); at.run()
