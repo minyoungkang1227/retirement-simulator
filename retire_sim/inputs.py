@@ -47,6 +47,8 @@ DEFAULTS = dict(
     tier=2,
     # (v49) 퇴직급여: 제도("DC" 확정기여형·"DB" 확정급여형·퇴직금), 지금 직장 근속연수(년, 본인·배우자)
     ret_plan="DC", tenure=0, s_tenure=0,
+    # (v50) 은퇴 후 근로(월 만 원, 몇 살 전까지 — 본인·배우자), 전월세 보증금(억), 나이에 따른 지출 변화
+    post_inc=0, post_until=0, s_post_inc=0, s_post_until=0, jeonse=0.0, spend_profile="lifestyle",
 )
 
 
@@ -122,14 +124,16 @@ def income_gap(p: dict) -> tuple:
 #: 값이 정해져 있는 항목 — API로 들어온 엉뚱한 값이 엔진 안에서 터지지 않게 앞에서 막는다
 CHOICES = {"sex": ("M", "F"), "s_sex": ("M", "F"), "profile": tuple(PROFILES),
            "region": ("대도시", "중소도시", "농어촌"), "save_mode": ("월 금액", "소득의 %"),
-           "floor": ("계리적", "보수적"), "ret_plan": ("DC", "DB")}
+           "floor": ("계리적", "보수적"), "ret_plan": ("DC", "DB"),
+           "spend_profile": ("flat", "lifestyle", "all")}
 RANGES = {"age": (18, 100), "s_age": (18, 100), "retire_age": (30, 100), "nps_start": (55, 75),
           "paths": (100, 200_000), "survivor": (0, 100), "overseas": (0, 100), "children": (0, 10),
           "care_growth": (-2.0, 5.0), "debt_rate": (0.0, 20.0), "debt_years": (1, 40), "tier": (1, 3),
-          "tenure": (0, 50), "s_tenure": (0, 50)}
+          "tenure": (0, 50), "s_tenure": (0, 50), "post_until": (0, 100), "s_post_until": (0, 100)}
 NON_NEGATIVE = ("deposit", "invest", "ret_acct", "other", "saving", "salary", "s_salary",
                 "essential", "lifestyle", "nps", "s_nps", "priv", "legacy",
-                "h_official", "h_market", "h_n", "rent", "biz", "debt")
+                "h_official", "h_market", "h_n", "rent", "biz", "debt",
+                "post_inc", "s_post_inc", "jeonse")
 
 
 def validate(p: dict) -> dict:
@@ -186,9 +190,11 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
     n1, n2 = nps_values(p)
     members = [mk(p["age"], p["sex"], n1, p["priv"], p["priv_start"], p["priv_years"] if p["priv"] > 0 else 0)]
     members[0].salary = float(p.get("salary", 0)); members[0].tenure = float(p.get("tenure", 0))
+    members[0].post_income = float(p.get("post_inc", 0)) * 12; members[0].post_until = int(p.get("post_until", 0))
     if p["spouse"]:
         members.append(mk(p["s_age"], p["s_sex"], n2))
         members[1].salary = float(p.get("s_salary", 0)); members[1].tenure = float(p.get("s_tenure", 0))
+        members[1].post_income = float(p.get("s_post_inc", 0)) * 12; members[1].post_until = int(p.get("s_post_until", 0))
 
     m = v.get("spend_mult", 1.0)
     liquid = max(v.get("assets", total_assets(p)) - p["ret_acct"], 0)
@@ -212,7 +218,7 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
                      + v.get("saving_delta", 0) * 12 / sal_tot) if use_rate else 0.0,
         wage_growth=p.get("wage_g", 1.0) / 100,
         retirement_contrib=bool(p.get("ret_contrib")) and p["age"] < p["retire_age"],
-        ret_plan=p.get("ret_plan", "DC"),
+        ret_plan=p.get("ret_plan", "DC"), spend_profile=v.get("spend_profile", p.get("spend_profile", "lifestyle")),
         stock_weight=v.get("stock_weight", PROFILES[p["profile"]]),
         annual_spending=p["essential"] * 12 * m, essential=p["essential"] * 12 * m,
         lifestyle=p["lifestyle"] * m, legacy_target=p["legacy"] * 10000,
@@ -254,7 +260,8 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
                         owner_share=(tuple([1 / k] * k) if p["h_joint"] else None), years_held=p["h_years"],
                         hi_property_monthly=p["h_hi"] or None, rent_annual=p["rent"],
                         reverse_mortgage_age=rm_age or None, downsize_age=ds_age or None,
-                        downsize_ratio=hv.get("ds_ratio", p.get("ds_ratio", 50)) / 100)
+                        downsize_ratio=hv.get("ds_ratio", p.get("ds_ratio", 50)) / 100,
+                        jeonse=float(p.get("jeonse", 0)) * 10000)
 
     biz = [dict(income=p["biz"], until_age=p["biz_until"], workplace=p["biz_work"])] if p["biz"] > 0 else [None]
     biz += [None] * (k - 1)

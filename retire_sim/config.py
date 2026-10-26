@@ -16,6 +16,8 @@ class Person:
     private_pension_years: int = 20
     salary: float = 0.0           # (v20) 연 세전 근로소득(만원, 오늘 가치). 은퇴 전 저축·퇴직연금 계산용
     tenure: float = 0.0           # (v49) 지금 직장 근속연수(년). 퇴직금(DB) 계산과 퇴직소득세 근속연수공제에 쓴다
+    post_income: float = 0.0      # (v50) 은퇴 후 근로소득(연, 만원, 오늘 가치) — 재취업·부분 근로
+    post_until: int = 0           # (v50) 은퇴 후 근로를 그만둘 나이(이 나이 전까지)
 
 
 @dataclass
@@ -44,6 +46,10 @@ class Household:
     #                     "DB": 은퇴 때 마지막 월급 × 근속연수(확정급여형·퇴직금 제도)
     #   어느 쪽이든 은퇴 시점에 IRP로 옮겨 이연퇴직소득으로 연금 수령 — 퇴직소득세의 70%(1~10년차)·60%(11년차~)
     ret_plan: str = "DC"
+    # (v50) 은퇴 후 지출이 나이에 따라 어떻게 바뀌나 (실질, 오늘 가치 대비 배수)
+    #   "flat": 평생 같음(v49까지)  "lifestyle": 여행·취미만 75세부터 줄어 85세에 절반(기본)
+    #   "all": 위 + 기본생활비도 75세부터 연 1%씩 줄어 85세 이후 90% (Blanchett 2014 연 −1%의 보수적 적용)
+    spend_profile: str = "lifestyle"
     # ── v21 큰 지출 이벤트 ──
     # [{"label": "자녀 대학", "age": 48, "amount": 1000, "years": 4, "kind": "cost"},        (연 금액)
     #  {"label": "주택 구입", "age": 35, "amount": 60000, "kind": "house", "ltv": 0.6,       (집값)

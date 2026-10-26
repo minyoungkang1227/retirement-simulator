@@ -80,6 +80,30 @@ def income_tax_person(nps, fin, age, tc: TaxConfig, extra=0):
     return np.where(fin > 2000, np.maximum(sep, comb), sep) * 1.1
 
 
+# ── (v50) 근로소득 — 은퇴 후 재취업·부분 근로 (소득세법 제47조 근로소득공제, 제59조 근로소득세액공제) ──
+def earned_income_deduction(wage):
+    """근로소득공제(만원, 한도 2,000만). wage = 연 총급여."""
+    w = np.maximum(np.asarray(wage, float), 0)
+    d = np.where(w <= 500, w * .70,
+        np.where(w <= 1500, 350 + (w - 500) * .40,
+        np.where(w <= 4500, 750 + (w - 1500) * .15,
+        np.where(w <= 10000, 1200 + (w - 4500) * .05, 1475 + (w - 10000) * .02))))
+    return np.minimum(d, 2000)
+
+
+def earned_income_credit(tax_on_wage, wage):
+    """근로소득세액공제(만원, 국세분). 산출세액 130만 이하 55%, 초과분 30%.
+    한도: 총급여 3,300만 이하 74만 / 7,000만 이하 max(74 − (총급여−3,300)×0.008, 66) / 초과 max(66 − (총급여−7,000)×0.5, 50)."""
+    t = np.maximum(np.asarray(tax_on_wage, float), 0); w = np.asarray(wage, float)
+    c = np.where(t <= 130, t * .55, 71.5 + (t - 130) * .30)
+    lim = np.where(w <= 3300, 74, np.where(w <= 7000, np.maximum(74 - (w - 3300) * .008, 66),
+                                          np.maximum(66 - (w - 7000) * .5, 50)))
+    return np.where(w > 0, np.minimum(c, lim), 0.0)
+
+
+HI_JEONSE_RATIO = 0.30          # (v50) 건보 재산: 전월세 보증금의 30%를 재산과표에 더한다(기본공제 1억 원 전)
+
+
 # ── (v49) 퇴직소득세 (소득세법 제48·55조, 근속연수공제는 2023년 이후 퇴직분 기준) ──
 #   ① 근속연수공제  ② 환산급여 = (퇴직소득 − 근속연수공제) × 12 / 근속연수  ③ 환산급여공제
 #   ④ 과세표준 = 환산급여 − 환산급여공제  ⑤ 산출세액 = 기본세율(BRACKETS)(과세표준) × 근속연수 / 12
@@ -207,6 +231,7 @@ class HouseConfig:
     downsize_ratio: float = 0.5        # 새 집 가격 / 기존 집 가격
     cost_basis: float = None           # 기존 집 취득가(만원). None이면 현재 시세의 50%로 가정
     sell_cost: float = 0.006           # 매도 중개수수료 등
+    jeonse: float = 0.0                # (v50) 전월세 보증금(만원, 오늘 가치). 금융자산이 아니라 돌려받을 돈 — 상속·기초연금 재산·건보 재산분에 반영
 
 
 # 주택연금 월지급금 (한국주택금융공사, 2026-03-01, 종신지급방식 정액형, 만원/월)

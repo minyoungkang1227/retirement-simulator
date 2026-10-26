@@ -10,7 +10,27 @@ from . import mortality, pension
 from .economy_v2 import EconomyV2, generate
 from .tax import (reverse_mortgage_monthly, acquisition_tax_rate, one_house_cgt, TaxConfig, HouseConfig, income_tax_person, private_pension_tax, health_premium,
                   property_tax, comprehensive_property_tax, rent_tax, gift_tax, hi_property_monthly,
-                  retirement_income_tax, RET_INCOME_PENSION_RATIO)
+                  retirement_income_tax, RET_INCOME_PENSION_RATIO,
+                  earned_income_deduction, earned_income_credit, HI_JEONSE_RATIO)
+
+
+def spend_profile(hh: Household, T):
+    """(v50) 연도별 지출 배수 (기본생활, 여행·취미). 기준 나이는 부부 평균(Blanchett 2014와 같음).
+
+    lifestyle: 75세까지 1 → 85세 0.5로 직선 감소, 이후 0.5. 'go-go → slow-go → no-go'(활동기 → 둔화기 → 정착기).
+               자본시장연구원(2025, 재정패널 2008~2021) — 65세 이상 가구에서 의료·주거 외 품목이 나이와 함께 크게 준다.
+    all:       위 + 기본생활비 75세부터 연 1%씩 줄어 85세 이후 0.90. Blanchett(2014)의 60~90세 평균 실질 −0.96%/년을
+               75세 이후에만 적용한 보수적 버전. 같은 연구들이 보건 지출은 늘거나 그대로라 기본생활 전체를 크게 줄이진 않는다.
+    flat:      평생 1 (v49까지).
+    """
+    age = np.mean([m.age for m in hh.members]) + np.arange(T + 1)
+    ess = np.ones(T + 1); life = np.ones(T + 1)
+    prof = getattr(hh, "spend_profile", "flat")
+    if prof in ("lifestyle", "all"):
+        life = np.clip(1 - 0.5 * (age - 75) / 10, 0.5, 1.0)
+    if prof == "all":
+        ess = np.clip(1 - 0.01 * (age - 75), 0.90, 1.0)
+    return ess, life
 
 
 def glide_path(hh: Household, T):
@@ -130,7 +150,7 @@ def dependent_care(hh: Household, cfg: SimConfig, qx_table, T, n, rng, markov: b
     return dep
 
 
-def floor_table(hh: Household, cfg: SimConfig, e: EconomyV2, house: HouseConfig, qx_table, T, ess_base):
+def floor_table(hh: Household, cfg: SimConfig, e: EconomyV2, house: HouseConfig, qx_table, T, ess_base, ess_m=None):
     """기본생활비 보호선 F[t, 상태]: 생존확률로 가중한 '앞으로 필요한 기본생활비 부족분'의 현가.
 
     상태 0 = 부부 모두 생존(1인 가구는 본인 생존), 1 = 본인만 생존, 2 = 배우자만 생존.
@@ -168,8 +188,10 @@ def floor_table(hh: Household, cfg: SimConfig, e: EconomyV2, house: HouseConfig,
             surv.append(np.concatenate([[1.0], np.cumprod(1 - q)[:-1]]))   # s년 뒤 생존확률
         vs = v_r ** np.arange(horizon)
         yrs = np.arange(t0, t0 + horizon)
+        em = ess_m[t0:t0 + horizon] if ess_m is not None else 1.0
+        em = np.concatenate([em, np.full(horizon - len(em), em[-1])]) if ess_m is not None and len(em) < horizon else em
         gap = lambda members, ratio: np.maximum(
-            ess_base * ratio - sum((inc_alone if len(members) == 1 and k > 1 else inc_vec)(i, yrs)
+            ess_base * ratio * em - sum((inc_alone if len(members) == 1 and k > 1 else inc_vec)(i, yrs)
                                    for i in members) - rent_real, 0.0)
         g0 = gap([0], 1.0 if k == 1 else hh.survivor_spending_ratio)
         if k == 1:
@@ -240,7 +262,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     w_now = np.full(n, float(w_path[0]))
     prev_life = None                                           # 작년에 쓴 여행·취미 예산(실질) — 지출 경직성용
 
-    floor_tab = floor_table(hh, cfg, e, house, qx_table, T, ess_base) if hh.floor_method == "actuarial" else None
+    ess_m, life_m = spend_profile(hh, T)                       # (v50) 나이에 따른 지출 배수
+    floor_tab = floor_table(hh, cfg, e, house, qx_table, T, ess_base, ess_m) if hh.floor_method == "actuarial" else None
     short_real = np.zeros(n)                                   # 생존 중 부족했던 기본생활비 누계(실질)
     cons_u = np.zeros(n); cons_a = np.zeros(n)                 # (v27) CRRA 효용 누적, 할인·생존 가중 합
     gamma = getattr(cfg, 'risk_aversion', 3.0); beta = 1 / 1.02
@@ -274,6 +297,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     # (v49) 퇴직급여: DC 적립(Wdc, 은퇴 전) → 은퇴 때 IRP(Wr)로. Rr = 아직 안 꺼낸 이연퇴직소득 원금, tau = 퇴직소득세 실효율
     Wdc = np.zeros(n); Wr = np.zeros(n); Rr = np.zeros(n); tau = np.zeros(n); t_ret = None
     sev_real = np.zeros(n); sev_tax_real = np.zeros(n)
+    jeonse = np.full(n, float(getattr(house, 'jeonse', 0.0)))   # (v50) 전월세 보증금(오늘 가치) — 집을 사면 그 자금으로 들어가고 0
     joint_factor = lambda t0: joint_pv(hh, qx_table, t0)
 
     def sell_from_taxable(amount):
@@ -321,6 +345,12 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             if b and m.age + t < b["until_age"]:
                 bz[i] = a[i] * b["income"] * cpi[:, t]
                 work[i] = a[i] & bool(b.get("workplace", False))
+        # (v50) 은퇴 후 근로소득 (재취업·부분 근로): 은퇴 후 ~ post_until 전까지, 직장가입자
+        wage = np.zeros((k, n)); post_retired = hh.retire_age is None or hh.members[0].age + t >= hh.retire_age
+        for i, m in enumerate(hh.members):
+            if post_retired and getattr(m, "post_income", 0) > 0 and m.age + t < getattr(m, "post_until", 0):
+                wage[i] = a[i] * m.post_income * cpi[:, t]
+                work[i] = work[i] | (wage[i] > 0)
         rent = house.rent_annual * cpi[:, t] * live
         if ds_t is not None and t == ds_t and house.market > 0:  # 집 줄이기: 팔고 작은 집 사기
             sell = house.market * hp(t)
@@ -348,7 +378,9 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                     mort_bal = mort_bal + loan; mort_rate = np.where(loan > 0, i_m, mort_rate)
                     mort_pay = mort_pay + loan * i_m / (1 - (1 + i_m) ** -N)
                     down = price - loan + acquisition_tax_rate(price) * price
-                    ev_cost += (down - ev.get("deposit_back", 0) * cpi[:, t]) * live   # 전세 보증금 회수분은 자기자본으로
+                    back = ev.get("deposit_back", 0) or jeonse                       # (v50) 회수액을 따로 안 넣었으면 지금 보증금
+                    ev_cost += (down - back * cpi[:, t]) * live   # 전세 보증금 회수분은 자기자본으로
+                    jeonse = np.zeros(n)
                     extra_house = extra_house + ev["amount"] * live
                     rent_save = rent_save + ev.get("rent_saving", 0) * live
             elif ev["age"] <= age0 < ev["age"] + ev.get("years", 1):
@@ -369,9 +401,10 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         if cfg.nps.basic_on:
             elig = [a[i] & (hh.members[i].age + t >= 65) for i in range(k)]
             if any(e.any() for e in elig):
-                inc_m = (nps.sum(0) + surv.sum(0) + priv.sum(0) + rent + bz.sum(0)) / 12
+                inc_m = (nps.sum(0) + surv.sum(0) + priv.sum(0) + rent + bz.sum(0)
+                         + np.maximum(wage.sum(0) / 12 - 110 * na, 0) * 12 * 0.7) / 12   # (v50) 근로소득: 월 110만 공제 후 70%
                 fin_now = np.maximum(Wt + Wi + Wp + Wr + Wdc + S + D - debt, 0)
-                gross = np.maximum(official - np.where(rm_on, rm_bal, 0.0) - mort_bal - od_bal, 0)
+                gross = np.maximum(official - np.where(rm_on, rm_bal, 0.0) - mort_bal - od_bal, 0) + jeonse * cpi[:, t]   # (v50) 임차보증금
                 a_m = [pension.a_benefit_monthly(m) * cpi[:, t] for m in hh.members]      # A급여액(명목)
                 basic_inc = pension.basic_pension_annual(inc_m, gross, fin_now, elig,
                                                          [(nps[i] + surv[i]) / 12 for i in range(k)],
@@ -405,8 +438,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         # 5) 지출·간병비
         ratio = np.where(na >= 2, 1.0, hh.survivor_spending_ratio)
         retired = True if hh.retire_age is None else (hh.members[0].age + t >= hh.retire_age)
-        ess = ess_base * ratio * cpi[:, t] * live
-        life_want = hh.lifestyle * ratio * cpi[:, t] * live
+        ess = ess_base * ratio * cpi[:, t] * live * ess_m[t]
+        life_want = hh.lifestyle * ratio * cpi[:, t] * live * life_m[t]
         care = dep_care[:, t] * care_cpi[:, t] * live          # (v36) 부모 간병 분담분
         if markov:
             care = care + ((incare[:, :, t] & ~severe[:, :, t]) * care_level
@@ -448,7 +481,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             died_now = alive[j, :, t - 1] & ~a[j] if t > 0 else ~a[j]
             dl_ben = ad.death_benefit * died_now * live      # 남은 가족이 있어야 쓸 수 있다
             dl_cost = ad.death_premium * a[j]
-        income_all = (nps.sum(0) + surv.sum(0) + basic_inc + priv.sum(0) + rent + bz.sum(0)
+        income_all = (nps.sum(0) + surv.sum(0) + basic_inc + priv.sum(0) + rent + bz.sum(0) + wage.sum(0)
                       + ann_inc + ci_ben + dl_ben + rm_inc)
         if retired:
             # 목표 우선순위: 기본생활(Essential) 보호선을 먼저 지키고, 남는 만큼만 여행·취미(Lifestyle) 지출
@@ -539,7 +572,12 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             for i, m in enumerate(hh.members):
                 age = m.age + t
                 sep_rent, comb_rent = rent_tax(rent_i[i], nps[i] * tc.nps_taxable_ratio)
-                taxes += a[i] * (income_tax_person(nps[i], fin_i[i], age, tc, extra=comb_rent + bz[i]) + sep_rent)
+                t_all = income_tax_person(nps[i], fin_i[i], age, tc,
+                                          extra=comb_rent + bz[i] + np.maximum(wage[i] - earned_income_deduction(wage[i]), 0))
+                if wage[i].any():                                        # (v50) 근로소득세액공제
+                    t_wo = income_tax_person(nps[i], fin_i[i], age, tc, extra=comb_rent + bz[i])
+                    t_all = t_all - np.minimum(earned_income_credit((t_all - t_wo) / 1.1, wage[i]) * 1.1, t_all - t_wo)
+                taxes += a[i] * (t_all + sep_rent)
                 taxes += a[i] * private_pension_tax(priv[i] + pw_taxable * fshare[i], age)
             if tc.use_isa:
                 taxes += np.maximum(Wi * (w * tc.div_yield + (1 - w) * np.maximum(eco["rate"][:, t], 0))
@@ -563,14 +601,14 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             # 자동 계산은 명목 과세표준에 바로 등급을 적용하므로 따로 물가 환산을 하지 않는다.
             pm = (house.hi_property_monthly * hscale * hidx[:, t] * cpi[:, t]
                   if house.hi_property_monthly is not None
-                  else hi_property_monthly(sum(prop_base), tc))
+                  else hi_property_monthly(sum(prop_base) + jeonse * cpi[:, t] * HI_JEONSE_RATIO, tc))   # (v50) 보증금 30%
             rate = tc.hi_rate * (1 + tc.ltc_ratio)
             any_work = work.any(0)
             # 직장가입자(사업장 대표): 사업소득 전액(대표자 전액 부담) + 보수 외 소득 2,000만원 초과분
             hi_w = np.zeros(n)
             for i in range(k):
                 other = .5 * nps[i] + np.where(fin_i[i] > 1000, fin_i[i], 0) + .5 * rent_i[i]
-                hi_w += work[i] * rate * (bz[i] + np.maximum(other - 2000, 0))
+                hi_w += work[i] * rate * (bz[i] + 0.5 * wage[i] + np.maximum(other - 2000, 0))   # (v50) 근로자는 보수의 절반 부담
             # 지역가입자(직장 아닌 생존자): 소득분 + 재산분(직장가입자 몫 주택 지분 제외)
             nonw = [a[i] & ~work[i] for i in range(k)]
             reg_inc = sum(nonw[i] * (.5 * nps[i] + np.where(fin_i[i] > 1000, fin_i[i], 0) + .5 * rent_i[i] + bz[i]) for i in range(k))
@@ -646,6 +684,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             fin_est = np.maximum(Wt + Wi + Wp + Wr + Wdc + S + D - debt, 0) * (dep_at < 0)
             est = fin_est + np.maximum(house.market * hp(t + 1) - rm_bal, 0) + np.maximum(extra_house * hidx[:, t + 1] * cpi[:, t + 1] - mort_bal, 0)   # 주택연금·주담대 상환 후
             est = np.maximum(est - od_bal, 0)                                 # (v48) 남은 기존 대출은 상속재산에서 차감
+            est = est + jeonse * cpi[:, t + 1]                                # (v50) 돌려받을 보증금
             recent = sum(g for (tg, g, _) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
             recent_gt = sum(gt for (tg, _, gt) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
             fin_ded = np.where(fin_est <= 2000, fin_est, np.where(fin_est <= 10000, 2000, np.minimum(fin_est * .2, 20000)))

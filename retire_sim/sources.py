@@ -126,6 +126,39 @@ SOURCES = (
         stale="공제표가 물가연동이 아니라 명목 퇴직금이 커질수록 실효세율이 오른다. 대표 30대 가구에서 퇴직소득세는 "
               "퇴직급여의 3~4%(연금수령 시 그 70%)로 결과를 1%p 안쪽으로 움직인다."),
     Source(
+        key="earned_income", name="근로소득공제(총급여 구간 70/40/15/5/2%, 한도 2,000만)·근로소득세액공제(130만 이하 55%, 초과 30%, 한도 74/66/50만)",
+        org="소득세법 제47조·제59조",
+        used_for="은퇴 후 재취업·부분 근로 소득의 세금",
+        as_of="2026", cycle="세법 개정 시",
+        where="law.go.kr 「소득세법」 제47·59조",
+        how="retire_sim/tax.py 의 earned_income_deduction·earned_income_credit 교체 → test_earned_income_rules_v50 손검산",
+        stale="은퇴 후 근로는 대부분 저소득 구간이라 세금 영향은 작다(월 200만 원 근로에서 연 수십만 원)."),
+    Source(
+        key="nps_work_cut", name="국민연금 재직자 노령연금 감액 기준 — 월 소득 A값 + 200만 원(2026년 약 519만 원) 이하면 감액 없음",
+        org="국민연금법 개정(2026. 6. 17. 시행, 2026. 1. 1. 발생 소득부터 적용)",
+        used_for="은퇴 후 근로가 있어도 국민연금을 깎지 않는 근거",
+        as_of="2026-06", cycle="A값은 매년 7월",
+        where="국민연금공단 공지, 보건복지부 보도자료",
+        how="기준을 넘는 근로를 모델링하려면 retire_sim/pension.py 의 nps_annual_amount 에 감액 구간을 추가",
+        stale="월 519만 원을 넘는 은퇴 후 근로는 드물어 지금은 감액을 넣지 않았다."),
+    Source(
+        key="hi_jeonse", name="건강보험 지역가입자 재산 — 전월세 보증금(월세는 연 환산 × 40)의 30%를 재산과표에 더함",
+        org="국민건강보험법 시행령 [별표 4] 재산보험료부과점수 산정 · 공단 안내",
+        used_for="세 들어 사는 가구의 건보료 재산분",
+        as_of="2026", cycle="개정 시",
+        where="law.go.kr 「국민건강보험법 시행령」 별표 4, 건강보험공단 지역보험료 안내",
+        how="retire_sim/tax.py 의 HI_JEONSE_RATIO 교체",
+        stale="보증금 5억 가구에서 20년 건보료가 약 1,600만 원 늘어난다. 월세 환산분은 아직 입력받지 않는다."),
+    Source(
+        key="old_age_spending", name="고령가구 연령별 소비 — 60~64세 대비 균등화 실질소비 65~69세 75%, 70~74세 57%, 75세 이상 43%, 보건만 유지·증가",
+        org="자본시장연구원 연구보고서 25-03(2025), 재정패널(NaSTaB) 2008~2021 · Blanchett(2014) JFP, 60~90세 실질지출 연 −0.96%",
+        used_for="나이에 따른 지출 변화(spend_profile): 여행·취미 75세부터 감소, 선택 시 기본생활비 연 1% 감소",
+        as_of="2025-02", cycle="부정기",
+        where="kcmi.re.kr 보고서 1822, Journal of Financial Planning 2014-05",
+        how="retire_sim/engine_tax.py 의 spend_profile 배수 교체",
+        stale="단면 자료라 '돈이 없어 못 쓰는' 효과가 섞여 있어 그대로 쓰지 않고 보수적으로 줄여 적용했다. "
+              "기본값(여행·취미만)은 기본 가구 +3.7%p, 60세 부부 +6.3%p."),
+    Source(
         key="widowhood", name="사별 후 사망위험 메타분석 (남 RR 1.22 / 여 1.03, 6개월 이내 1.41)",
         org="Moon et al. (2011) PLOS ONE — 226만 명, 전향 코호트 15편, 연령·성별 보정",
         used_for="배우자 사별 직후 생존자의 사망위험 상승",
