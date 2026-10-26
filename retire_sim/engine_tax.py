@@ -261,6 +261,15 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     mort_bal = np.zeros(n); mort_pay = np.zeros(n); mort_rate = np.zeros(n)   # 주택담보대출(원리금균등, 명목)
     rent_save = np.zeros(n)                                    # (v24) 집을 사서 더 안 내게 된 월세·전세대출 이자(연, 오늘 가치)
     debt_retire_real = np.full(n, np.nan); debt_settled = False
+    # (v48) 이미 갚고 있는 대출(주담대·신용대출 등): 원리금균등, 명목 고정 상환액.
+    #   은퇴 전 상환은 소득에서(입력한 저축액은 상환 후 금액), 은퇴 후 남은 상환은 노후자금에서.
+    od_bal = np.zeros(n); od_pay = np.zeros(n); od_rate = np.zeros(n)
+    if getattr(hh, "debt_balance", 0) > 0:
+        N0 = max(int(getattr(hh, "debt_years", 10) or 1), 1)
+        i0 = hh.debt_rate if getattr(hh, "debt_rate", None) else np.maximum(eco["rate"][:, 0], 0) + 0.015
+        od_rate = np.broadcast_to(np.asarray(i0, float), (n,)).copy()
+        od_bal = np.full(n, float(hh.debt_balance))
+        od_pay = od_bal * od_rate / (1 - (1 + od_rate) ** -N0)
     joint_factor = lambda t0: joint_pv(hh, qx_table, t0)
 
     def sell_from_taxable(amount):
@@ -346,6 +355,10 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         if not (pre_ret and mort_from_income):                                # 은퇴 전 원리금은 근로소득(생활비)에서, 은퇴 후엔 노후자금에서
             ev_cost += m_now
         mort_bal = np.maximum(mort_bal * (1 + mort_rate) - m_now, 0)
+        od_now = np.where(od_bal > 1e-6, np.minimum(od_pay, od_bal * (1 + od_rate)), 0.0) * live
+        if not pre_ret:                                                       # (v48) 기존 대출: 은퇴 후 상환분만 노후자금에서
+            ev_cost += od_now
+        od_bal = np.maximum(od_bal * (1 + od_rate) - od_now, 0) * live
         official = (house.official * hscale + extra_house * 0.69) * hidx[:, t] * cpi[:, t]     # 새 집 공시가격 ≈ 시세의 69%
         # (v28) 기초연금: 65세 이상, 소득인정액(소득평가액 + 재산 소득환산) 기준
         basic_inc = np.zeros(n)
@@ -354,7 +367,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             if any(e.any() for e in elig):
                 inc_m = (nps.sum(0) + surv.sum(0) + priv.sum(0) + rent + bz.sum(0)) / 12
                 fin_now = np.maximum(Wt + Wi + Wp + S + D - debt, 0)
-                gross = np.maximum(official - np.where(rm_on, rm_bal, 0.0) - mort_bal, 0)
+                gross = np.maximum(official - np.where(rm_on, rm_bal, 0.0) - mort_bal - od_bal, 0)
                 a_m = [pension.a_benefit_monthly(m) * cpi[:, t] for m in hh.members]      # A급여액(명목)
                 basic_inc = pension.basic_pension_annual(inc_m, gross, fin_now, elig,
                                                          [(nps[i] + surv[i]) / 12 for i in range(k)],
@@ -588,6 +601,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         if died_all.any():
             fin_est = np.maximum(Wt + Wi + Wp + S + D - debt, 0) * (dep_at < 0)
             est = fin_est + np.maximum(house.market * hp(t + 1) - rm_bal, 0) + np.maximum(extra_house * hidx[:, t + 1] * cpi[:, t + 1] - mort_bal, 0)   # 주택연금·주담대 상환 후
+            est = np.maximum(est - od_bal, 0)                                 # (v48) 남은 기존 대출은 상속재산에서 차감
             recent = sum(g for (tg, g, _) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
             recent_gt = sum(gt for (tg, _, gt) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
             fin_ded = np.where(fin_est <= 2000, fin_est, np.where(fin_est <= 10000, 2000, np.minimum(fin_est * .2, 20000)))

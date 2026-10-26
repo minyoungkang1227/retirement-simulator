@@ -41,6 +41,10 @@ DEFAULTS = dict(
     overseas=20, own_equal=True, survivor=70, enhanced=True, paths=10000,
     # (v36) 간병비 초과상승률(%p/년), 부양하는 부모, 행동 가정
     care_growth=1.0, parents=[], behaviour=False,
+    # (v48) 이미 갚고 있는 대출: 남은 원금(억), 금리(%, 0이면 시장금리+1.5%p), 남은 기간(년)
+    debt=0.0, debt_rate=0.0, debt_years=10,
+    # (v48) 입력 단계: 1 빠른 진단 / 2 내 재산 반영 / 3 전문가 상담. 화면에 보일 항목만 정한다(계산엔 영향 없음)
+    tier=2,
 )
 
 
@@ -94,10 +98,10 @@ CHOICES = {"sex": ("M", "F"), "s_sex": ("M", "F"), "profile": tuple(PROFILES),
            "floor": ("계리적", "보수적")}
 RANGES = {"age": (18, 100), "s_age": (18, 100), "retire_age": (30, 100), "nps_start": (55, 75),
           "paths": (100, 200_000), "survivor": (0, 100), "overseas": (0, 100), "children": (0, 10),
-          "care_growth": (-2.0, 5.0)}
+          "care_growth": (-2.0, 5.0), "debt_rate": (0.0, 20.0), "debt_years": (1, 40), "tier": (1, 3)}
 NON_NEGATIVE = ("deposit", "invest", "ret_acct", "other", "saving", "salary", "s_salary",
                 "essential", "lifestyle", "nps", "s_nps", "priv", "legacy",
-                "h_official", "h_market", "h_n", "rent", "biz")
+                "h_official", "h_market", "h_n", "rent", "biz", "debt")
 
 
 def validate(p: dict) -> dict:
@@ -188,7 +192,10 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
         survivor_spending_ratio=p["survivor"] / 100,
         dependents=[dict(age=int(d["age"]), sex=d.get("sex", "F"), share=float(d.get("share", 1.0)) )
                     for d in (p.get("parents") or [])],
-        floor_method="fixed95" if p.get("floor") == "보수적" else "actuarial")
+        floor_method="fixed95" if p.get("floor") == "보수적" else "actuarial",
+        debt_balance=float(p.get("debt", 0)) * 10000,
+        debt_rate=(float(p["debt_rate"]) / 100) if p.get("debt_rate") else None,
+        debt_years=int(p.get("debt_years", 10)))
 
     care = CareMarkov() if p["enhanced"] else CareShock()
     if v.get("care_mult"):

@@ -45,6 +45,10 @@ class Household:
     #   "loan_years": 30, "deposit_back": 30000, "rent_saving": 1200}]                      (전세 보증금 회수, 절감 주거비 연)
     # 본인 나이 기준, 금액은 만원·오늘 가치
     events: list = field(default_factory=list)
+    # ── v48 이미 갚고 있는 대출 (주담대·신용대출 합계) ──
+    debt_balance: float = 0.0             # 남은 원금(만원, 오늘)
+    debt_rate: Optional[float] = None     # 연 고정금리. None이면 첫해 시장금리 + 1.5%p
+    debt_years: int = 10                  # 남은 상환 기간(년), 원리금균등
     # (v36) 더블케어: 부양하는 부모. [{"age": 78, "sex": "F", "share": 0.5}, ...]
     #   share 는 그 부모의 간병비 중 이 가구가 대는 몫(형제가 나눠 내면 1/형제수).
     #   부모의 수명·간병은 가구원과 같은 생명표·마르코프로 돌리되, 생활비는 포함하지 않는다.
