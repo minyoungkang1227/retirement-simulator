@@ -1,0 +1,8 @@
+{
+  "appId": "io.github.minyoungkang1227.nohucompass",
+  "appName": "노후나침반",
+  "webDir": "www",
+  "backgroundColor": "#F7F9F9",
+  "android": { "backgroundColor": "#F7F9F9" },
+  "ios": { "backgroundColor": "#F7F9F9", "contentInset": "always" }
+}

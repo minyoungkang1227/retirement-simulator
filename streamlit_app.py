@@ -79,7 +79,14 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
 .dots {{ display: flex; gap: 10px; margin: .8rem 0 .4rem; flex-wrap: wrap; }}
 .dot {{ width: 32px; height: 32px; border-radius: 50%; }}
 .dot.bad {{ background: {CORAL}; }} .dot.ok {{ background: {TEAL}; opacity: .85; }}
-.legend, .note {{ color: {MUTED}; font-size: .88rem; line-height: 1.6; }}
+.legend, .note {{ color: {MUTED}; font-size: .92rem; line-height: 1.65; }}
+.sec {{ font-size: 1.2rem; font-weight: 800; color: {INK}; margin: 1.9rem 0 .7rem; padding-top: 1.1rem; border-top: 1px solid #E3EAEC; }}
+.wf {{ overflow-x: auto; }} .wf svg {{ min-width: 540px; }}
+.sec span {{ font-size: .86rem; font-weight: 400; color: {MUTED}; margin-left: .3rem; }}
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {{ color: #4F6164; font-size: .9rem; line-height: 1.6; }}
+[data-testid="stTab"] p {{ font-size: 1rem; font-weight: 600; }}
+[data-testid="stWidgetLabel"] p {{ font-size: .95rem; font-weight: 600; color: {INK}; }}
+[data-testid="stExpander"] summary p {{ font-size: .98rem; font-weight: 600; }}
 .card {{ border: 1px solid #CBD7DB; border-radius: 12px; padding: .8rem 1rem; margin-bottom: .6rem; background: white; }}
 .card h4 {{ margin: 0 0 .3rem; font-size: 1rem; color: {TEAL}; }}
 .card p {{ margin: 0; line-height: 1.6; }}
@@ -103,7 +110,9 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
   .card, .goal {{ padding: .7rem .8rem; }}
   .goal {{ margin-bottom: .5rem; }}
   .tip, .gap {{ padding: .7rem .8rem; }}
-  .legend, .note {{ font-size: .82rem; }}
+  .legend, .note {{ font-size: .88rem; }}
+  .sec {{ font-size: 1.08rem; margin-top: 1.4rem; }}
+  [data-testid="stTab"] p {{ font-size: .92rem; }}
   [data-testid="stTabs"] button p {{ font-size: .9rem; }}
 }}
 </style>""", unsafe_allow_html=True)
@@ -337,6 +346,11 @@ def paired(a, b):
 
 
 def pct(x): return f"{x * 100:.0f}%"
+
+
+def sec(title: str, sub: str = "") -> str:
+    """(v50.4) 결과 화면 섹션 제목 — 크기·간격을 한 곳에서 정해, 굵은 본문과 제목이 섞여 보이지 않게."""
+    return f'<div class="sec">{title}' + (f' <span>{sub}</span>' if sub else "") + "</div>"
 
 
 
@@ -939,7 +953,18 @@ with tab1:
             st.markdown(f'<div class="tip">🎯 <b>{ret_age}세</b>에 은퇴하면 기본생활을 <b>10번 중 9번</b> 지킬 수 있어요 — {rel}.</div>',
                         unsafe_allow_html=True)
 
+    # 3) 목표별 결과: 기본 / 여행·취미 / 자녀 — 결론 바로 아래에 둔다(v50.4)
+    st.markdown(sec("목표별로 보면"), unsafe_allow_html=True)
+    cards = [("🏠 기본 생활", "먹고 사는 데 꼭 필요한 돈", f'10번 중 <span class="hl">{n_ok}번</span> 끝까지 가능해요')]
+    if p["lifestyle"] > 0:
+        cards.append(("✈️ 여행·취미", "원하는 예산 중 쓸 수 있는 정도", f'<span class="hl">{s.get("여행·취미 평균 충족률", 0) * 100:.0f}%</span> 정도'))
+    if p["legacy"] > 0:
+        cards.append(("👨‍👩‍👧 자녀", f"{p['legacy']:.1f}억 원 남기기", f'10번 중 <span class="hl">{int(round(s.get("유산 목표 달성 확률", 0) * 10))}번</span> 가능해요'))
+    for col, (h_, t_, v_) in zip(st.columns(len(cards)), cards):
+        col.markdown(f'<div class="goal"><div class="h">{h_}</div><div class="t">{t_}</div><div class="v">{v_}</div></div>', unsafe_allow_html=True)
+
     # 2) 매달 부족한 돈: 생활비 − 연금 = 부족분, 그리고 채우는 방법
+    st.markdown(sec("매달 얼마가 모자라나"), unsafe_allow_html=True)
     short = max(gap, 0)
     if short > 0:
         fill = "이 부족분은 <b>모아둔 돈에서 꺼내 채워요.</b>" + (f" 국민연금을 받기 전({p['nps_start']}세 전)에는 생활비 {need:.0f}만 원 전부를 모아둔 돈에서 씁니다." if pension > 0 else "")
@@ -949,24 +974,6 @@ with tab1:
         big = "매달 연금으로 생활비가 충분해요"
     st.markdown(f'<div class="gap"><div class="eq">필요한 생활비 <b>월 {need:.0f}만 원</b><br>받는 연금 <b>월 {pension:.0f}만 원</b> (오늘 돈 가치 기준)</div>'
                 f'<div class="big">{big}</div><div class="eq">{fill}</div></div>', unsafe_allow_html=True)
-
-    # 2-2) 은퇴 후 1년, 돈이 어디로 가나 — 리포트와 같은 숫자로 그린 폭포 그래프
-    wf = report.waterfall_svg(base.get("flow") or [], brand=BRAND)
-    if wf:
-        st.markdown("**은퇴 후 1년, 돈이 어디로 가나** (살아 있는 해의 평균, 오늘 돈 가치)")
-        st.markdown(wf, unsafe_allow_html=True)
-        st.markdown('<div class="legend">연금으로 들어온 돈에서 생활비·세금·건보료·보유세가 빠지고, 남는 부족분을 '
-                    '모아둔 돈에서 꺼내 씁니다. 건보료는 지역가입자 소득분과 재산분을 모두 반영한 금액이에요.</div>',
-                    unsafe_allow_html=True)
-
-    # 3) 목표별 결과: 기본 / 여행·취미 / 자녀
-    cards = [("🏠 기본 생활", "먹고 사는 데 꼭 필요한 돈", f'10번 중 <span class="hl">{n_ok}번</span> 끝까지 가능해요')]
-    if p["lifestyle"] > 0:
-        cards.append(("✈️ 여행·취미", "원하는 예산 중 쓸 수 있는 정도", f'<span class="hl">{s.get("여행·취미 평균 충족률", 0) * 100:.0f}%</span> 정도'))
-    if p["legacy"] > 0:
-        cards.append(("👨‍👩‍👧 자녀", f"{p['legacy']:.1f}억 원 남기기", f'10번 중 <span class="hl">{int(round(s.get("유산 목표 달성 확률", 0) * 10))}번</span> 가능해요'))
-    for col, (h_, t_, v_) in zip(st.columns(len(cards)), cards):
-        col.markdown(f'<div class="goal"><div class="h">{h_}</div><div class="t">{t_}</div><div class="v">{v_}</div></div>', unsafe_allow_html=True)
 
     # 3-1) (v49.1) 10번 중 9번까지 얼마나 왔나 — 필요 자산·필요 저축 대비 진행률
     if n_ok < 9:
@@ -979,10 +986,27 @@ with tab1:
         if req_s:
             bars += progress_bar("월 저축 (자산 대신 저축으로 채운다면)", monthly_saving(p), req_s, "만", "{:.0f}")
         if bars:
-            st.markdown("**10번 중 9번까지 얼마나 왔나**" + bars, unsafe_allow_html=True)
-            st.caption("두 막대는 '둘 중 하나만 바꾼다면'입니다. 실제로는 은퇴 시기·생활비와 섞어서 맞추는 게 보통이에요 — '바꿔보기' 탭.")
+            st.markdown(sec("10번 중 9번까지 얼마나 왔나") + bars, unsafe_allow_html=True)
+            st.caption("두 막대는 '둘 중 하나만 바꾼다면'입니다. 실제로는 은퇴 시기·생활비와 섞어서 맞추는 게 보통이에요 — 위의 '바꿔보기' 탭.")
+
+    # 4-2) 무엇부터 하면 되나 — 효과 순위
+    if n_ok < 9:
+        with st.spinner("효과가 큰 방법을 찾는 중"):
+            acts = action_ranking(json.dumps(p, sort_keys=True))
+        if acts:
+            st.markdown(sec("무엇부터 하면 좋을까", "효과가 큰 순서대로 세 가지"), unsafe_allow_html=True)
+            for rank, (lab, how, gain, ci_) in enumerate(acts[:3], 1):
+                st.markdown(f'<div class="act"><div class="r">{rank}</div><div><b>{lab}</b>'
+                            f'<div class="s">{how}<br>기본 생활을 지킬 가능성 {ok * 100:.0f}% → <b>{min(ok + gain, 1) * 100:.0f}%</b> '
+                            f'({gain * 100:+.0f}%p)</div></div></div>', unsafe_allow_html=True)
+            st.caption("권유가 아니라 '어떤 선택이 얼마나 효과가 큰지' 계산한 결과입니다. 자세한 조정은 위의 '바꿔보기' 탭에서 하세요.")
+    if p.get("events"):
+        ds_ = base.get("debt_share", 0)
+        st.caption("큰 지출 반영: " + ", ".join(f'{e_["age"]}세 {e_["kind"]}' for e_ in p["events"])
+                   + (f" · 은퇴 때 갚을 빚이 남는 경우 10번 중 {ds_ * 10:.0f}번" if ds_ > 0.05 else ""))
 
     # 3-2) 가정의 불확실성 — 난수를 늘려도 줄지 않는 폭
+    st.markdown(sec("이 숫자는 얼마나 확실한가"), unsafe_allow_html=True)
     with st.spinner("가정이 달라질 때의 폭을 계산 중"):
         lo, hi = assumption_band(json.dumps(p, sort_keys=True))
     st.markdown(f'<div class="legend">주식 수익률·수명·간병 발생률은 아무도 정확히 모릅니다. 세 가정을 각각 추정 폭만큼만 움직여도 '
@@ -1005,27 +1029,20 @@ with tab1:
             st.caption(f"수익률은 결과를 가장 크게 바꾸는 가정인데, 사람이 고르면 낙관적으로 고르기 쉽습니다. "
                        f"그래서 이 계산기는 KOSPI 2000~2026 자료와 해외 추정치를 합쳐 정하고, 그 불확실성을 위의 '{pct(lo)} ~ {pct(hi)}'로 따로 보여줍니다.")
 
-    # 4-2) 무엇부터 하면 되나 — 효과 순위
-    if n_ok < 9:
-        with st.spinner("효과가 큰 방법을 찾는 중"):
-            acts = action_ranking(json.dumps(p, sort_keys=True))
-        if acts:
-            st.markdown("**효과가 큰 순서대로 세 가지**")
-            for rank, (lab, how, gain, ci_) in enumerate(acts[:3], 1):
-                st.markdown(f'<div class="act"><div class="r">{rank}</div><div><b>{lab}</b>'
-                            f'<div class="s">{how}<br>기본 생활을 지킬 가능성 {ok * 100:.0f}% → <b>{min(ok + gain, 1) * 100:.0f}%</b> '
-                            f'({gain * 100:+.0f}%p)</div></div></div>', unsafe_allow_html=True)
-            st.caption("권유가 아니라 '어떤 선택이 얼마나 효과가 큰지' 계산한 결과입니다. 자세한 조정은 '바꿔보기' 탭에서 하세요.")
-    if p.get("events"):
-        ds_ = base.get("debt_share", 0)
-        st.caption("큰 지출 반영: " + ", ".join(f'{e_["age"]}세 {e_["kind"]}' for e_ in p["events"])
-                   + (f" · 은퇴 때 갚을 빚이 남는 경우 10번 중 {ds_ * 10:.0f}번" if ds_ > 0.05 else ""))
+    # 2-2) 은퇴 후 1년, 돈이 어디로 가나 — 리포트와 같은 숫자로 그린 폭포 그래프
+    wf = report.waterfall_svg(base.get("flow") or [], brand=BRAND)
+    if wf:
+        st.markdown(sec("은퇴 후 1년, 돈이 어디로 가나", "살아 있는 해의 평균, 오늘 돈 가치"), unsafe_allow_html=True)
+        st.markdown(f'<div class="wf">{wf}</div>', unsafe_allow_html=True)   # 휴대폰에서는 글자가 작아지지 않게 옆으로 밀어 보기
+        st.markdown('<div class="legend">연금으로 들어온 돈에서 생활비·세금·건보료·보유세가 빠지고, 남는 부족분을 '
+                    '모아둔 돈에서 꺼내 씁니다. 건보료는 지역가입자 소득분과 재산분을 모두 반영한 금액이에요.</div>',
+                    unsafe_allow_html=True)
 
     # 5) 나이별 남는 돈 (3개 선)
     fan = pd.DataFrame(base["fan"], columns=["나이", "좋을 때", "보통", "나쁠 때"])
     lines_df = pd.concat([pd.DataFrame({"나이": fan["나이"], "억 원": fan[c], "경우": lab})
                           for c, lab in (("좋을 때", "운이 좋을 때"), ("보통", "보통일 때"), ("나쁠 때", "운이 나쁠 때"))])
-    st.markdown("**나이별로 남는 돈** (오늘 돈 가치)")
+    st.markdown(sec("나이별로 남는 돈", "오늘 돈 가치"), unsafe_allow_html=True)
     st.altair_chart(alt.Chart(lines_df).mark_line(strokeWidth=3).encode(
         x=alt.X("나이:Q", title="나이"),
         y=alt.Y("억 원:Q", title="억 원", axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=-5)),
@@ -1127,13 +1144,13 @@ with tab2:
                 lines.append("저축만 늘려서는 어려워요. 은퇴 시기나 생활비도 함께 바꿔 보세요.")
         if req is None and p["age"] >= p["retire_age"]:
             lines.append("모아둔 돈만 늘려서는 어려워요. 생활비나 연금 받는 시기를 함께 바꿔 보세요.")
-        lines.append("👉 <b>'바꿔보기'</b> 탭에서 은퇴 시기·저축·생활비를 바꿔 보면 결과가 어떻게 달라지는지 바로 볼 수 있어요.")
+        lines.append("👇 아래 <b>바꿔 볼 조건</b>에서 은퇴 시기·저축·생활비를 바꿔 보면 결과가 어떻게 달라지는지 바로 볼 수 있어요.")
     st.markdown('<div class="tip"><b>기본 생활을 10번 중 9번 지키려면</b><br>' + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
     with st.expander("숫자 읽는 법", expanded=not ss.get("tweak")):
         st.markdown(f"""
 - **기본생활 지킬 확률 {pct(s["기본생활 유지 확률"])}** = 10번 중 약 {s["기본생활 유지 확률"] * 10:.0f}번은 생활비를 끝까지 낼 수 있다는 뜻이에요.
 - **+5%p** = 확률이 5만큼 오른다는 뜻이에요 (예: 48% → 53%).
-- 더 자세한 뜻은 **'자세한 설명'** 탭에 있어요.""")
+- 더 자세한 뜻은 **'이 계산에 대하여'** 탭에 있어요.""")
 
     with st.form("tweak_form"):
         st.markdown("**바꿔 볼 조건**")

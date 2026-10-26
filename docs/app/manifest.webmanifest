@@ -1,0 +1,18 @@
+{
+  "name": "노후나침반 빠른 진단",
+  "short_name": "노후나침반",
+  "description": "1만 가지 미래로 은퇴 후 기본생활을 지킬 수 있는지 확인하는 태블릿 상담 앱",
+  "lang": "ko",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F7F9F9",
+  "theme_color": "#1F6F78",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

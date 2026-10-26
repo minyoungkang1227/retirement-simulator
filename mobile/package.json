@@ -1,0 +1,21 @@
+{
+  "name": "nohu-compass-app",
+  "version": "50.3.0",
+  "private": true,
+  "description": "노후나침반 설치형 앱 (가벼운 모드) — docs/app 화면 + 앱 안에 넣은 계산 엔진",
+  "scripts": {
+    "www": "node build-www.mjs",
+    "android": "node build-www.mjs && npx cap add android && npx capacitor-assets generate --android && node patch-android.mjs && npx cap sync android",
+    "ios": "node build-www.mjs && npx cap add ios && npx capacitor-assets generate --ios && npx cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.6.9",
+    "@capacitor/app": "7.1.2",
+    "@capacitor/core": "7.6.9",
+    "@capacitor/ios": "7.6.9"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "7.6.9"
+  }
+}

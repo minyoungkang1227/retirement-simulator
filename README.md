@@ -13,6 +13,8 @@
 기본생활·여행·남길 자산이라는 세 가지 목표를 1만 개의 경제·수명 시나리오 위에서 계산하고, **무엇을 바꾸면 목표에 가까워지는지**를 비교해 보여줍니다. 결과는 추천이 아니라 같은 시나리오 위에서의 비교입니다.
 
 - **웹 앱 (설치 없이 사용):** https://retire-compass.streamlit.app
+- **설치형 앱 (안드로이드):** 저장소 [Releases](https://github.com/minyoungkang1227/retirement-simulator/releases)의 `.apk` — 계산 엔진이 앱 안에 있어 인터넷 없이 계산 (`mobile/`)
+- **태블릿 앱 (상담용 가벼운 모드):** https://minyoungkang1227.github.io/retirement-simulator/app/ — 홈 화면에 추가하면 앱처럼 열리고, 계산은 기기 안에서 합니다 (`docs/app/`)
 - [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/minyoungkang1227/retirement-simulator/blob/main/notebooks/retire_sim_colab.ipynb) (분석용 노트북)
 
 ## 왜 만들었나
@@ -86,6 +88,12 @@
 
 ## 최근 변경
 
+> **v50.4 (2026-10-26):** **웹 화면을 읽기 쉽게 고쳤습니다** — 버튼·선택 색을 기본 빨강에서 브랜드 청록으로(`.streamlit/config.toml`), 글자 크기를 키우고, 결과 화면을 '결론 → 목표별 → 부족분 → 무엇부터 → 확실성 → 그래프' 순서와 섹션 제목으로 정리했습니다. 모델은 그대로입니다.
+>
+> **v50.3 (2026-10-26):** **설치형 안드로이드 앱을 만들었습니다** (`mobile/`, Capacitor). 계산 엔진 런타임(약 17MB)을 앱 안에 넣어 첫 실행부터 인터넷 없이 계산하고, `main`에 올리면 GitHub Actions가 APK를 만들어 Releases에 올립니다. iPad·Play 스토어는 개발자 계정이 필요해 다음 단계로 남겼습니다(`mobile/README.md`).
+>
+> **v50.2 (2026-10-26):** **태블릿 상담 앱(가벼운 모드)을 만들었습니다** (`docs/app/`). 설계사가 태블릿으로 고객 앞에서 1단계 빠른 진단만 빠르게 하도록, 웹 1단계와 같은 질문 5화면 → 결과(10번 중 몇 번 · 은퇴 가능 나이 · 월 부족분 · 가정 범위 · 효과 순위 · 수익률 직접 정해 보기 · 결과 카드)를 담았습니다. **서버 없이 브라우저 안의 파이썬(Pyodide)이 같은 `retire_sim` 엔진을 돌립니다** — 고객 입력이 기기 밖으로 나가지 않고, 한 번 연 뒤에는 인터넷 없이도 됩니다. 같은 입력이면 웹과 계산 ID·확률이 같습니다(1만 경로 1.7초, 서버 0.9초). 화면값 → 엔진 입력 변환은 `retire_sim/lite.py` 한 곳에 두고, 웹 1단계와 한 글자도 다르지 않은지 테스트가 감시합니다. 모델은 그대로(v50). 테스트 163 → 166개.
+>
 > **v50.1 (2026-10-26):** **검증을 화면으로 꺼냈습니다.** 세금·건보료·퇴직소득세·연금 계산을 법 조문의 세율·공제액·고시값으로 직접 계산한 값과 나란히 둔 **검증 장부**(`retire_sim/verify.py`, 11개 영역 30항목)를 만들고, 앱 '이 계산에 대하여' 탭과 테스트가 **같은 장부**를 읽게 했습니다 — 화면의 "30개 중 30개 일치"는 테스트가 통과하는 한 거짓일 수 없습니다. 고장 네 개를 심어 각각 정확히 그 항목만 잡히는지도 고정했습니다. 공단 모의계산기 화면값과의 대조는 아직이며, 화면에도 그렇게 적었습니다. 테스트 129 → 163개.
 
 > **v50 (2026-10-26):** **세 가지 빈자리를 메웠습니다.** ① **나이에 따른 지출 변화** — 지금까지는 기본생활비와 여행 예산이 평생 같았는데, 실제로는 나이가 들수록 여행·여가는 줄고 의료비는 늘어납니다. 자본시장연구원(2025, 재정패널 2008~2021)에서 60~64세 대비 균등화 실질소비가 75세 이상 43% 수준이고 Blanchett(2014)도 60~90세 연 −1%였지만, 단면 자료에는 '돈이 없어 못 쓰는' 효과가 섞여 있어 보수적으로 **여행·취미만 75세부터 줄어 85세에 절반**을 기본으로 했습니다(기본생활비까지 줄이는 선택, 평생 같게 두는 선택도 있음). 위 예시 가구는 49% → **53%**. ② **은퇴 후 근로**(재취업·파트타임) — 근로소득공제·세액공제, 직장 건보료 본인부담, 기초연금 근로소득 공제까지. 월 200만 원을 65세까지 벌면 +6.6%p, 70세까지면 +11.3%p. 국민연금은 2026년 6월 개정으로 월 약 519만 원 이하 근로면 깎이지 않아 감액하지 않았습니다. ③ **전월세 보증금** — 상속재산, 기초연금 재산, 건보 재산(30%)에 넣습니다. 보증금 5억이면 −10%p인데, 그동안 기초연금을 받는 것으로 잘못 계산하던 것이 바로잡힌 결과입니다.
@@ -166,6 +174,9 @@ retire_sim/          모델 패키지
   branding.py        화이트라벨 (기관 이름·색·로고)
   api.py             HTTP API (FastAPI) — /simulate, /compare, /report, /product/compare, /usage
   usage.py           API 호출 기록 (종량 집계 · 상담 로그, 고객 입력은 남기지 않음)
+  lite.py            태블릿 앱 가벼운 모드 — 1단계 화면값 → 엔진 입력, 결과 묶음 (브라우저 안에서 실행)
+mobile/              설치형 앱 (Capacitor) — docs/app 화면 + 앱 안에 넣은 엔진 런타임, APK는 .github/workflows/android.yml 이 빌드
+docs/app/            태블릿 앱 (PWA: index.html · worker.js · sw.js · engine.zip) — GitHub Pages로 배포
 notebooks/           Colab 분석 노트북
 scripts/             검증·생성 스크립트
   check.py             작업 후 오류 검증 + 최적화 점검을 한 번에
@@ -176,6 +187,7 @@ scripts/             검증·생성 스크립트
   make_readme_images.py  문서 그림 재생성
   make_sources_doc.py  자료 출처 문서 생성
   sync_notebook.py     노트북↔모듈 동기화
+  build_app.py         태블릿 앱의 엔진 묶음(docs/app/engine.zip) 다시 만들기 — 엔진을 고치면 꼭 실행
   product_compare.py · product_spread.py   연금보험 상품 비교, 상품 선택 vs 개시 나이
   measure_hi_property.py   건보료 재산분 손계산·짝지은 비교
   calibrate_care.py · calibrate_mortality.py   실데이터 보정
@@ -188,12 +200,15 @@ CHANGELOG.md         버전별 변경 내역 (무엇을 / 어떻게 / 전과 무
 ## 사용법
 
 - **웹 앱:** 위 링크에서 한 단계씩 입력 → "이 조건으로 계산하기"
+- **태블릿 앱:** 위 주소를 태블릿 브라우저로 열고 공유 → '홈 화면에 추가'. 처음 한 번 계산 엔진(약 17MB)을 받은 뒤로는 인터넷 없이 열립니다. 배포는 GitHub 저장소 Settings → Pages → Branch `main` · 폴더 `/docs` 한 번만 켜면 됩니다.
 - **Colab:** 배지를 누르고 `런타임 > 모두 실행`, 2단계 입력 셀만 수정
 - **로컬:**
   ```bash
   pip install -r requirements.txt
   streamlit run streamlit_app.py      # 웹 앱
   python -m pytest -q                 # 이론값 검증 포함 전체 테스트
+  python scripts/build_app.py         # 엔진을 고쳤다면 태블릿 앱 묶음도 다시
+  cd docs/app && python -m http.server 8000   # 태블릿 앱을 로컬에서 열어 보기 (http://localhost:8000)
 
   PYTHONPATH=. python scripts/check.py              # 오류 검증 + 최적화 점검 한 번에
   PYTHONPATH=. python scripts/run_example.py        # 화면 없이 엔진만 돌려 보기

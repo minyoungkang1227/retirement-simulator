@@ -1547,3 +1547,87 @@ def test_app_about_tab_shows_verification_ledger():
     assert f"{n}개 중" in md and f"{n}개</span> 일치" in md, "장부 요약 숫자가 장부 크기와 다르다"
     assert f"{n}개 항목 중 {n}개가 일치" in md, "설명하기 탭의 근거 문장이 장부를 따라가지 않는다"
     assert "모의계산기 화면값과의 대조" in " ".join(c.value for c in at.caption), "아직 안 한 것을 숨기면 안 된다"
+
+
+# ─────────────────────────── (v50.2) 태블릿 앱 · 가벼운 모드 ───────────────────────────
+def _lite_form(P: dict) -> dict:
+    """엔진 입력 → 앱 화면 값 (1단계 질문만)."""
+    from retire_sim.inputs import total_assets
+    keys = ("age", "sex", "retire_age", "spouse", "s_age", "s_sex", "saving", "h_market", "debt", "debt_years", "jeonse",
+            "essential", "lifestyle", "s_nps", "salary", "s_salary", "ret_contrib", "tenure", "s_tenure",
+            "post_inc", "post_until", "profile")
+    f = {k: P[k] for k in keys}
+    f.update(total=total_assets(P), nps=0 if P.get("nps_auto") else P["nps"])
+    return f
+
+
+def test_lite_inputs_match_web_tier1():
+    """앱의 화면값 → 엔진 입력 변환이 웹 1단계와 한 글자도 다르지 않아야 한다 — 같은 고객이면 앱과 웹이 같은 숫자를 낸다."""
+    from retire_sim import lite
+    at = _app(); at.run()
+    [b for b in at.button if b.label == "1단계로 시작"][0].click().run()
+    for _ in range(5):
+        [b for b in at.button if b.label in ("다음", "이 조건으로 계산하기")][-1].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    P = dict(at.session_state["p"])
+    got = lite.to_inputs(_lite_form(P))
+    diff = {k: (P.get(k), got.get(k)) for k in set(P) | set(got) if P.get(k) != got.get(k)}
+    assert not diff, f"앱과 웹의 1단계 입력이 다르다: {diff}"
+    md = " ".join(m.value for m in at.markdown)
+    for line in lite.assumptions(got):
+        assert line in md, f"앱의 '가정한 값'이 웹과 다르다: {line}"
+
+
+def test_lite_results_and_averages():
+    """앱이 부르는 계산이 모두 돌고, 화면에 박아 둔 평균 생활비가 엔진 기본값(AVG_SPEND)과 같다."""
+    import json
+    import pathlib
+    from retire_sim import lite
+    from retire_sim.inputs import defaults
+    f = _lite_form(defaults()); f["paths"] = 1000
+    b = json.loads(lite.call("base", json.dumps(f)))
+    assert 0 <= b["ok"] <= 1 and b["calc_id"] and b["pre"] and b["assumptions"]
+    r = json.loads(lite.call("retire_age", json.dumps(f)))
+    assert r["applies"] and (r["age"] is None or r["prob"] >= lite.TARGET)
+    bd = json.loads(lite.call("band", json.dumps(f)))
+    assert bd["lo"] <= b["ok"] + 0.05 and bd["hi"] >= b["ok"] - 0.05
+    hi = json.loads(lite.call("stock_return", json.dumps(f), json.dumps({"r": 0.145})))["prob"]
+    lo = json.loads(lite.call("stock_return", json.dumps(f), json.dumps({"r": 0.04})))["prob"]
+    assert hi > lo, "수익률을 높게 정하면 확률이 올라가야 한다"
+    html = (pathlib.Path(__file__).resolve().parent.parent / "docs" / "app" / "index.html").read_text(encoding="utf-8")
+    for key, spouse in (("couple", True), ("single", False)):
+        a = lite.averages(spouse)
+        assert f"{key}: {{ essential: {a['essential']}, lifestyle: {a['lifestyle']} }}" in html, f"앱의 평균값({key})이 엔진과 다르다"
+
+
+def test_app_engine_bundle_is_current():
+    """docs/app/engine.zip 이 지금 엔진 코드로 만든 것이어야 한다. 실패하면: python scripts/build_app.py"""
+    import importlib.util
+    import json
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("build_app", root / "scripts" / "build_app.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    meta = json.loads((root / "docs" / "app" / "engine.json").read_text(encoding="utf-8"))
+    assert meta["digest"] == m.digest(), "엔진을 고친 뒤 앱 묶음을 다시 만들지 않았다 — python scripts/build_app.py"
+    from retire_sim import __version__
+    assert meta["model_version"] == __version__
+
+
+def test_mobile_app_wiring():
+    """(v50.3) 설치형 앱: 화면이 앱 안의 엔진 런타임을 쓰도록 바꿀 표시가 있고, 버전이 고정돼 있으며, 서명 키가 있다."""
+    import json
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    html = (root / "docs" / "app" / "index.html").read_text(encoding="utf-8")
+    assert html.count('const BUNDLED_PYODIDE = "";') == 1, "build-www.mjs 가 바꿀 표시가 없다"
+    build = (root / "mobile" / "build-www.mjs").read_text(encoding="utf-8")
+    worker = (root / "docs" / "app" / "worker.js").read_text(encoding="utf-8")
+    ver = lambda s: s.split('PYODIDE_VERSION = "')[1].split('"')[0]
+    assert ver(build) == ver(worker), "앱에 넣는 Pyodide 와 웹이 받는 Pyodide 버전이 다르다"
+    pkg = json.loads((root / "mobile" / "package.json").read_text(encoding="utf-8"))
+    for name, v in {**pkg["dependencies"], **pkg["devDependencies"]}.items():
+        assert v[0].isdigit(), f"{name} 버전이 고정되지 않았다: {v}"
+    cfg = json.loads((root / "mobile" / "capacitor.config.json").read_text(encoding="utf-8"))
+    assert cfg["appId"] == "io.github.minyoungkang1227.nohucompass", "앱 ID는 스토어에 한 번 올리면 못 바꾼다"
+    assert (root / "mobile" / "debug.keystore").exists(), "서명 키가 없으면 빌드마다 키가 달라져 업데이트 설치가 안 된다"

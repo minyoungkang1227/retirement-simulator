@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>노후나침반 빠른 진단</title>
+<meta name="description" content="1만 가지 미래로 은퇴 후 기본생활을 지킬 수 있는지 확인하는 태블릿 상담 앱 (가벼운 모드)">
+<meta name="theme-color" content="#1F6F78">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="노후나침반">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+:root {
+  --teal: #1F6F78; --teal-soft: #E6EDEF; --teal-tint: #F1F6F7; --coral: #E2725B; --coral-soft: #FBEAE6;
+  --ink: #1B2B2E; --muted: #5A6B6E; --line: #CBD7DB; --bg: #F7F9F9; --card: #FFFFFF;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font-family: Pretendard, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; font-size: 18px; line-height: 1.55; }
+body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+p, li, h1, h2, h3, .card { word-break: keep-all; overflow-wrap: anywhere; }
+button { font: inherit; color: inherit; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 20px 24px 120px; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.brand { white-space: nowrap; display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.15rem; color: var(--teal); }
+.brand svg { width: 34px; height: 34px; }
+.engine { font-size: .82rem; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.engine i { width: 9px; height: 9px; border-radius: 50%; background: #C9A227; display: inline-block; }
+.engine.ok i { background: var(--teal); }
+.engine.bad i { background: var(--coral); }
+h1 { font-size: 2rem; line-height: 1.3; margin: .2rem 0 .6rem; }
+h2 { font-size: 1.35rem; margin: 0 0 .8rem; }
+.sub { color: var(--muted); }
+.hero-home { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 32px; }
+.btn { min-height: 56px; padding: 0 26px; border-radius: 14px; border: 1px solid var(--line); background: var(--card);
+  font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.btn.primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+.btn.ghost { background: transparent; }
+a.btn { text-decoration: none; color: inherit; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px 20px; }
+.steps { display: flex; gap: 6px; margin: 4px 0 18px; }
+.steps span { flex: 1; height: 6px; border-radius: 3px; background: var(--line); }
+.steps span.on { background: var(--teal); }
+.steplabel { color: var(--muted); font-size: .92rem; margin-bottom: 4px; }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 24px; }
+.field label { display: block; font-weight: 700; margin-bottom: 6px; font-size: .98rem; }
+.field .help { color: var(--muted); font-size: .84rem; margin-top: 4px; line-height: 1.45; }
+.num { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #fff; height: 58px; }
+.num button { width: 58px; border: 0; background: var(--teal-tint); font-size: 1.5rem; color: var(--teal); cursor: pointer; flex: 0 0 auto; }
+.num input { flex: 1; min-width: 0; border: 0; text-align: center; font: inherit; font-size: 1.3rem; font-weight: 700; color: var(--ink); background: transparent; }
+.num input:focus { outline: none; background: var(--teal-tint); }
+.num .unit { align-self: center; padding: 0 10px 0 0; color: var(--muted); font-size: .9rem; white-space: nowrap; }
+.field.off { opacity: .4; pointer-events: none; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; height: 58px; background: #fff; }
+.seg button { flex: 1; border: 0; background: transparent; cursor: pointer; font-weight: 600; border-right: 1px solid var(--line); padding: 0 6px; }
+.seg button:last-child { border-right: 0; }
+.seg button.on { background: var(--teal); color: #fff; }
+.seg.tall { height: auto; }
+.seg.tall button { padding: 12px 6px; line-height: 1.35; }
+.seg.tall small { display: block; font-weight: 400; font-size: .8rem; opacity: .85; }
+.toggle { display: flex; align-items: center; gap: 14px; min-height: 58px; cursor: pointer; font-weight: 700; }
+.toggle .sw { width: 60px; height: 34px; border-radius: 17px; background: var(--line); position: relative; flex: 0 0 auto; transition: background .15s; }
+.toggle .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 28px; height: 28px; border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+.toggle.on .sw { background: var(--teal); }
+.toggle.on .sw::after { left: 29px; }
+.note { color: var(--muted); font-size: .86rem; }
+.hint { background: var(--teal-tint); border-radius: 14px; padding: 14px 16px; font-size: .92rem; color: var(--ink); }
+.nav { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(247,249,249,.96); border-top: 1px solid var(--line);
+  padding: 12px 24px calc(12px + env(safe-area-inset-bottom)); backdrop-filter: blur(8px); }
+.nav .in { max-width: 1100px; margin: 0 auto; display: flex; gap: 12px; }
+.nav .btn { flex: 1; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; }
+.card h3 { margin: 0 0 6px; font-size: 1rem; color: var(--teal); }
+.card p { margin: 0; }
+ul.plain { margin: .3rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .9rem; }
+ul.plain li { margin: .15rem 0; }
+/* 결과 */
+.res { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 860px) { .res { grid-template-columns: 1fr; } }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.chip { flex: 1; min-width: 120px; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; background: #fff; }
+.chip .k { color: var(--muted); font-size: .78rem; }
+.chip .v { font-weight: 800; font-size: 1.05rem; }
+.big { font-size: 2.1rem; line-height: 1.3; font-weight: 800; margin: 2px 0 12px; }
+.big .n { color: var(--coral); }
+.big .g { color: var(--teal); }
+.dots { display: flex; gap: 10px; margin: 6px 0 8px; }
+.dot { width: 38px; height: 38px; border-radius: 50%; background: var(--teal); opacity: .9; }
+.dot.bad { background: var(--coral); opacity: 1; }
+.legend { color: var(--muted); font-size: .84rem; }
+.tip { background: var(--teal-tint); border-left: 5px solid var(--teal); border-radius: 12px; padding: 14px 16px; margin: 14px 0; }
+.gapbox { background: var(--teal-soft); border-radius: 16px; padding: 16px 18px; margin: 14px 0; }
+.gapbox .v { font-size: 1.5rem; font-weight: 800; color: var(--teal); }
+.gapbox .v .n { color: var(--coral); }
+.goals { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.goal .t { color: var(--muted); font-size: .86rem; }
+.goal .v { font-size: 1.35rem; font-weight: 800; }
+.goal .v b { color: var(--teal); }
+.act { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--line); }
+.act:first-of-type { border-top: 0; }
+.act .r { flex: 0 0 30px; height: 30px; border-radius: 50%; background: var(--teal); color: #fff; text-align: center; font-weight: 800; line-height: 30px; }
+.act .s { color: var(--muted); font-size: .9rem; }
+.act .g { color: var(--teal); font-weight: 800; }
+.wait { color: var(--muted); font-size: .92rem; display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.spin { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--teal); animation: sp 0.9s linear infinite; flex: 0 0 auto; }
+@keyframes sp { to { transform: rotate(360deg); } }
+input[type=range] { width: 100%; height: 44px; accent-color: var(--teal); }
+details { margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }
+.stack > * + * { margin-top: 16px; }
+.share img { width: 100%; max-width: 340px; border: 1px solid var(--line); border-radius: 12px; display: block; }
+.err { background: var(--coral-soft); border-radius: 12px; padding: 12px 14px; color: #8A3A2A; }
+@media (max-width: 600px) {
+  html, body { font-size: 16px; }
+  .wrap { padding: 14px 16px 120px; }
+  h1 { font-size: 1.6rem; } .big { font-size: 1.6rem; }
+  .dot { width: 24px; height: 24px; } .dots { gap: 6px; }
+  .goals { grid-template-columns: 1fr; }
+  .hero-home, .panel { padding: 18px; }
+  .nav { padding-left: 16px; padding-right: 16px; }
+  .engine { font-size: .74rem; text-align: right; }
+  .engine span { max-width: 150px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="brand"><svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="29" fill="#1F6F78"/><circle cx="32" cy="32" r="21" fill="none" stroke="#fff" stroke-width="3" opacity=".5"/><path d="M32 12 L39 32 L32 52 L25 32 Z" fill="#fff"/><path d="M32 12 L39 32 L25 32 Z" fill="#E2725B"/></svg>노후나침반</div>
+    <div class="engine" id="engine"><i></i><span>계산 엔진 준비 중</span></div>
+  </div>
+  <main id="app"></main>
+</div>
+<div class="nav" id="nav" hidden><div class="in" id="navin"></div></div>
+
+<script>
+"use strict";
+/* ───────────────────── 상태 ─────────────────────
+ * 입력은 이 화면의 메모리에만 있다. 저장하지 않고, 기기 밖으로 보내지 않는다.
+ * 평균 생활비(AVG)는 retire_sim.inputs.AVG_SPEND(국민연금연구원 2024)와 같은 값 — tests 가 확인한다.
+ */
+const AVG = { couple: { essential: 217, lifestyle: 1000 }, single: { essential: 139, lifestyle: 700 } };
+const WEB_APP = "https://retire-compass.streamlit.app";
+const EXAMPLE = { age: 52, sex: "M", retire_age: 60, spouse: true, s_age: 50, s_sex: "F", total: 5.0, saving: 150,
+  h_market: 0, debt: 0, debt_years: 10, jeonse: 0, essential: 217, lifestyle: 1000, nps: 110, s_nps: 50,
+  salary: 0, s_salary: 0, ret_contrib: false, tenure: 0, s_tenure: 0, post_inc: 0, post_until: 65, profile: "균형형" };
+const BLANK = { ...EXAMPLE, total: 0, saving: 0, nps: 0, s_nps: 0, essential: 217, lifestyle: 1000 };
+const STEPS = ["나와 가족", "자산과 대출", "생활비", "연금과 투자", "최종 확인"];
+const S = { view: "home", step: 0, f: { ...BLANK }, res: {}, engine: "loading", meta: null, runId: 0 };
+
+/* ───────────────────── 계산 일꾼 ───────────────────── */
+/* 설치형 앱(mobile/)으로 빌드할 때는 build-www.mjs 가 아래 값을 "./pyodide/"로 바꾼다 —
+ * 엔진 런타임을 앱 안에 넣어, 처음 실행에도 인터넷 없이 계산한다. 웹(Pages)에서는 비워 두어 CDN에서 받는다. */
+const BUNDLED_PYODIDE = "";
+const qs = new URLSearchParams(location.search);
+const PY_BASE = qs.get("pyodide") || BUNDLED_PYODIDE;
+const worker = new Worker("worker.js" + (PY_BASE ? "?pyodide=" + encodeURIComponent(PY_BASE) : ""));
+const pending = new Map(); let seq = 0;
+worker.onmessage = (ev) => {
+  const m = ev.data;
+  if (m.type === "status") return setEngine("loading", m.text);
+  if (m.type === "ready") { S.meta = m.meta; return setEngine("ok", "계산 준비 완료 · 이 기기 안에서 계산"); }
+  if (m.type === "failed") return setEngine("bad", "엔진을 못 열었어요 — 인터넷 연결을 확인하고 새로고침");
+  const p = pending.get(m.id); if (!p) return; pending.delete(m.id);
+  m.ok ? p.resolve(m.out) : p.reject(new Error(m.error));
+};
+worker.postMessage({ fn: "__boot" });
+function calc(fn, extra) { const id = ++seq; return new Promise((resolve, reject) => {
+  pending.set(id, { resolve, reject }); worker.postMessage({ id, fn, form: S.f, extra }); }); }
+function setEngine(state, text) {
+  S.engine = state; const el = document.getElementById("engine");
+  el.className = "engine" + (state === "ok" ? " ok" : state === "bad" ? " bad" : "");
+  el.querySelector("span").textContent = text;
+}
+
+/* ───────────────────── 도우미 ───────────────────── */
+const $ = (s) => document.querySelector(s);
+const esc = (x) => String(x).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pct = (x) => Math.round(x * 100) + "%";
+const fmt = (x, d = 0) => Number(x).toLocaleString("ko-KR", { maximumFractionDigits: d, minimumFractionDigits: d });
+const pre = () => S.f.age < S.f.retire_age;
+
+function num(key, label, o = {}) {
+  const v = S.f[key], d = o.dec || 0, off = o.off ? " off" : "";
+  return `<div class="field${off}"><label for="f_${key}">${label}</label>
+    <div class="num"><button type="button" data-step="${key}" data-d="-1" aria-label="줄이기">−</button>
+    <input id="f_${key}" data-key="${key}" inputmode="${d ? "decimal" : "numeric"}" value="${fmt(v, d).replace(/,/g, "")}"
+      data-min="${o.min ?? 0}" data-max="${o.max ?? 99999}" data-inc="${o.inc ?? 1}" data-dec="${d}">
+    ${o.unit ? `<span class="unit">${o.unit}</span>` : ""}
+    <button type="button" data-step="${key}" data-d="1" aria-label="늘리기">+</button></div>
+    ${o.help ? `<div class="help">${o.help}</div>` : ""}</div>`;
+}
+function seg(key, label, opts, o = {}) {
+  return `<div class="field${o.off ? " off" : ""}"><label>${label}</label><div class="seg${o.tall ? " tall" : ""}">${opts.map(([val, txt, small]) =>
+    `<button type="button" data-seg="${key}" data-val="${esc(val)}" class="${String(S.f[key]) === String(val) ? "on" : ""}">${txt}${small ? `<small>${small}</small>` : ""}</button>`).join("")}</div>
+    ${o.help ? `<div class="help">${o.help}</div>` : ""}</div>`;
+}
+function toggle(key, label, o = {}) {
+  return `<div class="field${o.off ? " off" : ""}"><div class="toggle${S.f[key] ? " on" : ""}" data-toggle="${key}" role="switch" aria-checked="${!!S.f[key]}"><span class="sw"></span>${label}</div>
+    ${o.help ? `<div class="help">${o.help}</div>` : ""}</div>`;
+}
+function clamp(el, v) {
+  const lo = +el.dataset.min, hi = +el.dataset.max, d = +el.dataset.dec;
+  v = Math.min(hi, Math.max(lo, isFinite(v) ? v : lo)); return +v.toFixed(d);
+}
+function readInputs() {
+  document.querySelectorAll("input[data-key]").forEach(el => {
+    const v = parseFloat(String(el.value).replace(/,/g, "")); S.f[el.dataset.key] = clamp(el, v);
+  });
+}
+
+/* ───────────────────── 화면: 처음 ───────────────────── */
+function home() {
+  return `<div class="hero-home stack">
+    <div><div class="sub">가벼운 모드 · 1단계 빠른 진단 · 3분</div>
+    <h1>지금 계획으로 은퇴 후 기본생활을<br>끝까지 지킬 수 있을까요?</h1>
+    <p class="sub">숫자 10개 남짓만 넣으면, 국민연금·기초연금·세금·건보료·간병까지 반영한 <b>1만 가지 미래</b>로 확인합니다.
+    수익률은 묻지 않아요 — 한국 자료로 추정합니다.</p></div>
+    <div class="row"><button class="btn primary" data-go="start" style="min-width:240px">새 고객 진단 시작</button>
+    <button class="btn" data-go="example">예시 가구로 먼저 보기 (52·50세 부부)</button></div>
+    <div class="hint">🔒 입력한 정보는 <b>이 기기 안에서만</b> 계산되고 어디에도 저장·전송되지 않습니다. 앱을 닫으면 지워집니다.</div>
+    <p class="note">세금·명의·주택연금·부모 간병 같은 세부 조정은 <a href="${WEB_APP}" target="_blank" rel="noopener">웹 버전(2·3단계)</a>에서 할 수 있어요.
+    ${BUNDLED_PYODIDE ? "계산 엔진이 앱 안에 들어 있어 인터넷 없이도 계산됩니다." : "처음 한 번은 계산 엔진(약 17MB)을 내려받아 조금 걸리고, 그다음부터는 인터넷 없이도 열립니다."}</p>
+  </div>`;
+}
+
+/* ───────────────────── 화면: 단계별 입력 ───────────────────── */
+function stepView() {
+  const i = S.step, f = S.f;
+  let body = "";
+  if (i === 0) {
+    body = `<div class="grid">
+      ${num("age", "현재 나이", { unit: "세", min: 20, max: 90 })}
+      ${seg("sex", "성별", [["M", "남"], ["F", "여"]])}
+      ${num("retire_age", "은퇴 (예정) 나이", { unit: "세", min: 40, max: 90, help: "결과를 가장 크게 바꾸는 값이에요. 이미 은퇴했다면 지금 나이 이하로." })}
+      ${toggle("spouse", "배우자와 함께")}
+      ${num("s_age", "배우자 나이", { unit: "세", min: 20, max: 90, off: !f.spouse })}
+      ${seg("s_sex", "배우자 성별", [["M", "남"], ["F", "여"]], { off: !f.spouse })}
+    </div>`;
+  } else if (i === 1) {
+    body = `<div class="grid">
+      ${num("total", "금융자산 합계", { unit: "억 원", dec: 1, inc: 0.1, max: 500, help: "예금·적금, 주식·펀드, 퇴직연금·연금저축을 모두 더한 금액. 집은 빼고요." })}
+      ${num("saving", "한 달 저축·투자액", { unit: "만 원", inc: 10, max: 5000, off: !pre(), help: pre() ? "대출 갚고 남는 돈 중 모으는 금액" : "이미 은퇴해서 묻지 않아요" })}
+      ${num("h_market", "사는 집 시세 (없으면 0)", { unit: "억 원", dec: 1, inc: 0.5, max: 800 })}
+      ${num("jeonse", "전월세 보증금 (집이 없을 때)", { unit: "억 원", dec: 1, inc: 0.1, max: 100, help: "돌려받을 돈이라 생활비로 쓰지 않는다고 봐요. 기초연금·건보료 재산에는 잡힙니다." })}
+      ${num("debt", "갚고 있는 대출 (없으면 0)", { unit: "억 원", dec: 1, inc: 0.1, max: 100, help: "주택담보·신용대출 남은 원금 합계" })}
+      ${num("debt_years", "대출 남은 기간", { unit: "년", min: 1, max: 40, off: !(f.debt > 0), help: "은퇴 후까지 남는 상환분만 노후자금에서 나가요" })}
+    </div>`;
+  } else if (i === 2) {
+    const a = f.spouse ? AVG.couple : AVG.single;
+    body = `<div class="grid">
+      ${num("essential", "월 기본생활비", { unit: "만 원", inc: 10, max: 5000, help: "식비·주거·공과금·통신·보험료, 평소 병원비·약값까지. 간병비는 따로 계산해요." })}
+      ${num("lifestyle", "연 여행·취미 예산", { unit: "만 원", inc: 100, max: 50000, help: "75세부터 줄어 85세에 절반이 된다고 봐요" })}
+    </div>
+    <div class="hint" style="margin-top:16px">잘 모르시면 평균값을 쓰세요 — ${f.spouse ? "부부" : "혼자"} 기준 기본생활비 월 <b>${a.essential}만 원</b>,
+      여행·취미 연 <b>${fmt(a.lifestyle)}만 원</b> (국민연금연구원 2024).
+      <div style="margin-top:10px"><button class="btn" data-go="avg">평균값 넣기</button></div></div>`;
+  } else if (i === 3) {
+    body = `<div class="hint" style="margin-bottom:16px">국민연금 예상 월액을 모르면 <b>0</b>으로 두고 세전 연소득을 넣으세요. 소득으로 추정합니다. (정확한 값: 국민연금공단 '내 연금 알아보기')</div>
+    <div class="grid">
+      ${num("nps", "국민연금 예상 (본인)", { unit: "만 원/월", inc: 5, max: 500 })}
+      ${num("s_nps", "국민연금 예상 (배우자)", { unit: "만 원/월", inc: 5, max: 500, off: !f.spouse })}
+      ${num("salary", "본인 세전 연소득", { unit: "만 원", inc: 100, max: 100000 })}
+      ${num("s_salary", "배우자 세전 연소득", { unit: "만 원", inc: 100, max: 100000, off: !f.spouse })}
+      ${toggle("ret_contrib", "회사에서 퇴직금·퇴직연금이 쌓이고 있어요", { off: !pre(), help: "마지막 월급 × 근속연수로 계산하고, IRP로 받아 연금으로 나눠 쓴다고 봐요 (퇴직소득세 30% 감면)" })}
+      ${num("tenure", "본인 지금 회사 근속연수", { unit: "년", max: 50, off: !(pre() && f.ret_contrib), help: "적립금을 앞의 금융자산에 이미 넣었다면 0" })}
+      ${num("s_tenure", "배우자 근속연수", { unit: "년", max: 50, off: !(pre() && f.ret_contrib && f.spouse) })}
+      ${num("post_inc", "은퇴 후에도 일한다면 월 소득", { unit: "만 원", inc: 10, max: 2000, help: "재취업·파트타임. 없으면 0" })}
+      ${num("post_until", "몇 살까지 일하나요", { unit: "세", min: 40, max: 90, off: !(f.post_inc > 0) })}
+    </div>
+    <div style="margin-top:16px">${seg("profile", "투자 성향", [["보수형", "보수형", "주식 약 30%"], ["균형형", "균형형", "주식 약 50%"], ["성장형", "성장형", "주식 약 70%"]], { tall: true })}</div>`;
+  } else {
+    body = confirmView();
+  }
+  return `<div class="steplabel">1단계 빠른 진단 · ${i + 1}/${STEPS.length}</div>
+    <div class="steps">${STEPS.map((_, k) => `<span class="${k <= i ? "on" : ""}"></span>`).join("")}</div>
+    <div class="panel"><h2>${STEPS[i]}</h2>${body}</div>`;
+}
+function confirmView() {
+  const f = S.f;
+  const lines = [
+    ["나와 가족", `현재 ${f.age}세 · ${f.retire_age}세 은퇴${f.spouse ? `<br>배우자 ${f.s_age}세` : ""}`],
+    ["자산과 대출", `금융자산 ${fmt(f.total, 1)}억 원${pre() ? `<br>월 ${fmt(f.saving)}만 원 저축` : ""}${f.h_market > 0 ? `<br>집 시세 ${fmt(f.h_market, 1)}억 원` : ""}${f.debt > 0 ? `<br>대출 ${fmt(f.debt, 1)}억 원 · ${f.debt_years}년 남음` : ""}${f.jeonse > 0 ? `<br>보증금 ${fmt(f.jeonse, 1)}억 원` : ""}`],
+    ["생활비", `기본생활 월 ${fmt(f.essential)}만 원<br>여행·취미 연 ${fmt(f.lifestyle)}만 원`],
+    ["연금과 투자", `${f.nps > 0 ? `국민연금 월 ${fmt(f.nps)}만 원${f.spouse ? ` · 배우자 ${fmt(f.s_nps)}만 원` : ""}` : f.salary > 0 ? "국민연금은 소득으로 추정" : "국민연금 0원"}<br>투자 성향 ${f.profile}${f.ret_contrib && pre() ? "<br>퇴직금 반영" : ""}${f.post_inc > 0 ? `<br>은퇴 후 월 ${fmt(f.post_inc)}만 원 (${f.post_until}세까지)` : ""}`],
+  ];
+  return `<div class="grid">${lines.map(([h, t]) => `<div class="card"><h3>${h}</h3><p>${t}</p></div>`).join("")}</div>
+    <p class="note" style="margin-top:14px">묻지 않은 값(세금 계좌 배분, 연금 개시 65세 등)은 평균적인 가정으로 채우고, 결과 화면에 무엇을 가정했는지 적어 드려요.</p>`;
+}
+
+/* ───────────────────── 화면: 결과 ───────────────────── */
+const wait = (t) => `<div class="wait"><span class="spin"></span>${t}</div>`;
+function resultView() {
+  const r = S.res, b = r.base;
+  if (r.error) return `<div class="err">계산하지 못했어요: ${esc(r.error)}</div>`;
+  if (!b) return `<div class="panel">${wait(S.engine === "ok" ? "1만 가지 미래를 계산하는 중" : "계산 엔진을 준비하는 중 — 처음 한 번만 조금 걸려요")}</div>`;
+  const nOk = Math.round(b.ok * 10), nBad = 10 - nOk;
+  const head = nBad === 0
+    ? `지금 계획대로면<br>10번 중 <span class="g">9번 이상</span> 생활비를 끝까지 낼 수 있어요`
+    : `지금 계획대로면<br>10번 중 <span class="n">${nBad}번</span>은 ${b.dep_age ? Math.round(b.dep_age) + "세쯤 " : ""}생활비가 모자라요`;
+  const short = Math.max(b.gap, 0);
+  let ra = "";
+  if (b.pre) {
+    const x = r.retire;
+    if (!x) ra = wait("몇 살에 은퇴하면 되는지 찾는 중");
+    else if (x.age == null) ra = `<div class="tip">은퇴를 ${x.max_age}세까지 늦춰도 10번 중 9번에는 못 미쳐요 (그때 ${pct(x.prob)}). 생활비나 저축을 함께 바꿔야 해요.</div>`;
+    else {
+      const d = x.age - S.f.retire_age;
+      const rel = d === 0 ? "지금 계획대로도 충분해요" : d > 0 ? `지금 계획보다 <b>${d}년</b> 늦게` : `지금 계획보다 <b>${-d}년</b> 일찍 은퇴해도 돼요`;
+      ra = `<div class="tip">🎯 <b>${x.age}세</b>에 은퇴하면 기본생활을 <b>10번 중 9번</b> 지킬 수 있어요 — ${rel}.</div>`;
+    }
+  }
+  const band = r.band ? `<p class="legend">주식 수익률·수명·간병 발생률은 아무도 정확히 모릅니다. 세 가정을 각각 추정 폭만큼만 움직여도
+      <b>${pct(b.ok)}</b>는 <b>${pct(r.band.lo)} ~ ${pct(r.band.hi)}</b> 사이에서 움직여요. 숫자 하나보다 <b>선택을 바꿨을 때의 차이</b>를 보세요.</p>`
+    : wait("가정이 달라질 때의 폭을 계산 중");
+  let acts = "";
+  if (nOk < 9) {
+    acts = `<div class="card"><h3>효과가 큰 순서대로</h3>${!r.actions ? wait("효과가 큰 방법을 찾는 중")
+      : r.actions.length === 0 ? `<p class="note">뚜렷하게 효과가 큰 단일 선택지는 없었어요. 여러 가지를 함께 바꿔야 해요.</p>`
+      : r.actions.map((a, k) => `<div class="act"><div class="r">${k + 1}</div><div><b>${esc(a.label)}</b>
+        <div class="s">${esc(a.how)}<br>기본생활을 지킬 가능성 ${pct(b.ok)} → <span class="g">${pct(Math.min(b.ok + a.gain, 1))}</span> (+${Math.round(a.gain * 100)}%p)</div></div></div>`).join("")}
+      <p class="note" style="margin-top:8px">권유가 아니라, 같은 1만 가지 미래 위에서 각 선택의 효과를 잰 결과예요.</p></div>`;
+  }
+  return `<div class="chips">
+      <div class="chip"><div class="k">금융자산</div><div class="v">${fmt(b.assets, 1)}억</div></div>
+      <div class="chip"><div class="k">월 저축</div><div class="v">${b.pre ? fmt(b.saving) + "만" : "—"}</div></div>
+      <div class="chip"><div class="k">연금</div><div class="v">월 ${fmt(b.pension)}만</div></div>
+      <div class="chip"><div class="k">생활비</div><div class="v">월 ${fmt(b.need)}만</div></div>
+    </div>
+    <div class="res">
+      <div class="stack">
+        <div class="panel">
+          <div class="big">${head}</div>
+          <div class="dots">${Array.from({ length: 10 }, (_, k) => `<div class="dot${k < nBad ? " bad" : ""}"></div>`).join("")}</div>
+          <div class="legend">● 주황: 모자라는 경우 · ● 청록: 끝까지 괜찮은 경우 — 1만 가지 미래를 10번으로 줄여 표시</div>
+          ${ra}
+          <div class="gapbox"><div class="legend">필요한 생활비 <b>월 ${fmt(b.need)}만 원</b> · 받는 연금 <b>월 ${fmt(b.pension)}만 원</b> (오늘 돈 가치)</div>
+            <div class="v">${short > 0 ? `매달 <span class="n">${fmt(short)}만 원</span>이 부족해요` : "연금으로 생활비가 충분해요"}</div>
+            <div class="legend">${short > 0 ? "부족분은 모아둔 돈에서 꺼내 채워요. 국민연금을 받기 전(65세 전)에는 생활비 전부를 모아둔 돈에서 씁니다." : "모아둔 돈은 여행·취미와 남길 돈에 쓸 수 있어요."}${b.severance > 0 ? ` 은퇴 때 퇴직금 약 ${fmt(b.severance, 1)}억 원(오늘 가치)을 반영했어요.` : ""}</div></div>
+          <div class="goals">
+            <div class="card goal"><h3>🏠 기본 생활</h3><div class="t">먹고 사는 데 꼭 필요한 돈</div><div class="v">10번 중 <b>${nOk}번</b> 끝까지</div></div>
+            ${b.life != null ? `<div class="card goal"><h3>✈️ 여행·취미</h3><div class="t">원하는 예산 중 쓸 수 있는 정도</div><div class="v"><b>${pct(b.life)}</b> 정도</div></div>` : ""}
+          </div>
+          ${band}
+        </div>
+      </div>
+      <div class="stack">
+        ${acts}
+        <div class="card"><h3>수익률을 직접 정해서 보면? (다른 계산기 방식)</h3>
+          <p class="note">많은 계산기는 기대수익률을 직접 넣게 합니다. 이 앱은 묻지 않고 한국 자료로 추정해요(주식 연 8.3%, 명목·보수 차감 후).</p>
+          <input type="range" id="rr" min="3" max="15" step="0.5" value="${r.rr ?? 8.3}">
+          <div class="row" style="justify-content:space-between;align-items:center"><span>주식 기대수익률 <b id="rrv">${fmt(r.rr ?? 8.3, 1)}%</b></span>
+          <button class="btn" data-go="rr">이 수익률로 계산</button></div>
+          <div id="rrout">${r.rrProb != null ? `<p>그렇게 가정하면 <b>${pct(r.rrProb)}</b> — 이 앱의 추정(${pct(b.ok)})보다 <b>${(r.rrProb - b.ok) >= 0 ? "+" : ""}${Math.round((r.rrProb - b.ok) * 100)}%p</b>.
+            <span class="note">수익률은 결과를 가장 크게 바꾸는 가정인데, 사람이 고르면 낙관적으로 고르기 쉬워요.</span></p>` : r.rrBusy ? wait("계산 중") : ""}</div>
+        </div>
+        <div class="card share"><h3>결과를 한 장으로</h3>
+          <p class="note">고객에게 보여 주거나 보낼 수 있는 그림이에요. 이름·연락처는 들어가지 않아요.</p>
+          <div class="row" style="margin-top:10px"><button class="btn primary" data-go="share" ${r.band ? "" : "disabled"}>${r.card ? "다시 만들기" : r.band ? "결과 카드 만들기" : "계산이 끝나면 만들 수 있어요"}</button></div>
+          <div id="shareout" style="margin-top:12px">${cardHTML()}</div>
+        </div>
+        <details class="card"><summary>묻지 않고 이렇게 가정했어요</summary><ul class="plain">${b.assumptions.map(a => `<li>${esc(a)}</li>`).join("")}</ul>
+          <p class="note">더 정확하게 보려면 <a href="${WEB_APP}" target="_blank" rel="noopener">웹 버전 2·3단계</a>에서 이 값들을 직접 넣을 수 있어요.</p></details>
+        <p class="note">계산 ID ${esc(b.calc_id)} · 모델 v${esc(b.model_version)} · 기본 ${fmt(b.paths)}개 미래, 보조 계산 3,000개 · 같은 입력이면 같은 결과.
+          투자 권유가 아니라 같은 시나리오 위에서의 계산입니다.</p>
+      </div>
+    </div>`;
+}
+
+/* ───────────────────── 결과 계산 (가벼운 것부터 차례로) ───────────────────── */
+async function runAll() {
+  const id = ++S.runId; S.res = {}; render();
+  const keep = (k, v) => { if (id === S.runId) { S.res[k] = v; render(); } };
+  try {
+    keep("base", await calc("base"));
+    if (S.res.base.pre) keep("retire", await calc("retire_age"));
+    keep("band", await calc("band"));
+    if (S.res.base && Math.round(S.res.base.ok * 10) < 9) keep("actions", await calc("actions"));
+  } catch (e) { keep("error", e.message); }
+}
+
+/* ───────────────────── 결과 카드 (1080×1350) ───────────────────── */
+function cardSVG() {
+  const b = S.res.base, f = S.f, nOk = Math.round(b.ok * 10), nBad = 10 - nOk;
+  const T = "#1F6F78", C = "#E2725B", I = "#1B2B2E", M = "#5A6B6E";
+  const font = "Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif";
+  const dots = Array.from({ length: 10 }, (_, k) => `<circle cx="${150 + k * 87}" cy="560" r="30" fill="${k < nBad ? C : T}"/>`).join("");
+  const rows = [`금융자산 ${fmt(b.assets, 1)}억 원` + (b.pre ? ` · 월 저축 ${fmt(b.saving)}만 원` : ""),
+    `기본생활비 월 ${fmt(f.essential)}만 원 · 연금 월 ${fmt(b.pension)}만 원`,
+    `현재 ${f.age}세 · ${f.retire_age}세 은퇴` + (f.spouse ? " (부부)" : "")];
+  if (b.life != null) rows.push(`여행·취미 예산은 ${pct(b.life)} 정도 쓸 수 있어요`);
+  const body = rows.map((t, k) => `<text x="90" y="${720 + k * 62}" font-size="38" fill="${I}">${esc(t)}</text>`).join("");
+  const ra = S.res.retire && S.res.retire.age != null ? `<rect x="60" y="${730 + rows.length * 62}" width="960" height="110" rx="24" fill="#E6EDEF"/>
+    <text x="90" y="${800 + rows.length * 62}" font-size="42" font-weight="700" fill="${T}">${S.res.retire.age}세에 은퇴하면 10번 중 9번 지켜요</text>` : "";
+  const bandTxt = S.res.band ? `주식 수익률·수명·간병을 달리 가정하면 ${pct(S.res.band.lo)}~${pct(S.res.band.hi)}` : "";
+  const today = new Date(); const d = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350" font-family="${font}">
+<rect width="1080" height="1350" fill="#FFFFFF"/><rect width="1080" height="150" fill="${T}"/>
+<text x="60" y="95" font-size="48" font-weight="800" fill="#FFFFFF">노후나침반 진단</text>
+<text x="1020" y="95" font-size="30" fill="#FFFFFF" text-anchor="end">${d}</text>
+<text x="60" y="290" font-size="46" fill="${M}">1만 가지 미래 가운데</text>
+<text x="60" y="400" font-size="96" font-weight="800" fill="${I}">10번 중 <tspan fill="${nOk >= 7 ? T : C}">${nOk}번</tspan></text>
+<text x="60" y="475" font-size="46" fill="${I}">기본생활비를 끝까지 낼 수 있어요</text>
+${dots}
+<text x="60" y="650" font-size="30" fill="${M}">${esc(bandTxt)}</text>
+${body}${ra}
+<line x1="60" y1="1230" x2="1020" y2="1230" stroke="#CBD7DB" stroke-width="2"/>
+<text x="60" y="1285" font-size="28" fill="${M}">계산 ID ${esc(b.calc_id)} · 모델 v${esc(b.model_version)} · 같은 입력이면 같은 결과</text>
+<text x="60" y="1325" font-size="26" fill="${M}">투자 권유가 아니라 같은 시나리오 위에서의 계산입니다</text></svg>`;
+}
+async function makeCard() {
+  const svg = cardSVG();
+  const img = new Image(); img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  await img.decode();
+  const cv = document.createElement("canvas"); cv.width = 1080; cv.height = 1350; cv.getContext("2d").drawImage(img, 0, 0);
+  const blob = await new Promise(r => cv.toBlob(r, "image/png"));
+  const name = `nohu-compass-${S.res.base.calc_id}.png`;
+  const file = new File([blob], name, { type: "image/png" });
+  S.res.card = { url: URL.createObjectURL(blob), name, file, canShare: !!(navigator.canShare && navigator.canShare({ files: [file] })) };
+  render();
+}
+function cardHTML() {
+  const c = S.res.card; if (!c) return "";
+  return `<img src="${c.url}" alt="결과 카드"><div class="row" style="margin-top:10px">
+    ${c.canShare ? `<button class="btn primary" data-go="doshare">보내기</button>` : ""}<a class="btn" href="${c.url}" download="${c.name}">저장</a></div>`;
+}
+
+/* ───────────────────── 그리기 · 이동 ───────────────────── */
+function render() {
+  const app = $("#app"), nav = $("#nav"), navin = $("#navin");
+  const y = window.scrollY;
+  if (S.view === "home") { app.innerHTML = home(); nav.hidden = true; }
+  else if (S.view === "step") {
+    app.innerHTML = stepView(); nav.hidden = false;
+    const last = S.step === STEPS.length - 1;
+    navin.innerHTML = `<button class="btn" data-go="back">${S.step === 0 ? "처음으로" : "이전"}</button>
+      <button class="btn primary" data-go="${last ? "calc" : "next"}">${last ? "이 조건으로 계산하기" : "다음"}</button>`;
+  } else {
+    const keepRR = $("#rr") ? +$("#rr").value : null;
+    app.innerHTML = resultView(); nav.hidden = false;
+    if (keepRR != null && $("#rr")) { $("#rr").value = keepRR; $("#rrv").textContent = fmt(keepRR, 1) + "%"; }
+    navin.innerHTML = `<button class="btn" data-go="edit">입력 수정</button><button class="btn" data-go="new">새 고객</button>`;
+  }
+  if (S.view === "result") window.scrollTo(0, y);
+}
+function goStep(k) { readInputs(); S.step = Math.max(0, Math.min(STEPS.length - 1, k)); render(); window.scrollTo(0, 0); }
+
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-go],[data-step],[data-seg],[data-toggle]"); if (!t) return;
+  if (t.dataset.step) {
+    const el = document.getElementById("f_" + t.dataset.step);
+    const v = parseFloat(String(el.value).replace(/,/g, "")) || 0;
+    const nv = clamp(el, v + (+t.dataset.d) * (+el.dataset.inc));
+    el.value = String(nv); S.f[t.dataset.step] = nv;
+    if (["debt", "post_inc"].includes(t.dataset.step)) { readInputs(); render(); }
+    return;
+  }
+  if (t.dataset.seg) { readInputs(); S.f[t.dataset.seg] = t.dataset.val; render(); return; }
+  if (t.dataset.toggle) { readInputs(); S.f[t.dataset.toggle] = !S.f[t.dataset.toggle]; render(); return; }
+  const g = t.dataset.go;
+  if (g === "start") { S.f = { ...BLANK }; S.view = "step"; S.step = 0; render(); window.scrollTo(0, 0); }
+  else if (g === "example") { S.f = { ...EXAMPLE }; S.view = "result"; render(); window.scrollTo(0, 0); runAll(); }
+  else if (g === "next") goStep(S.step + 1);
+  else if (g === "back") { if (S.step === 0) { readInputs(); S.view = "home"; render(); } else goStep(S.step - 1); }
+  else if (g === "avg") { readInputs(); const a = S.f.spouse ? AVG.couple : AVG.single; S.f.essential = a.essential; S.f.lifestyle = a.lifestyle; render(); }
+  else if (g === "calc") { readInputs(); S.view = "result"; render(); window.scrollTo(0, 0); runAll(); }
+  else if (g === "edit") { S.runId++; S.view = "step"; S.step = STEPS.length - 1; render(); window.scrollTo(0, 0); }
+  else if (g === "new") { S.runId++; S.f = { ...BLANK }; S.res = {}; S.view = "home"; render(); window.scrollTo(0, 0); }
+  else if (g === "rr") {
+    const r = +$("#rr").value; S.res.rr = r; S.res.rrProb = null; S.res.rrBusy = true; render();
+    try { const o = await calc("stock_return", { r: r / 100 }); S.res.rrProb = o.prob; } catch (err) { S.res.rrProb = null; }
+    S.res.rrBusy = false; render();
+  }
+  else if (g === "share") { t.disabled = true; try { await makeCard(); } catch (err) { t.disabled = false; } }
+  else if (g === "doshare") { const c = S.res.card; navigator.share({ files: [c.file], title: "노후나침반 진단" }).catch(() => {}); }
+});
+document.addEventListener("input", (e) => { if (e.target.id === "rr") $("#rrv").textContent = fmt(+e.target.value, 1) + "%"; });
+document.addEventListener("change", (e) => {
+  const el = e.target; if (!el.dataset || !el.dataset.key) return;
+  const v = clamp(el, parseFloat(String(el.value).replace(/,/g, ""))); el.value = String(v); S.f[el.dataset.key] = v;
+  if (["debt", "post_inc", "age", "retire_age"].includes(el.dataset.key)) render();
+});
+
+/* 설치형 앱(안드로이드)의 뒤로 가기 버튼: 앱을 바로 닫지 않고 이전 화면으로 */
+const CapApp = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+if (CapApp) CapApp.addListener("backButton", () => {
+  if (S.view === "step") { if (S.step === 0) { readInputs(); S.view = "home"; render(); } else goStep(S.step - 1); }
+  else if (S.view === "result") { S.runId++; S.view = "step"; S.step = STEPS.length - 1; render(); window.scrollTo(0, 0); }
+  else CapApp.exitApp();
+});
+
+render();
+if (!BUNDLED_PYODIDE && "serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>

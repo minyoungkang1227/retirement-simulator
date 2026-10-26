@@ -13,6 +13,7 @@
 It evaluates three goals — essential living, lifestyle (travel, hobbies) and legacy — across 10,000 economic and longevity scenarios, and compares **what changes bring you closer to your goals**. Results are comparisons on the same scenarios, not recommendations.
 
 - **Web app (no install, Korean UI):** https://retire-compass.streamlit.app
+- **Tablet app (light mode for advisor meetings):** https://minyoungkang1227.github.io/retirement-simulator/app/ — add to home screen; the same `retire_sim` engine runs inside the browser (Pyodide), so client inputs never leave the device (`docs/app/`, v50.2)
 - [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/minyoungkang1227/retirement-simulator/blob/main/notebooks/retire_sim_colab.ipynb) (analysis notebook)
 
 ## Motivation
