@@ -74,3 +74,37 @@ def breakdown(p: dict, paths: int = 3000) -> dict:
     none = advice.essential_prob(advice.run_case(p, allv))          # 셋 다 빼고 수익률·수명만 흔들리게
     return {"full": full, "rows": rows, "none": none, "tax20": float(s["20년 세금"]), "hi20": float(s["20년 건보료"]),
             "prop20": float(s["20년 보유세"])}
+
+
+#: (v50.9) 논의 중인 제도 개정 — 확정 전이라 기본 결과에는 넣지 않고 '바뀌면?'으로만 비교한다.
+#: (이름, 근거·상태, 엔진 변형). 상태가 바뀌면 여기만 고친다(확정되면 기본값으로 옮기고 이 목록에서 뺀다).
+POLICY_SCENARIOS = [
+    ("기초연금 부부감액 20% → 15%",
+     "정부안 — 2026-03 보건복지부 국회 보고. 소득 하위 40% 부부부터, 2027년까지 15%·2030년 10%",
+     {"basic_couple_cut": 0.15}),
+    ("기초연금 부부감액 폐지",
+     "국회 법안 — 2026년 10% → 2027년 5% → 2028년 폐지. 재정 2030년까지 약 16.7조 원 (국회예산정책처)",
+     {"basic_couple_cut": 0.0}),
+    ("상속세 일괄공제 5억 → 8억",
+     "국회 의원안 — 2025-11 기획재정위 조세소위 안건. 배우자공제 확대(5억 → 10억)는 부부가 모두 떠난 뒤 계산하는 이 모델에는 해당 없음",
+     {"tax": {"estate_lump": 80000}}),
+]
+
+
+def policy_scenarios(p: dict, paths: int | None = None) -> list:
+    """논의 중인 개정이 이 가구에 생기면 — 같은 난수 위에서 기본 결과와 비교.
+
+    반환: [{"name", "basis", "prob", "diff", "ci", "estate_tax_diff", "transfer_diff"}] — 금액은 중앙값 차이(오늘 가치, 만 원)."""
+    import numpy as np
+    from . import engine_tax, metrics
+    v0 = {"paths": paths} if paths else {}
+    base = advice.run_case(p, v0)
+    med = lambda r, k: float(np.nanmedian(r[k]))
+    out = []
+    for name, basis, v in POLICY_SCENARIOS:
+        r = advice.run_case(p, {**v0, **v})
+        c = metrics.compare(r, base)
+        out.append({"name": name, "basis": basis, "prob": advice.essential_prob(r), "diff": -c["차이"], "ci": c["±"],
+                    "estate_tax_diff": med(r, "estate_tax_real") - med(base, "estate_tax_real"),
+                    "transfer_diff": med(r, "transfer_real") - med(base, "transfer_real")})
+    return out

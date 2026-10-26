@@ -1674,3 +1674,19 @@ def test_stock_return_slider_matches_base_at_default():
     b = json.loads(lite.call("base", json.dumps(f)))["ok"]
     r = json.loads(lite.call("stock_return", json.dumps(f), json.dumps({"r": lite.STOCK_MEAN_NOMINAL})))["prob"]
     assert r == b
+
+
+def test_v50_9_dependent_and_policy_scenarios():
+    """(v50.9) 피부양자 입력은 건보료를 줄이고, 개정 시나리오는 맞는 방향으로 움직이며, 기본값은 결과를 바꾸지 않는다."""
+    import numpy as np
+    from retire_sim import advice, contrast
+    from retire_sim.inputs import defaults
+    p = defaults(); p.update(paths=1500)
+    base = advice.run_case(p)
+    assert advice.essential_prob(advice.run_case(p, {"tax": {"estate_lump": 50000}})) == advice.essential_prob(base)
+    assert advice.essential_prob(advice.run_case(p, {"basic_couple_cut": 0.20})) == advice.essential_prob(base)
+    dep = advice.run_case({**p, "hi_dependent": True})
+    assert dep["hi_y"].sum(1).mean() < base["hi_y"].sum(1).mean()
+    rows = {r["name"]: r for r in contrast.policy_scenarios(p, paths=1500)}
+    assert rows["기초연금 부부감액 폐지"]["diff"] >= rows["기초연금 부부감액 20% → 15%"]["diff"] >= 0
+    assert rows["상속세 일괄공제 5억 → 8억"]["estate_tax_diff"] <= 0

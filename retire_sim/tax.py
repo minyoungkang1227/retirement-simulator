@@ -60,6 +60,8 @@ class TaxConfig:
     nps_taxable_ratio: float = 0.75   # 국민연금 중 과세 대상 비율(2002년 이후 납입분) — 공단 원천징수 내역으로 확인
     div_yield: float = 0.02           # 주식 배당수익률(수익률 안에 포함, 과세계좌에서 과세)
     dependent_possible: bool = False  # 직장가입자 자녀 등의 피부양자 등록 가능 여부
+    estate_lump: float = 50000        # (v50.9) 상속세 일괄공제(만원) — 개정 논의 시나리오용(현행 5억)
+    estate_child_ded: float = 5000    # (v50.9) 자녀공제 1인당(만원, 현행 5,000만) — 기초공제 2억 + 자녀공제와 일괄공제 중 큰 쪽
     ownership: tuple = None           # 금융자산 명의 비율, None이면 균등
     overseas_share: float = 0.0       # 주식 중 해외주식 비율(양도차익 250만원 공제 후 22%)
     n_children: int = 2

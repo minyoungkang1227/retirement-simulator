@@ -49,6 +49,8 @@ DEFAULTS = dict(
     ret_plan="DC", tenure=0, s_tenure=0,
     # (v50) 은퇴 후 근로(월 만 원, 몇 살 전까지 — 본인·배우자), 전월세 보증금(억), 나이에 따른 지출 변화
     post_inc=0, post_until=0, s_post_inc=0, s_post_until=0, jeonse=0.0, spend_profile="lifestyle",
+    # (v50.9) 자녀 직장건보 피부양자로 등록할 수 있나 (소득 2,000만·재산 기준은 엔진이 해마다 판정)
+    hi_dependent=False,
 )
 
 
@@ -242,7 +244,8 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
     # (v47) 지출 경직성(lifestyle_floor=0.30)은 SimConfig 기본값이 됐다. '행동' 토글은 이제 패닉 매도만 더한다.
     beh = dict(panic_drop=0.25) if (v.get("behaviour", p.get("behaviour"))) else {}
     cfg = SimConfig(n_paths=v.get("paths", p["paths"]), seed=42, care=care,
-                    nps=NPSRules(basic_region=p.get("region", "대도시"), basic_on=not v.get("basic_off", False)),
+                    nps=NPSRules(basic_region=p.get("region", "대도시"), basic_on=not v.get("basic_off", False),
+                                 basic_couple_cut=v.get("basic_couple_cut", NPSRules.basic_couple_cut)),   # (v50.9) 개정 시나리오
                     care_real_growth=v.get("care_growth", p.get("care_growth", 1.0)) / 100, **beh)
 
     ekw = dict(v.get("eco", {}))
@@ -252,6 +255,7 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
     eco = EconomyV2.enhanced(**ekw) if p["enhanced"] else EconomyV2(**ekw)
 
     tkw = dict(overseas_share=p["overseas"] / 100, n_children=p["children"],
+               dependent_possible=bool(p.get("hi_dependent", False)),
                ownership=None if (p["own_equal"] or not p["spouse"]) else (1, 0))
     tkw.update(v.get("tax", {}))
 

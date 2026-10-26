@@ -688,7 +688,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             recent = sum(g for (tg, g, _) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
             recent_gt = sum(gt for (tg, _, gt) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
             fin_ded = np.where(fin_est <= 2000, fin_est, np.where(fin_est <= 10000, 2000, np.minimum(fin_est * .2, 20000)))
-            lump = max(50000, 20000 + 5000 * tc.n_children)
+            lump = max(tc.estate_lump, 20000 + tc.estate_child_ded * tc.n_children)
             et = np.maximum(progressive_estate(est + recent - lump - fin_ded) - recent_gt, 0)
             estate_real = np.where(died_all, (est - et) / cpi[:, t + 1], estate_real)
             etax_real = np.where(died_all, et / cpi[:, t + 1], etax_real)

@@ -347,6 +347,13 @@ def contrast_calc(p_json: str) -> dict:
 
 
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
+def policy_calc(p_json: str) -> list:
+    """(v50.9) 논의 중인 제도 개정이 이 가구에 생기면 — 계산은 contrast.policy_scenarios."""
+    from retire_sim import contrast
+    return contrast.policy_scenarios(json.loads(p_json))
+
+
+@st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def action_ranking(p_json: str):
     """효과가 큰 순서 — 계산은 라이브러리(advice)가 하고 여기서는 캐시만 한다."""
     return _action_ranking(json.loads(p_json))
@@ -423,6 +430,7 @@ def tier_assumptions(p: dict) -> list:
             out.append("퇴직금은 '마지막 월급 × 근속연수'(퇴직금·DB 제도) 기준, 은퇴 때 IRP로 받아 연금으로 수령")
     if t == 1:
         out.append("배우자는 은퇴 후 일하지 않음")
+        out.append("자녀 직장 건강보험의 피부양자로 올리지 않는다고 가정 (건보료를 직접 냄)")
     if t <= 2:
         out += ["여행·취미 지출은 75세부터 줄어 85세에 절반, 기본생활비는 평생 같음 (나이에 따른 지출 변화)",
                 "부모님 간병비 분담 없음",
@@ -710,12 +718,15 @@ if ss.step < len(STEPS) and not ss.get("done"):
             priv = c1.number_input("사적연금 연 수령액 (만 원)", 0, 10000, p["priv"], help="연금저축·IRP·연금보험")
             priv_start = c2.number_input("사적연금 시작 나이", 40, 90, p["priv_start"])
             priv_years = c3.number_input("받는 기간 (년)", 0, 50, p["priv_years"])
+            hdep = st.checkbox("은퇴 후 자녀의 직장 건강보험에 피부양자로 올릴 수 있어요", value=bool(p.get("hi_dependent", False)),
+                               help="자녀가 직장가입자면, 연금 등 소득이 연 2,000만 원 이하이고 재산 기준(재산세 과세표준 9억 이하, "
+                                    "5.4억을 넘으면 소득 1,000만 원 이하)을 맞추는 해에는 건강보험료를 내지 않아요. 기준을 맞추는지는 해마다 계산해서 판정해요.")
             back, nxt = nav(i, "s4")
             if nxt or back:
                 p.update(nps=int(nps), s_nps=int(s_nps), nps_start=int(nps_start), nps_auto=bool(auto), nps_years=int(ny), s_nps_years=int(sny), priv=int(priv),
                          priv_start=int(priv_start), priv_years=int(priv_years),
                          post_inc=int(pin), post_until=int(pun) if pin > 0 else 0,
-                         s_post_inc=int(spin), s_post_until=int(spun) if spin > 0 else 0); go(1 if nxt else -1)
+                         s_post_inc=int(spin), s_post_until=int(spun) if spin > 0 else 0, hi_dependent=bool(hdep)); go(1 if nxt else -1)
         elif i == 5:
             c1, c2 = st.columns(2)
             leg = c1.number_input("가족에게 남기고 싶은 금액 (억 원, 오늘 가치)", 0.0, 500.0, p["legacy"], step=0.5,
@@ -1291,6 +1302,32 @@ with tab2:
                     x=alt.X("x:Q", title=None), y=alt.Y("y:Q", title="기본생활 지킬 확률 (%)", scale=alt.Scale(domain=[0, 100])),
                     tooltip=["x", alt.Tooltip("y:Q", format=".0f")]).properties(height=200), width="stretch")
         st.caption("곡선이 가파를수록 그 조건이 결과에 큰 영향을 줍니다 (계산 속도를 위해 5천 개 시나리오 기준).")
+
+    # (v50.9) 논의 중인 법 개정 — 확정 전이라 기본 결과에는 넣지 않고, 바뀌면 이 가구에 어떻게 되는지만 비교
+    with st.expander("법이 바뀌면? — 국회·정부에서 논의 중인 개정"):
+        st.markdown("아직 **확정되지 않은** 개정이라 위 결과에는 넣지 않았어요. 확정되면 기본 계산에 반영합니다. "
+                    "같은 1만 가지 미래 위에서, 그 개정 하나만 바뀌었을 때를 비교해요.")
+        if st.button("이 가구에 미치는 영향 계산", key="policy_go"):
+            with st.spinner("개정안별로 계산 중"):
+                ss["policy_rows"] = (json.dumps(p, sort_keys=True), policy_calc(json.dumps(p, sort_keys=True)))
+        pr_ = ss.get("policy_rows")
+        if pr_ and pr_[0] == json.dumps(p, sort_keys=True):
+            body = ""
+            for r_ in pr_[1]:
+                d_ = r_["diff"] * 100
+                prob_txt = (f'{pct(s["기본생활 유지 확률"])} → <b>{pct(r_["prob"])}</b> '
+                            f'<span style="color:{TEAL if d_ > 0.05 else MUTED}">({d_:+.1f}%p)</span>' if abs(d_) >= 0.05 else "변화 없음")
+                money = ""
+                if r_["name"].startswith("상속세") and abs(r_["estate_tax_diff"]) < 100:
+                    money = f'<br><span style="font-size:.85rem;color:{MUTED}">이 가구는 상속세를 낼 만큼 재산이 크지 않아요</span>'
+                if abs(r_["estate_tax_diff"]) >= 100:
+                    money = f'<br><span style="font-size:.85rem">상속세 {r_["estate_tax_diff"] / 10000:+.2f}억 · 가족에게 가는 돈 {r_["transfer_diff"] / 10000:+.2f}억 (중간값)</span>'
+                body += (f'<tr><td><b>{r_["name"]}</b><br><span style="color:{MUTED};font-size:.85rem">{r_["basis"]}</span></td>'
+                         f'<td class="n">{prob_txt}{money}</td></tr>')
+            st.markdown(f'<table class="cmp"><tr><th>개정안</th><th style="text-align:right">기본생활 유지 확률</th></tr>{body}</table>',
+                        unsafe_allow_html=True)
+            st.caption("기초연금 부부감액은 정부안이 소득 하위 40% 부부부터 줄이지만, 여기서는 기초연금을 받는 모든 부부에게 적용했어요(받지 않는 가구는 변화 없음). "
+                       "상속세는 부부가 모두 떠난 뒤의 상속만 계산해서, 배우자공제 확대는 결과에 나타나지 않아요.")
 
     with st.expander("자주 쓰는 선택지 한 번에 비교"):
         rows = [("지금 계획", {})]
