@@ -106,6 +106,63 @@ def compare_chart_svg(rows_a, rows_b, label_a="지금 계획", label_b="바꾼 �
                       f"{label_a} vs {label_b} 비교", brand=b, **kw)
 
 
+def balance_svg(items, w=640, brand: Brand = None) -> str:
+    """(v50.5) 은퇴 후 한 달 살림을 '들어오는 돈 = 나가는 돈' 두 줄로.
+
+    폭포 그래프는 '누적해서 내려가는 막대'를 읽을 줄 알아야 해서, 처음 보는 사람이 무엇을 말하는지 몰랐다.
+    두 줄 막대는 길이가 같다는 것만 보면 된다 — 위 줄(연금 + 모아둔 돈에서 꺼낸 돈) = 아래 줄(생활비 + 세금 + …).
+    items 는 money_flow 의 [(항목, 연 금액)] 그대로 받고, 화면에는 한 달 금액(÷12)으로 보여준다."""
+    items = [(k, float(v) / 12) for k, v in items if abs(v) > 1e-9]
+    if not items:
+        return ""
+    b = brand or DEFAULT_BRAND
+    teal, coral, muted, ink = b.primary, b.accent, b.muted, b.ink
+    ins = [(k, v, teal, 1.0) for k, v in items if v > 0]
+    outs = [(k, -v, coral, op) for (k, v), op in zip([x for x in items if x[1] < 0], (1.0, .72, .52, .38, .3))]
+    tin, tout = sum(v for _, v, _, _ in ins), sum(v for _, v, _, _ in outs)
+    if tout > tin:
+        ins.append(("모아둔 돈에서 꺼냄", tout - tin, "#7FB8BE", 1.0))
+    elif tin > tout:
+        outs.append(("남아서 모음", tin - tout, "#CBD7DB", 1.0))
+    total = max(tin, tout)
+    x0, x1, bh = 118, w - 14, 54
+    sx = lambda v: v / total * (x1 - x0)
+    out = [f'<svg viewBox="0 0 {w} 200" width="100%" role="img" aria-label="은퇴 후 1년 돈의 흐름 (한 달 평균)">']
+    for row, (title, segs, y) in enumerate((("들어오는 돈", ins, 14), ("나가는 돈", outs, 104))):
+        out.append(f'<text x="0" y="{y + bh / 2 + 6}" font-size="16" font-weight="700" fill="{ink}">{title}</text>')
+        x, small = x0, []
+        for k, v, col, op in segs:
+            wd = sx(v)
+            out.append(f'<rect x="{x:.1f}" y="{y}" width="{max(wd - 2, 1):.1f}" height="{bh}" rx="6" fill="{col}" fill-opacity="{op}"/>')
+            txt = "#FFFFFF" if col in (teal, coral) and op > .6 else ink
+            if wd >= 92:
+                out.append(f'<text x="{x + 10:.1f}" y="{y + 23}" font-size="14" fill="{txt}">{_esc(k)}</text>')
+                out.append(f'<text x="{x + 10:.1f}" y="{y + 43}" font-size="16" font-weight="700" fill="{txt}">{v:,.0f}만</text>')
+            else:
+                small.append(f"{k} {v:,.0f}만")
+            x += wd
+        if small:
+            out.append(f'<text x="{x0}" y="{y + bh + 20}" font-size="13" fill="{muted}">작은 항목: {_esc(" · ".join(small))}</text>')
+    out.append("</svg>")
+    return "".join(out)
+
+
+def balance_sentence(items) -> str:
+    """balance_svg 와 같은 숫자로 쓴 한 문장 (HTML). 그림을 못 읽어도 이것만으로 뜻이 통하게."""
+    m = [(k, float(v) / 12) for k, v in items if abs(v) > 1e-9]
+    if not m:
+        return ""
+    tin = sum(v for _, v in m if v > 0); outs = [(k, -v) for k, v in m if v < 0]; tout = sum(v for _, v in outs)
+    inc = " · ".join(f"{k.replace(' 수입', '')} {v:,.0f}만 원" for k, v in m if v > 0)
+    spend = " · ".join(f"{k} {v:,.0f}만" for k, v in outs)
+    s = f"한 달 평균 <b>{inc}</b>이 들어오고, <b>{spend} 원</b>이 나가요. "
+    if tout > tin:
+        s += f'모자라는 <b style="color:#E2725B">{tout - tin:,.0f}만 원</b>은 모아둔 돈에서 꺼내 씁니다.'
+    else:
+        s += f"남는 <b>{tin - tout:,.0f}만 원</b>은 모아둔 돈에 더해집니다."
+    return s
+
+
 def waterfall_svg(items, w=640, h=250, pad=46, brand: Brand = None) -> str:
     """은퇴 후 평균 1년, 연금이 들어와 생활비·세금으로 빠지고 얼마가 모자라는지 보여주는 폭포 그래프.
 
@@ -234,9 +291,10 @@ def build(ctx: dict, brand: Brand = None) -> str:
   </div>
 </div>
 <div class="page pagebreak">
-  <h2>은퇴 후 1년, 돈은 이렇게 움직입니다</h2>
+  <h2>은퇴 후 한 달 살림 — 돈은 이렇게 움직입니다</h2>
+  <p>{ctx.get('flow_text', '')}</p>
   {ctx['flow_svg']}
-  <div class="note">연금으로 들어온 돈에서 생활비·세금·건강보험료가 빠지고, 모자라는 만큼을 모아둔 돈에서 꺼내 씁니다.</div>
+  <div class="note">두 막대의 길이는 같습니다 — 들어오는 돈(연금 + 모아둔 돈에서 꺼낸 돈)으로 나가는 돈(생활비·세금·건강보험료)을 메웁니다.</div>
   <h2>이 계산이 가정한 것</h2>
   <div class="note">{ctx['assumptions']}</div>
   <div class="foot">{_esc(b.disclaimer)}<br>{_esc(b.footer)}</div>

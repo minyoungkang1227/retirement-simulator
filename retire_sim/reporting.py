@@ -113,5 +113,5 @@ def build_report(p: dict, client_name: str = "", advisor: str = "", brand: Brand
                  else "연금만으로 생활비가 충분합니다"),
         band=band_txt, actions=acts,
         fan_svg=report.line_chart_svg(fan_rows(res), brand=b),
-        flow_svg=report.waterfall_svg(flow, brand=b),
+        flow_svg=report.balance_svg(flow, brand=b), flow_text=report.balance_sentence(flow),
         assumptions=assume), brand=b)
