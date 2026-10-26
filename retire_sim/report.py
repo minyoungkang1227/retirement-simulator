@@ -138,15 +138,15 @@ def waterfall_svg(items, w=640, h=250, pad=46, brand: Brand = None) -> str:
         ytop, ybot = sy(max(y0, y1)), sy(min(y0, y1))
         color = teal if v > 0 else coral
         if k == "모아둔 돈에서":
-            color = "#8A6FB0"
+            color = "#7FB8BE"   # 모아둔 돈 = 옅은 청록 (나이별 그래프의 '운이 좋을 때'와 같은 계열)
         out.append(f'<rect x="{x:.1f}" y="{ytop:.1f}" width="{bwid:.1f}" height="{max(ybot - ytop, 1.5):.1f}" fill="{color}" rx="3"/>')
-        out.append(f'<text x="{x + bwid / 2:.1f}" y="{ytop - 6:.1f}" font-size="11" fill="{b.ink}" text-anchor="middle">{v:+,.0f}</text>')
-        out.append(f'<text x="{x + bwid / 2:.1f}" y="{bot + 17:.1f}" font-size="11" fill="{muted}" text-anchor="middle">{_esc(k)}</text>')
+        out.append(f'<text x="{x + bwid / 2:.1f}" y="{ytop - 6:.1f}" font-size="13" fill="{b.ink}" text-anchor="middle">{v:+,.0f}</text>')
+        out.append(f'<text x="{x + bwid / 2:.1f}" y="{bot + 17:.1f}" font-size="13" fill="{muted}" text-anchor="middle">{_esc(k)}</text>')
         if i + 1 < len(bars):                              # 막대를 잇는 점선
             xr = x + bwid; y = sy(y1)
             out.append(f'<line x1="{xr:.1f}" y1="{y:.1f}" x2="{x + bw:.1f}" y2="{y:.1f}" '
                        f'stroke="{line}" stroke-width="1" stroke-dasharray="3 2"/>')
-    out.append(f'<text x="{pad}" y="{h - 8}" font-size="11" fill="{muted}">단위: 만 원 / 년 (오늘 돈 가치, 은퇴 후 평균)</text>')
+    out.append(f'<text x="{pad}" y="{h - 8}" font-size="12" fill="{muted}">단위: 만 원 / 년 (오늘 돈 가치, 은퇴 후 평균)</text>')
     out.append("</svg>")
     return "".join(out)
 
