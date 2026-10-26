@@ -206,7 +206,9 @@ def _term_years(pp: dict) -> int:
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def assumption_band(p_json: str) -> tuple:
     """가정(주식 위험프리미엄)을 ±1 표준오차만큼 움직였을 때의 범위. 계산은 advice 가 한다."""
-    return _assumption_band(json.loads(p_json))
+    pp = json.loads(p_json)
+    # (v51) 6번 다시 돌리는 계산이라 5,000개 미래로 — 범위 끝값이 ±1%p쯤 흔들리지만 '대략 이 정도 폭'을 보여주는 용도라 충분하다(13.4 → 약 10초)
+    return _assumption_band(pp, paths=min(pp["paths"], 5000))
 
 
 def run(p, v=None):
@@ -232,7 +234,7 @@ def solve_for(f, lo: float, hi: float, target: float, tol: float = 0.004, max_it
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def required_assets(p_json: str, target: float = 0.9):
     """기본생활 유지 확률이 target이 되는 금융자산(억 원) — 같은 시나리오 위에서 보간 탐색."""
-    p = json.loads(p_json); paths = min(p["paths"], 5000)
+    p = json.loads(p_json); paths = min(p["paths"], 3000)   # (v51) 역산은 6~8번 다시 돌려 3,000개로 — 금액이 몇 %만 달라진다
     f = lambda a: run(p, {"assets": a, "paths": paths})["s"]["기본생활 유지 확률"]
     return solve_for(f, 0.0, max(total_assets(p) * 3, 20.0), target)
 
@@ -240,7 +242,7 @@ def required_assets(p_json: str, target: float = 0.9):
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def required_saving(p_json: str, target: float = 0.9):
     """은퇴 전 월 저축액(만원) 역산: 기본생활 유지 확률이 target이 되는 최소 저축액."""
-    p = json.loads(p_json); paths = min(p["paths"], 5000)
+    p = json.loads(p_json); paths = min(p["paths"], 3000)   # (v51) 역산은 6~8번 다시 돌려 3,000개로 — 금액이 몇 %만 달라진다
     inc = (p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)) / 12
     if p.get("save_mode") == "소득의 %" and inc > 0:        # 저축률 방식: 소득과 함께 늘어나는 저축률을 역산 → 첫해 월액으로 표시
         f = lambda r: run(p, {"save_rate_override": r, "paths": paths})["s"]["기본생활 유지 확률"]
@@ -937,7 +939,8 @@ if _t < 3:
         st.caption("이 값들은 결과를 조금씩 바꿉니다. 영향이 큰 항목(은퇴 나이·생활비·여행 예산·금융자산·투자 성향·집·대출)은 "
                    "이미 직접 넣으셨습니다. 아래 '가정 범위'가 주식 수익률·수명·간병 같은 누구도 모르는 값의 영향을 따로 보여줍니다.")
 
-tab1, tab2, tab6, tab3, tab4, tab8, tab5, tab7 = st.tabs(["결과", "바꿔보기", "상품 추가", "위기 상황", "세금", "리포트", "이 계산에 대하여", "설명하기"])
+# (v51) 탭 8개 → 5개: 위기 상황·세금은 '바꿔보기' 안 펼침 칸(누를 때만 계산), 설명하기는 '이 계산에 대하여' 안 펼침 칸으로
+tab1, tab2, tab6, tab8, tab5 = st.tabs(["결과", "바꿔보기", "상품 추가", "리포트", "이 계산에 대하여"])
 
 with tab1:
     need, pension, gap = income_gap(p)
@@ -1200,25 +1203,6 @@ def whatif(rows):
 with tab2:
     pre = p["age"] < p["retire_age"]
     st.markdown("조건을 **직접 바꿔 보고** 결과가 어떻게 달라지는지 확인하세요. 같은 1만 가지 미래 위에서 비교하므로, 달라진 만큼이 순수하게 그 선택의 효과입니다.")
-    # 기본 생활을 10번 중 9번 지키려면 (첫 화면에서 옮겨 옴)
-    with st.spinner("계산 중"):
-        req, over = required_assets(json.dumps(p, sort_keys=True))
-        rs_, over_ = required_saving(json.dumps(p, sort_keys=True)) if p["age"] < p["retire_age"] else (None, None)
-    lines = []
-    if n_ok >= 9:
-        lines.append("지금 계획으로도 기본생활비를 <b>10번 중 9번 이상</b> 지킬 수 있어요.")
-    else:
-        if req is not None:
-            lines.append(f"모아둔 돈이 지금 {total_assets(p):.1f}억 원에서 <b>약 {req:.1f}억 원</b>이면 됩니다.")
-        if p["age"] < p["retire_age"]:
-            if rs_ is not None and rs_ > 0:
-                lines.append(f"또는 은퇴 전까지 매달 <b>약 {rs_:.0f}만 원</b>씩 모으면 됩니다 (지금 월 {monthly_saving(p):.0f}만 원).")
-            elif rs_ is None:
-                lines.append("저축만 늘려서는 어려워요. 은퇴 시기나 생활비도 함께 바꿔 보세요.")
-        if req is None and p["age"] >= p["retire_age"]:
-            lines.append("모아둔 돈만 늘려서는 어려워요. 생활비나 연금 받는 시기를 함께 바꿔 보세요.")
-        lines.append("👇 아래 <b>바꿔 볼 조건</b>에서 은퇴 시기·저축·생활비를 바꿔 보면 결과가 어떻게 달라지는지 바로 볼 수 있어요.")
-    st.markdown('<div class="tip"><b>기본 생활을 10번 중 9번 지키려면</b><br>' + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
     with st.expander("숫자 읽는 법", expanded=not ss.get("tweak")):
         st.markdown(f"""
 - **기본생활 지킬 확률 {pct(s["기본생활 유지 확률"])}** = 10번 중 약 {s["기본생활 유지 확률"] * 10:.0f}번은 생활비를 끝까지 낼 수 있다는 뜻이에요.
@@ -1329,22 +1313,6 @@ with tab2:
             st.caption("기초연금 부부감액은 정부안이 소득 하위 40% 부부부터 줄이지만, 여기서는 기초연금을 받는 모든 부부에게 적용했어요(받지 않는 가구는 변화 없음). "
                        "상속세는 부부가 모두 떠난 뒤의 상속만 계산해서, 배우자공제 확대는 결과에 나타나지 않아요.")
 
-    with st.expander("자주 쓰는 선택지 한 번에 비교"):
-        rows = [("지금 계획", {})]
-        if pre:
-            rows += [("은퇴 2년 늦추기", {"retire_delta": 2}), ("월 저축 50만 원 늘리기", {"saving_delta": 50})]
-        rows += [("생활비 10% 줄이기", {"spend_mult": 0.9})]
-        rows += [(f"투자 성향 {k}", {"stock_weight": w}) for k, w in PROFILES.items() if k != p["profile"]]
-        for a in (p["nps_start"] - 5, p["nps_start"] + 3):
-            if 60 <= a <= 70 and a >= min(p["age"], 70): rows.append((f"국민연금 {a}세부터", {"nps_start": a}))
-        if p["h_market"] > 0 and not p.get("rm_age") and not p.get("ds_age"):
-            young = min(p["age"], p["s_age"]) if p["spouse"] else p["age"]
-            if p["h_n"] == 1 and p["h_official"] <= 12:
-                for ra in sorted({max(young, 55, p["retire_age"] - (p["age"] - young)), max(young, 70)}):
-                    rows.append((f"주택연금 {ra}세 가입 (연소자 기준)", {"house": {"rm_age": int(ra)}}))
-            da = max(p["age"], 70)
-            rows.append((f"{da}세에 절반 가격 집으로 이사", {"house": {"ds_age": int(da), "ds_ratio": 50}}))
-        whatif(rows)
         if p["h_market"] > 0:
             st.caption("주택연금: 한국주택금융공사 2026-03 종신지급 정액형 월지급금 기준(명목 정액), 대출이자(금리+1.1%p)·보증료 0.75%가 쌓여 사망 시 집값에서 상환(집값 초과분은 청구 안 함), 재산세 25% 감면. "
                        "집 줄이기: 매도 비용 0.6%, 1주택 양도세(12억 초과분), 새 집 취득세 반영.")
@@ -1589,31 +1557,36 @@ with tab6:
             st.caption("특정 상품의 가입 권유가 아닙니다. 상품설명서의 숫자를 직접 넣어 비교해 보는 도구입니다. "
                        "실제 상품에는 사망보장·중도인출·연금전환 옵션 등 여기 반영되지 않은 조건이 있습니다.")
 
-with tab3:
+# (v51) 예전 '위기 상황'·'세금' 탭 — 처음 화면을 열 때 계산하지 않고, 펼쳐서 버튼을 누를 때만 계산한다(첫 결과 약 10초 단축)
+with tab2.expander("위기가 오면? — 주가 폭락·고물가·장수·간병"):
     st.markdown("정해진 위기가 온다고 가정했을 때 목표가 얼마나 흔들리는지 봅니다.")
-    ra = max(0, p["retire_age"] - p["age"])
-    whatif([("평소", {}),
-            ("은퇴 첫해 주가 −40%", {"eco": {"stock_shocks": {str(ra): -0.40}}}),
-            ("은퇴 10년 뒤 주가 −40%", {"eco": {"stock_shocks": {str(ra + 10): -0.40}}}),
-            ("3년 연속 물가 6%", {"eco": {"infl_shocks": {"0": .06, "1": .06, "2": .06}}}),
-            ("예상보다 오래 삶 (사망률 −20%)", {"q_mult": 0.8}),
-            ("간병 위험 2배", {"care_mult": 2.0})])
-    st.caption("같은 폭락도 은퇴 직후에 올수록 타격이 큽니다 (수익률 순서 위험).")
+    if st.button("위기 상황 계산", key="crisis_go"):
+        ra = max(0, p["retire_age"] - p["age"])
+        with st.spinner("위기 상황별로 계산 중"):
+            whatif([("평소", {}),
+                    ("은퇴 첫해 주가 −40%", {"eco": {"stock_shocks": {str(ra): -0.40}}}),
+                    ("은퇴 10년 뒤 주가 −40%", {"eco": {"stock_shocks": {str(ra + 10): -0.40}}}),
+                    ("3년 연속 물가 6%", {"eco": {"infl_shocks": {"0": .06, "1": .06, "2": .06}}}),
+                    ("예상보다 오래 삶 (사망률 −20%)", {"q_mult": 0.8}),
+                    ("간병 위험 2배", {"care_mult": 2.0})])
+        st.caption("같은 폭락도 은퇴 직후에 올수록 타격이 큽니다 (수익률 순서 위험).")
 
-with tab4:
+with tab2.expander("계좌·명의를 바꾸면? — 세금·건보료 (ISA·연금계좌·증여)"):
     st.markdown("계좌와 명의를 바꾸면 세금·건보료와 목표 달성이 어떻게 달라지는지 비교합니다.")
-    rows = [("지금 그대로", {}), ("ISA 활용", {"tax": {"use_isa": True}}), ("연금계좌 활용", {"tax": {"use_pension": True}}),
-            ("ISA + 연금계좌", {"tax": {"use_isa": True, "use_pension": True}})]
-    if p["children"] > 0:
-        rows.append(("+ 자녀당 5천만 원씩 10년마다 증여", {"tax": {"use_isa": True, "use_pension": True, "gift_per_child_10y": 5000}}))
-    out = []
-    for label, v in rows:
-        r = run(p, v); rs = r["s"]
-        out.append({"방법": label, "기본생활 유지": pct(rs["기본생활 유지 확률"]),
-                    "20년 세금+건보료": f"{(rs['20년 세금'] + rs['20년 건보료']) / 10000:.2f}억",
-                    "가족에게 남는 돈(중앙값)": f"{rs['가족 이전 총액(중앙값)'] / 10000:.1f}억"})
-    st.dataframe(pd.DataFrame(out), hide_index=True, width="stretch")
-    st.caption("증여는 가족에게 남는 돈을 늘리지만 내 기본생활 유지 확률을 낮출 수 있습니다.")
+    if st.button("세금 비교 계산", key="tax_go"):
+        rows = [("지금 그대로", {}), ("ISA 활용", {"tax": {"use_isa": True}}), ("연금계좌 활용", {"tax": {"use_pension": True}}),
+                ("ISA + 연금계좌", {"tax": {"use_isa": True, "use_pension": True}})]
+        if p["children"] > 0:
+            rows.append(("+ 자녀당 5천만 원씩 10년마다 증여", {"tax": {"use_isa": True, "use_pension": True, "gift_per_child_10y": 5000}}))
+        out = []
+        with st.spinner("방법별로 계산 중"):
+            for label, v in rows:
+                r = run(p, v); rs = r["s"]
+                out.append({"방법": label, "기본생활 유지": pct(rs["기본생활 유지 확률"]),
+                            "20년 세금+건보료": f"{(rs['20년 세금'] + rs['20년 건보료']) / 10000:.2f}억",
+                            "가족에게 남는 돈(중앙값)": f"{rs['가족 이전 총액(중앙값)'] / 10000:.1f}억"})
+        st.dataframe(pd.DataFrame(out), hide_index=True, width="stretch")
+        st.caption("증여는 가족에게 남는 돈을 늘리지만 내 기본생활 유지 확률을 낮출 수 있습니다.")
 
 with tab8:
     st.markdown("상담 결과를 **고객에게 남길 리포트**로 만듭니다. 내려받아 열고 브라우저에서 인쇄(Ctrl+P) → "
@@ -1743,9 +1716,11 @@ with tab5:
     st.caption("아직 하지 않은 것: 국민건강보험공단·국민연금공단 **모의계산기 화면값과의 대조**. "
                "건보료 재산분에는 자동차와 월세 환산분을 넣지 않았습니다(전월세 보증금은 v50부터 30% 반영). 법이 바뀌면 이 표도 함께 고칩니다.")
 
-with tab7:
+# ── 설계사용 (v51) 예전 '설명하기' 탭 — '이 계산에 대하여' 맨 아래 펼침 칸
+_advisor = tab5.expander("설계사용 — 고객에게 설명하실 때 (설명 순서·하지 말아야 할 말)")
+with _advisor:
     st.markdown("### 고객에게 설명하실 때")
-    st.markdown("이 화면은 **설명하시는 분을 위한 것**입니다. 고객께 보여 드리는 화면은 '결과' 탭입니다.")
+    st.markdown("이 칸은 **설명하시는 분을 위한 것**입니다. 고객께 보여 드리는 화면은 '결과' 탭입니다.")
 
     short = max(income_gap(p)[2], 0)
     _v_ok, _v_n, _ = verify.summary(verify_rows())
@@ -1793,7 +1768,7 @@ with tab7:
 
 **"주식 비중을 더 올리면 되지 않습니까?"**
 올리면 평균은 좋아지지만 **나쁜 쪽도 같이 나빠집니다.**
-'위기 상황' 탭에서 은퇴 직후 폭락을 보여 주시면 바로 이해하십니다.
+'바꿔보기' 탭의 '위기가 오면?'에서 은퇴 직후 폭락을 보여 주시면 바로 이해하십니다.
 
 #### 4) 보장설계를 설명하실 때
 

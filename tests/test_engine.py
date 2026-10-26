@@ -1077,7 +1077,7 @@ def test_explanation_tabs_avoid_jargon():
     import pathlib
     import re
     src = (pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py").read_text()
-    m = re.search(r"with tab5:(.*?)\nwith tab7:", src, re.S)
+    m = re.search(r"with tab5:(.*?)\n# ── 설계사용", src, re.S)
     assert m, "'이 계산에 대하여' 탭을 찾지 못했습니다"
     banned = ["확실성등가", "위험회피계수", "CRRA", "소득인정액", "연계감액", "코호트",
               "수지상등", "역선택", "기간프리미엄", "몬테카를로", "백분위"]
