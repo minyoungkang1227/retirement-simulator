@@ -155,7 +155,7 @@ def stock_return(p: dict, r_stock: float) -> float:
     """주식 기대수익률을 직접 정했을 때의 확률 — '다른 계산기처럼 정하면' 시연용 (웹 앱과 같은 방식)."""
     from .economy_v2 import EconomyV2
     erp = EconomyV2.enhanced().erp + (float(r_stock) - STOCK_MEAN_NOMINAL)
-    return _prob(p, {"eco": {"erp": erp}, "paths": min(p["paths"], SIDE_PATHS)})
+    return _prob(p, {"eco": {"erp": erp}})          # (v50.8) 기본 결과와 같은 경로 수 — 기본값이면 기본 결과와 똑같다
 
 
 def call(name: str, form_json: str, extra_json: str = "{}") -> str:

@@ -916,7 +916,7 @@ def test_app_tier_choice_and_tier1_flow():
     assert "에 은퇴하면 기본생활을" in md or "늦춰도 10번 중 9번에는" in md
     assert "10번 중 9번 지키려면 얼마가 더 필요할까" in md
     assert "<svg" in md and any(d.label.startswith("결과 카드") for d in at.get("download_button"))
-    assert any(e.label.startswith("수익률을 직접 정해서") for e in at.expander)
+    assert any(e.label.startswith("주식 수익률을 내가 정하면") for e in at.expander)
 
 
 def test_app_tier2_hides_expert_sections():
@@ -1663,3 +1663,14 @@ def test_contrast_simple_calculator_and_breakdown():
     assert d["세금·건강보험료"] > 0 and d["간병비 (장기요양)"] > 0, "비용을 빼면 확률이 올라야 한다"
     assert b["tax20"] > 0 and b["hi20"] > 0
     assert b["none"] >= b["full"] - 0.02
+
+
+def test_stock_return_slider_matches_base_at_default():
+    """(v50.8) 수익률 막대를 기본값 그대로 두면 위 결과와 똑같아야 한다 — 경로 수가 다르면 '−2%p'처럼 헷갈리는 차이가 났다."""
+    import json
+    from retire_sim import lite
+    from retire_sim.inputs import defaults
+    f = _lite_form(defaults()); f["paths"] = 2000
+    b = json.loads(lite.call("base", json.dumps(f)))["ok"]
+    r = json.loads(lite.call("stock_return", json.dumps(f), json.dumps({"r": lite.STOCK_MEAN_NOMINAL})))["prob"]
+    assert r == b

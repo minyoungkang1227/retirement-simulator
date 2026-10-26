@@ -285,7 +285,8 @@ def prob_at_stock_return(p_json: str, r_stock: float) -> float:
     다른 계산기처럼 수익률을 '정해서' 넣으면 결과가 얼마나 움직이는지 보여주기 위한 것 — 위험프리미엄만 옮긴다."""
     p = json.loads(p_json)
     erp = EconomyV2.enhanced().erp + (r_stock - STOCK_MEAN_NOMINAL)
-    return run(p, {"eco": {"erp": erp}, "paths": min(p["paths"], 3000)})["s"]["기본생활 유지 확률"]
+    # (v50.8) 위 결과와 같은 경로 수로 — 3,000개로 줄이면 기본값 그대로 눌러도 '−2%p'가 나와 헷갈렸다
+    return run(p, {"eco": {"erp": erp}})["s"]["기본생활 유지 확률"]
 
 
 def share_card_svg(p: dict, ok: float, band: tuple, ret_age, cid: str, life: float = None, legacy_ok: float = None) -> str:
@@ -1065,25 +1066,29 @@ with tab1:
     st.markdown(sec("이 숫자는 얼마나 확실한가"), unsafe_allow_html=True)
     with st.spinner("가정이 달라질 때의 폭을 계산 중"):
         lo, hi = assumption_band(json.dumps(p, sort_keys=True))
-    st.markdown(f'<div class="legend">주식 수익률·수명·간병 발생률은 아무도 정확히 모릅니다. 세 가정을 각각 추정 폭만큼만 움직여도 '
-                f'위 <b>{pct(ok)}</b>는 <b>{pct(lo)} ~ {pct(hi)}</b> 사이에서 움직입니다. '
-                f'계산을 더 많이 해도 이 폭은 줄지 않으니, <b>숫자 하나보다 선택을 바꿨을 때의 차이</b>를 보세요.</div>',
+    # (v50.8) '세 가정을 각각 추정 폭만큼 움직여도…'가 무슨 말인지 읽히지 않아, 무엇을 추정했고 그래서 어떻게 읽으면 되는지로 다시 썼다.
+    st.markdown(f'<p><b>{pct(ok)}</b>는 앞으로 <b>주식이 평균 얼마나 오를지, 얼마나 오래 살지, 간병이 얼마나 필요할지</b>를 '
+                f'과거 자료로 추정해서 나온 숫자예요. 이 추정이 그럴 법한 만큼 빗나가면 결과는 '
+                f'<b>{pct(lo)} ~ {pct(hi)}</b> 사이에서 움직여요.</p>'
+                f'<p>그래서 숫자 하나보다 <b>"은퇴를 2년 늦추면 몇 %p 오르나" 같은 차이</b>를 보는 게 더 믿을 만해요. '
+                f'차이는 같은 미래들 위에서 비교하기 때문에, 이런 추정이 빗나가도 거의 흔들리지 않아요.</p>',
                 unsafe_allow_html=True)
-    with st.expander("수익률을 직접 정해서 보면? (다른 계산기 방식)"):
-        st.markdown(f"많은 계산기는 기대수익률을 직접 넣게 합니다. 이 계산기는 묻지 않고 한국 자료로 추정합니다 — "
-                    f"주식 연 {STOCK_MEAN_NOMINAL * 100:.1f}%, 채권 3.2%, 물가 2.5%(명목, 보수 차감 후 평균). "
-                    "그 값을 바꾸면 결과가 얼마나 달라지는지 직접 확인해 보세요.")
+    with st.expander("주식 수익률을 내가 정하면 어떻게 될까? (다른 계산기 방식)"):
+        st.markdown(f"다른 계산기는 보통 \"기대수익률 몇 %\"를 직접 넣게 해요. 노후나침반은 묻지 않고 과거 자료로 정해요 — "
+                    f"주식 연 {STOCK_MEAN_NOMINAL * 100:.1f}%, 채권 연 3.2%, 물가 연 2.5%.\n\n"
+                    "아래 막대를 옮겨 다른 수익률을 넣어 보세요. **이 숫자 하나에 결과가 얼마나 크게 바뀌는지** 보이실 거예요. "
+                    "그래서 사람이 정하게 두지 않았어요.")
         with st.form("ret_form"):
-            r_in = st.slider("주식 기대수익률 (연, 명목)", 3.0, 15.0, float(STOCK_MEAN_NOMINAL * 100), step=0.5, format="%.1f%%")
-            go_r = st.form_submit_button("이 수익률로 계산")
+            r_in = st.slider("주식이 1년에 평균 몇 % 오른다고 볼까요", 3.0, 15.0, float(STOCK_MEAN_NOMINAL * 100), step=0.5, format="%.1f%%")
+            go_r = st.form_submit_button("이 수익률로 다시 계산")
         if go_r:
             with st.spinner("계산 중"):
                 pr_ = prob_at_stock_return(json.dumps(p, sort_keys=True), r_in / 100)
             diff_ = (pr_ - ok) * 100
-            st.markdown(f"주식 기대수익률 **{r_in:.1f}%** 라면 기본생활 유지 **{pct(pr_)}** — 이 계산기의 추정({pct(ok)})보다 "
-                        f"**{diff_:+.0f}%p**.")
-            st.caption(f"수익률은 결과를 가장 크게 바꾸는 가정인데, 사람이 고르면 낙관적으로 고르기 쉽습니다. "
-                       f"그래서 이 계산기는 KOSPI 2000~2026 자료와 해외 추정치를 합쳐 정하고, 그 불확실성을 위의 '{pct(lo)} ~ {pct(hi)}'로 따로 보여줍니다.")
+            st.markdown(f"주식이 해마다 평균 **{r_in:.1f}%** 오른다고 하면 → 기본생활을 지킬 가능성 **{pct(pr_)}** "
+                        f"(노후나침반 추정 {pct(ok)}보다 **{diff_:+.0f}%p**).")
+            st.caption("수익률을 높게 넣을수록 결과가 좋아 보이는데, 사람은 보통 낙관적으로 넣기 쉬워요. "
+                       "노후나침반은 KOSPI 2000~2026 자료와 해외 추정치를 합쳐 정했어요.")
 
     # 2-2) (v50.5) 은퇴 후 한 달 살림 — '들어오는 돈 = 나가는 돈' 두 줄 막대 (리포트와 같은 숫자)
     wf = report.balance_svg(base.get("flow") or [], brand=BRAND)
