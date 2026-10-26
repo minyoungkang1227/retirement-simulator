@@ -804,6 +804,50 @@ def test_app_runs_and_example_household_reaches_results():
     assert "지금 계획대로면" in md
 
 
+def test_existing_debt_v48():
+    """(v48) 이미 갚고 있는 대출: 없으면 결과가 그대로, 은퇴 전에 끝나면 영향 없음(소득에서 상환),
+    은퇴 후까지 남으면 기본생활 유지 확률이 내려가고 남은 원금은 상속재산에서 빠진다."""
+    from retire_sim import advice
+    from retire_sim.inputs import defaults
+    p = defaults(); p.update(paths=2000)
+    run = lambda **kw: advice.run_case({**p, **kw})
+    prob = lambda r: advice.essential_prob(r)
+    base = run()
+    assert prob(run(debt=0.0)) == prob(base)                       # 없으면 비트 단위로 같다
+    assert prob(run(debt=1.0, debt_years=5)) == prob(base)         # 52세 → 57세에 끝: 은퇴(60) 전 상환
+    long = run(debt=2.0, debt_years=20)                            # 72세까지 → 은퇴 후 12년 상환
+    assert prob(long) < prob(base) - 0.02
+    e0, e1 = np.nanmedian(base["estate_real"]), np.nanmedian(long["estate_real"])
+    assert e1 < e0
+
+
+def test_app_tier_choice_and_tier1_flow():
+    """(v48) 첫 화면에서 단계를 고르고, 1단계(빠른 진단)는 5화면 만에 결과까지 가며 가정한 값을 보여준다."""
+    at = _app(); at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    labels = [b.label for b in at.button]
+    assert {"1단계로 시작", "2단계로 시작", "3단계로 시작"} <= set(labels)
+    [b for b in at.button if b.label == "1단계로 시작"][0].click().run()
+    for _ in range(5):
+        [b for b in at.button if b.label in ("다음", "이 조건으로 계산하기")][-1].click().run()
+        assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert "지금 계획대로면" in md
+    assert any(b.label.startswith("더 정확하게") for b in at.button)
+
+
+def test_app_tier2_hides_expert_sections():
+    """(v48) 2단계는 대출·주택·큰 지출·사업만 묻고, 부모 부양·계산 가정·세금·명의는 3단계에서만 보인다."""
+    at = _app(); at.run()
+    [b for b in at.button if b.label == "2단계로 시작"][0].click().run()
+    for _ in range(7):
+        [b for b in at.button if b.label == "다음"][-1].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    exps = {e.label for e in at.expander}
+    assert "갚고 있는 대출" in exps and "주택" in exps
+    assert not any(x in exps for x in ("부모 부양 (더블케어)", "세금·명의·모델"))
+
+
 def test_app_whatif_draws_the_ab_comparison_chart():
     """'바꿔보기'에서 조건을 바꾸면 지금 계획 vs 바꾼 뒤 그래프가 그려진다."""
     at = _app(); at.run()

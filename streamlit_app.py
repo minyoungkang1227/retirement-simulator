@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 46          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 48          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -270,9 +270,190 @@ def go(delta):
 
 
 st.markdown(f"### 🧭 {BRAND.name}")
+
+# ─────────────────────────── (v48) 입력 단계 고르기 ───────────────────────────
+# 묻는 순서는 '안 물으면 결과가 얼마나 틀어지나'(민감도) × '본인이 답할 수 있나'로 정했다.
+#   1단계: 은퇴 나이·생활비·여행 예산·금융자산·투자 성향·집·대출·저축·국민연금 — 측정한 영향 상위 항목
+#   2단계: + 계좌별 자산, 소득, 연금 개시 나이·사적연금, 남길 자산, 주택 세부, 대출 금리, 큰 지출, 사업
+#   3단계: + 부모 간병 분담, 사별 후 생활비, 해외주식·명의, 생활비 보호 방식, 계산 가정
+TIERS = {
+    1: ("빠른 진단", "혼자서 3분",
+        "숫자 10개 남짓. 정확히 몰라도 대략으로 넣으면 됩니다. 나머지는 평균적인 가정으로 채우고, 무엇을 가정했는지 결과에 적어 드립니다."),
+    2: ("내 재산 반영", "내 재산을 잘 아는 분 · 10분",
+        "계좌별 자산, 소득과 저축, 연금 개시 나이, 주택·대출·큰 지출 계획까지 넣습니다. 세금과 건보료가 내 상황에 맞게 계산됩니다."),
+    3: ("전문가 상담", "설계사·전문가와 함께",
+        "부모님 간병 분담, 한 명만 남았을 때 생활비, 해외주식·명의, 생활비를 지키는 방식과 계산 가정까지 모두 조정합니다."),
+}
+TIER1_SPLIT = (0.3, 0.4, 0.3)        # 1단계: 금융자산 합계를 예금·투자·연금계좌로 나누는 비율(기본 가구와 같은 비율)
+
+
+def tier1_nps_years(age: int) -> int:
+    """1단계에서 국민연금을 소득으로 추정할 때의 '지금까지 가입 기간' 근사: 30세부터 그 기간의 80%를 납부."""
+    return int(round(max(0, min(age - 30, 35)) * 0.8))
+
+
+def tier_assumptions(p: dict) -> list:
+    """이 단계에서 묻지 않고 기본값으로 채운 항목 (결과 화면에 그대로 보여준다)."""
+    t = int(p.get("tier", 2)); out = []
+    if t == 1:
+        out += [f"금융자산을 예금 {TIER1_SPLIT[0]:.0%} · 주식·펀드 {TIER1_SPLIT[1]:.0%} · 연금계좌 {TIER1_SPLIT[2]:.0%}로 나눠 계산 (세금이 계좌마다 다릅니다)",
+                f"국민연금은 {p['nps_start']}세부터 받고, 사적연금은 연금계좌 적립금 외에는 없음",
+                "남길 자산 목표는 없음"]
+        if p.get("nps_auto"):
+            out.append(f"국민연금은 소득으로 추정 — 30세부터 가입해 그 기간의 80%를 냈다고 가정 (지금까지 {p.get('nps_years', 0)}년)")
+        if p.get("h_market", 0) > 0:
+            out.append("집은 1채, 공시가격은 시세의 69%, 보유 10년으로 가정")
+        if p.get("debt", 0) > 0:
+            out.append("대출 금리는 지금 시장금리 + 1.5%p 고정")
+    if t <= 2:
+        out += ["부모님 간병비 분담 없음",
+                f"한 명만 남았을 때 생활비는 부부일 때의 {p.get('survivor', 70)}%",
+                f"주식 중 해외주식 {p.get('overseas', 20)}%, 금융자산은 부부 균등 명의",
+                "간병비는 물가보다 연 1.0%p 더 오름 (2022~2026 장기요양 수가 실적)"]
+    return out
+
+
+if not ss.get("done") and not ss.get("tier_set"):
+    st.markdown('<p class="sub">내가 원하는 은퇴생활을 지키려면 무엇이 필요한지, 1만 가지 미래로 확인합니다. '
+                '<b>어떻게 시작할까요?</b></p>', unsafe_allow_html=True)
+    cols = st.columns(3)
+    for k, (name, who, desc) in TIERS.items():
+        with cols[k - 1]:
+            st.markdown(f'<div class="goal"><div class="h">{k}단계 · {name}</div><div class="t">{who}</div>'
+                        f'<div class="legend">{desc}</div></div>', unsafe_allow_html=True)
+            if st.button(f"{k}단계로 시작", key=f"tier{k}", type="primary" if k == 1 else "secondary", width="stretch"):
+                p["tier"] = k; ss.tier_set = True; ss.step = 0; st.rerun()
+    st.caption("어느 단계로 시작해도 나중에 결과 화면에서 더 자세한 단계로 넘어갈 수 있고, 이미 넣은 값은 그대로 이어집니다.")
+    st.divider()
+    st.markdown("**입력이 번거로우시면, 예시 가구로 먼저 결과를 보세요.**")
+    e1, e2 = st.columns(2)
+    if e1.button("60대 초반 부부 예시 보기", key="ex_60", width="stretch"):
+        ss.p.update(age=60, sex="M", retire_age=60, spouse=True, s_age=58, s_sex="F", deposit=1.5, invest=2.5, ret_acct=1.0, other=0.0,
+                    essential=250, lifestyle=1000, nps_auto=False, nps=110, s_nps=50, nps_start=65, priv=600, priv_start=60, priv_years=20,
+                    legacy=1.0, profile="균형형", salary=0, s_salary=0, saving=0, tier=2)
+        ss.tier_set = True; ss.done = True; st.rerun()
+    if e2.button("30대 맞벌이 부부 예시 보기", key="ex_30", width="stretch"):
+        ss.p.update(age=34, sex="M", retire_age=60, spouse=True, s_age=32, s_sex="F", deposit=0.4, invest=0.4, ret_acct=0.2, other=0.0,
+                    essential=300, lifestyle=1200, nps_auto=True, nps_years=5, s_nps_years=4, nps_start=65, priv=0, legacy=1.0, profile="균형형",
+                    salary=5000, s_salary=4000, save_mode="소득의 %", save_rate=15, wage_g=1.0, ret_contrib=True, tier=2)
+        ss.tier_set = True; ss.done = True; st.rerun()
+    with st.expander("저장해 둔 고객 불러오기"):
+        up = st.file_uploader("고객 파일(.json)", type="json", key="load_file", label_visibility="collapsed")
+        if up is not None and st.button("불러오기", key="load_go", width="stretch"):
+            try:
+                inp, cl, adv, warn = load_blob(up.getvalue())
+                ss.p.update(inp); ss["client"] = cl; ss["advisor"] = adv
+                if warn: ss["load_warn"] = warn
+                ss.tier_set = True; ss.done = True; st.rerun()
+            except Exception as ex:
+                st.error(f"불러오지 못했습니다: {ex}")
+    st.markdown('<p class="note">입력하신 정보는 계산에만 쓰이고 저장되지 않습니다.</p>', unsafe_allow_html=True)
+    st.stop()
+
+# ─────────────────────────── (v48) 1단계 · 빠른 진단 ───────────────────────────
+STEPS1 = ["나와 가족", "자산과 대출", "생활비", "연금과 투자", "최종 확인"]
+if not ss.get("done") and int(p.get("tier", 2)) == 1:
+    i = min(ss.step, len(STEPS1) - 1)
+    st.markdown(f'<p class="sub">1단계 · 빠른 진단 — {i + 1}/{len(STEPS1)} · {STEPS1[i]}</p>', unsafe_allow_html=True)
+    st.progress((i + 1) / len(STEPS1))
+
+    def go1(delta):
+        ss.step = max(0, min(len(STEPS1) - 1, i + delta)); st.rerun()
+
+    with st.form(f"t1step{i}"):
+        if i == 0:
+            c1, c2, c3 = st.columns(3)
+            age = c1.number_input("현재 나이", 20, 90, p["age"]); sex = c2.radio("성별", ["남", "여"], index=0 if p["sex"] == "M" else 1, horizontal=True)
+            retire = c3.number_input("은퇴 (예정) 나이", 40, 90, p["retire_age"], help="이미 은퇴했다면 현재 나이 이하로 입력")
+            spouse = st.checkbox("배우자와 함께", value=p["spouse"])
+            c1, c2 = st.columns(2)
+            s_age = c1.number_input("배우자 나이", 20, 90, p["s_age"]); s_sex = c2.radio("배우자 성별", ["남", "여"], index=0 if p["s_sex"] == "M" else 1, horizontal=True)
+            st.caption("은퇴 나이는 결과를 가장 크게 바꾸는 값입니다. 계획 중인 나이를 넣어 주세요.")
+            back, nxt = nav(i, "t1s0")
+            if nxt or back:
+                p.update(age=int(age), sex="M" if sex == "남" else "F", retire_age=int(retire), spouse=bool(spouse),
+                         s_age=int(s_age), s_sex="M" if s_sex == "남" else "F")
+                go1(1 if nxt else -1)
+        elif i == 1:
+            pre = p["age"] < p["retire_age"]
+            c1, c2 = st.columns(2)
+            tot = c1.number_input("금융자산 합계 (억 원)", 0.0, 500.0, float(round(total_assets(p), 1)), step=0.1,
+                                  help="예금·적금, 주식·펀드, 퇴직연금·연금저축을 모두 더한 금액. 집은 빼고요.")
+            sav = c2.number_input("한 달 저축·투자액 (만 원)", 0, 5000, int(p["saving"]) if pre else 0, step=10, disabled=not pre,
+                                  help="대출 상환하고 남는 돈 중 모으는 금액")
+            c1, c2, c3 = st.columns(3)
+            h_mkt = c1.number_input("사는 집 시세 (억 원, 없으면 0)", 0.0, 800.0, float(p["h_market"]), step=0.5)
+            dbt = c2.number_input("갚고 있는 대출 (억 원, 없으면 0)", 0.0, 100.0, float(p.get("debt", 0.0)), step=0.1,
+                                  help="주택담보대출·신용대출 남은 원금 합계")
+            dyr = c3.number_input("대출 남은 기간 (년)", 1, 40, int(p.get("debt_years", 10)))
+            st.caption("대출은 은퇴 전에는 월급에서 갚는다고 보고, **은퇴 후까지 남는 상환분만** 노후자금에서 나갑니다.")
+            back, nxt = nav(i, "t1s1")
+            if nxt or back:
+                p.update(deposit=round(tot * TIER1_SPLIT[0], 2), invest=round(tot * TIER1_SPLIT[1], 2),
+                         ret_acct=round(tot * TIER1_SPLIT[2], 2), other=0.0,
+                         saving=int(sav) if pre else 0, save_mode="월 금액",
+                         h_market=float(h_mkt), h_official=round(float(h_mkt) * 0.69, 1), h_n=1, h_years=10,
+                         debt=float(dbt), debt_years=int(dyr), debt_rate=0.0)
+                go1(1 if nxt else -1)
+        elif i == 2:
+            a_ess, a_life = avg_essential(p["spouse"]), avg_lifestyle(p["spouse"])
+            c1, c2 = st.columns(2)
+            ess = c1.number_input("월 기본생활비 (만 원)", 0, 5000, p["essential"], step=10,
+                                  help="식비·주거·공과금·통신·보험료, 그리고 평소 병원비·약값까지. 요양·간병비는 따로 계산합니다.")
+            life = c2.number_input("연 여행·취미 예산 (만 원)", 0, 50000, p["lifestyle"], step=100)
+            st.caption(f"잘 모르시면 평균값을 쓰셔도 됩니다 — {'부부' if p['spouse'] else '혼자'} 기준 기본생활비 월 **{a_ess}만 원**, "
+                       f"여행·취미 연 **{a_life:,}만 원** (국민연금연구원 2024년 조사). 생활비와 여행 예산은 결과를 크게 바꾸는 값이라 "
+                       "지금 쓰는 돈을 떠올려 넣으면 더 정확합니다.")
+            back, nxt = nav(i, "t1s2")
+            if nxt or back:
+                p.update(essential=int(ess), lifestyle=int(life)); go1(1 if nxt else -1)
+        elif i == 3:
+            st.markdown("**국민연금 예상 월액** — 모르면 0으로 두고 아래에 세전 연소득을 넣으면 추정합니다.")
+            c1, c2 = st.columns(2)
+            nps = c1.number_input("본인 (만 원/월)", 0, 500, 0 if p.get("nps_auto") else int(p["nps"]))
+            s_nps = c2.number_input("배우자 (만 원/월)", 0, 500, 0 if p.get("nps_auto") else int(p["s_nps"]), disabled=not p["spouse"])
+            c1, c2 = st.columns(2)
+            sal = c1.number_input("본인 세전 연소득 (만 원, 월액을 모를 때)", 0, 100000, int(p.get("salary", 0)), step=100)
+            ssal = c2.number_input("배우자 세전 연소득 (만 원)", 0, 100000, int(p.get("s_salary", 0)), step=100, disabled=not p["spouse"])
+            st.caption("정확한 값은 국민연금공단 '내 연금 알아보기'에서 볼 수 있습니다.")
+            prof = st.radio("투자 성향", list(PROFILES), index=list(PROFILES).index(p["profile"]), horizontal=True,
+                            captions=["주식 약 30%, 안정 위주", "주식 약 50%, 균형", "주식 약 70%, 장기 성장"])
+            back, nxt = nav(i, "t1s3")
+            if nxt or back:
+                auto = nps == 0 and sal > 0
+                p.update(nps_auto=auto, nps=int(nps), s_nps=int(s_nps), salary=float(sal), s_salary=float(ssal),
+                         nps_years=tier1_nps_years(p["age"]), s_nps_years=tier1_nps_years(p["s_age"]),
+                         nps_start=65, priv=0, legacy=0.0, profile=prof)
+                go1(1 if nxt else -1)
+        else:
+            need, pension, gap = income_gap(p)
+            c1, c2 = st.columns(2)
+            c1.markdown(f'<div class="card"><h4>나와 가족</h4><p>현재 {p["age"]}세 · {p["retire_age"]}세 은퇴'
+                        + (f'<br>배우자 {p["s_age"]}세' if p["spouse"] else '') + '</p></div>', unsafe_allow_html=True)
+            c2.markdown(f'<div class="card"><h4>자산과 대출</h4><p>금융자산 {total_assets(p):.1f}억 원'
+                        + (f'<br>월 {p["saving"]:.0f}만 원 저축' if p["age"] < p["retire_age"] else '')
+                        + (f'<br>집 시세 {p["h_market"]:.1f}억 원' if p["h_market"] > 0 else '')
+                        + (f'<br>대출 {p["debt"]:.1f}억 원 · {p["debt_years"]}년 남음' if p.get("debt", 0) > 0 else '') + '</p></div>',
+                        unsafe_allow_html=True)
+            c1.markdown(f'<div class="card"><h4>생활비</h4><p>기본생활 월 {p["essential"]}만 원<br>여행·취미 연 {p["lifestyle"]:,}만 원</p></div>',
+                        unsafe_allow_html=True)
+            c2.markdown(f'<div class="card"><h4>연금 · 성향</h4><p>연금 월 {pension:.0f}만 원'
+                        + (' (소득으로 추정)' if p.get("nps_auto") else '') + f'<br>투자 성향 {p["profile"]}</p></div>', unsafe_allow_html=True)
+            st.markdown("**묻지 않고 이렇게 가정했습니다**")
+            st.markdown("\n".join(f"- {a}" for a in tier_assumptions(p)))
+            c1, c2 = st.columns(2)
+            back = c1.form_submit_button("이전", width="stretch")
+            calc = c2.form_submit_button("이 조건으로 계산하기", type="primary", width="stretch")
+            if back: go1(-1)
+            if calc:
+                ss.done = True; st.rerun()
+    st.markdown('<p class="note">입력하신 정보는 계산에만 쓰이고 저장되지 않습니다.</p>', unsafe_allow_html=True)
+    st.stop()
+
 if ss.step < len(STEPS) and not ss.get("done"):
-    st.markdown(f'<p class="sub">내가 원하는 은퇴생활을 지키려면 무엇이 필요한지, 1만 가지 미래로 확인합니다. '
-                f'단계 {ss.step + 1}/{len(STEPS)} · {STEPS[ss.step]}</p>', unsafe_allow_html=True)
+    _t = int(p.get("tier", 2))
+    st.markdown(f'<p class="sub">{_t}단계 · {TIERS[_t][0]} — '
+                f'{ss.step + 1}/{len(STEPS)} · {STEPS[ss.step]}</p>', unsafe_allow_html=True)
     st.progress((ss.step + 1) / len(STEPS))
 
     with st.sidebar:
@@ -285,32 +466,11 @@ if ss.step < len(STEPS) and not ss.get("done"):
         if ss.step > 5: st.caption(f"남길 자산: {p['legacy']:.1f}억 원")
         if ss.step > 6: st.caption(f"투자 성향: {p['profile']}")
 
-    if ss.step == 0:
-        st.markdown("**입력이 번거로우시면, 예시 가구로 먼저 결과를 보세요.** 나중에 '입력 수정하기'로 내 정보로 바꿀 수 있어요.")
-        e1, e2 = st.columns(2)
-        if e1.button("60대 초반 부부 예시 보기", key="ex_60", width="stretch"):
-            ss.p.update(age=60, sex="M", retire_age=60, spouse=True, s_age=58, s_sex="F", deposit=1.5, invest=2.5, ret_acct=1.0, other=0.0,
-                        essential=250, lifestyle=1000, nps_auto=False, nps=110, s_nps=50, nps_start=65, priv=600, priv_start=60, priv_years=20,
-                        legacy=1.0, profile="균형형", salary=0, s_salary=0, saving=0)
-            ss.done = True; st.rerun()
-        if e2.button("30대 맞벌이 부부 예시 보기", key="ex_30", width="stretch"):
-            ss.p.update(age=34, sex="M", retire_age=60, spouse=True, s_age=32, s_sex="F", deposit=0.4, invest=0.4, ret_acct=0.2, other=0.0,
-                        essential=300, lifestyle=1200, nps_auto=True, nps_years=5, s_nps_years=4, nps_start=65, priv=0, legacy=1.0, profile="균형형",
-                        salary=5000, s_salary=4000, save_mode="소득의 %", save_rate=15, wage_g=1.0, ret_contrib=True)
-            ss.done = True; st.rerun()
-        with st.expander("저장해 둔 고객 불러오기"):
-            up = st.file_uploader("고객 파일(.json)", type="json", key="load_file", label_visibility="collapsed")
-            if up is not None and st.button("불러오기", key="load_go", width="stretch"):
-                try:
-                    inp, cl, adv, warn = load_blob(up.getvalue())
-                    ss.p.update(inp); ss["client"] = cl; ss["advisor"] = adv
-                    if warn: ss["load_warn"] = warn
-                    ss.done = True; st.rerun()
-                except Exception as ex:
-                    st.error(f"불러오지 못했습니다: {ex}")
-        st.divider()
+    if ss.step == 0 and st.button("← 단계 다시 고르기", key="retier"):
+        ss.tier_set = False; st.rerun()
 
     i = ss.step
+    tier = int(p.get("tier", 2))
     with st.form(f"step{i}"):
         if i == 0:
             c1, c2, c3 = st.columns(3)
@@ -356,7 +516,8 @@ if ss.step < len(STEPS) and not ss.get("done"):
                     p.update(saving=0, salary=0, s_salary=0, ret_contrib=False)
                 go(1 if nxt else -1)
         elif i == 2:
-            st.markdown("**꼭 필요한 기본생활비**는 얼마인가요? 식비·주거·의료·보험료 등 줄이기 어려운 지출입니다.")
+            st.markdown("**꼭 필요한 기본생활비**는 얼마인가요? 식비·주거·보험료, 평소 병원비·약값 등 줄이기 어려운 지출입니다. "
+                        "요양·간병비는 확률로 따로 계산하니 넣지 마세요.")
             a_ess = avg_essential(p["spouse"])
             ess = st.number_input("월 기본생활비 (만 원, 오늘 가치)", 0, 5000, p["essential"], step=10,
                                   help="재산세·건강보험료는 빼고 입력하세요 (따로 계산)")
@@ -415,6 +576,21 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 p.update(profile=prof); go(1 if nxt else -1)
         elif i == 7:
             st.markdown("해당되는 것만 입력하세요. 없으면 그대로 **다음**을 누르면 됩니다.")
+            # (v48) 단계별로 보이는 칸이 다르다. 안 보이는 칸은 지금 값(기본값 또는 앞에서 넣은 값)을 그대로 둔다.
+            region, rent = p.get("region", "대도시"), p["rent"]
+            h_off, h_mkt, h_n, h_joint, h_years, h_hi = p["h_official"], p["h_market"], p["h_n"], p["h_joint"], p["h_years"], p["h_hi"]
+            rm_age, ds_age, ds_ratio = p.get("rm_age", 0), p.get("ds_age", 0), p.get("ds_ratio", 50)
+            new_par, care_growth, behaviour = p.get("parents") or [], p.get("care_growth", 1.0), p.get("behaviour", False)
+            overseas, own_equal, survivor = p["overseas"], p["own_equal"], p["survivor"]
+            floor, enhanced, paths = p.get("floor", "계리적"), p["enhanced"], p["paths"]
+            dbt, drate, dyr = p.get("debt", 0.0), p.get("debt_rate", 0.0), p.get("debt_years", 10)
+            with st.expander("갚고 있는 대출", expanded=p.get("debt", 0) > 0):
+                c1, c2, c3 = st.columns(3)
+                dbt = c1.number_input("남은 원금 (억 원)", 0.0, 100.0, float(dbt), step=0.1, help="주택담보대출·신용대출 합계")
+                drate = c2.number_input("금리 (%/년, 0 = 시장금리+1.5%p)", 0.0, 20.0, float(drate), step=0.1)
+                dyr = c3.number_input("남은 기간 (년)", 1, 40, int(dyr))
+                st.caption("원리금균등 상환으로 계산합니다. 은퇴 전에는 월급에서 갚는다고 보고(입력한 저축액은 상환 후 금액), "
+                           "은퇴 후까지 남는 상환분만 노후자금에서 나갑니다. 남은 원금은 상속재산에서 뺍니다.")
             with st.expander("주택", expanded=p["h_official"] > 0):
                 c1, c2, c3 = st.columns(3)
                 h_off = c1.number_input("공시가격 합계 (억 원)", 0.0, 500.0, p["h_official"], step=0.5)
@@ -432,40 +608,44 @@ if ss.step < len(STEPS) and not ss.get("done"):
                                   help="기초연금 재산 공제가 지역마다 다릅니다. 대도시 1억 3,500만 원, 중소도시 8,500만 원, 농어촌 7,250만 원까지 재산에서 빼고 계산합니다. "
                                        "대도시 = 특별시·광역시, 중소도시 = 도의 '시', 농어촌 = 도의 '군'입니다.")
                 rent = st.number_input("연 임대수입 (만 원)", 0, 100000, p["rent"])
-                st.markdown("주택 활용 계획 (선택)")
-                c1, c2, c3 = st.columns(3)
-                rm_age = c1.number_input("주택연금 가입 나이 (0 = 안 함)", 0, 90, p.get("rm_age", 0),
-                                         help="부부 중 나이 적은 사람 기준, 55세 이상·공시가격 12억 이하 1주택")
-                ds_age = c2.number_input("집 줄이기 나이 (0 = 안 함)", 0, 90, p.get("ds_age", 0), help="본인 나이 기준, 팔고 작은 집으로 이사")
-                ds_ratio = c3.slider("새 집 가격 (기존 대비 %)", 20, 90, p.get("ds_ratio", 50), step=10)
-            with st.expander("부모 부양 (더블케어)", expanded=bool(p.get("parents"))):
-                st.caption("부모님이 나중에 간병이 필요해질 가능성을 확률로 계산합니다. 자녀 교육비와 겹치는 시기가 가장 빠듯합니다. "
-                           "분담 비율은 형제가 똑같이 나눠 내면 1/형제 수입니다. 부모님 생활비는 넣지 않고 간병비만 봅니다.")
-                old_par = (p.get("parents") or []) + [{}] * 4
-                new_par = []
-                for j in range(4):
-                    d0 = old_par[j] or {}
-                    c1, c2, c3 = st.columns([1, 1, 1.4])
-                    who = c1.selectbox(f"{j + 1}", ["없음", "아버지", "어머니", "장인", "장모"],
-                                       index=(["없음", "아버지", "어머니", "장인", "장모"].index(d0["who"])
-                                              if d0.get("who") in ("아버지", "어머니", "장인", "장모") else 0),
-                                       key=f"par_who{j}", label_visibility="collapsed" if j else "visible")
-                    p_age = c2.number_input("나이", 40, 110, int(d0.get("age", 78)), key=f"par_age{j}",
-                                            label_visibility="collapsed" if j else "visible")
-                    p_sh = c3.slider("내가 대는 몫 (%)", 0, 100, int(float(d0.get("share", 0.5)) * 100), step=10,
-                                     key=f"par_sh{j}", label_visibility="collapsed" if j else "visible")
-                    if who != "없음" and p_sh > 0:
-                        new_par.append(dict(who=who, age=int(p_age), sex="M" if who in ("아버지", "장인") else "F",
-                                            share=p_sh / 100))
-            with st.expander("계산 가정 (바꾸지 않아도 됩니다)"):
-                care_growth = st.slider("간병비가 물가보다 더 오르는 정도 (%p/년)", -1.0, 3.0,
-                                        float(p.get("care_growth", 1.0)), step=0.5,
-                                        help="간병은 사람이 하는 일이라 비용이 임금을 따라갑니다. "
-                                             "장기요양 수가는 2022~2026년 평균 4.05%, 같은 기간 물가는 3.02%로 연 1.0%p 빨랐습니다.")
-                behaviour = st.checkbox("폭락장에 주식을 줄인다고 가정 (패닉 매도 · 지출을 바로 못 줄이는 경직성은 기본 반영)",
-                                        value=bool(p.get("behaviour")),
-                                        help="켜면 주가가 25% 빠진 다음 해에 주식을 절반으로 줄이고 천천히 돌아오며, "
-                                             "여행·취미 지출을 한 해에 30%까지만 줄입니다. 끄면 규칙대로 움직이는 가구가 됩니다.")
+                if tier >= 3:
+                    st.markdown("주택 활용 계획 (선택)")
+                    c1, c2, c3 = st.columns(3)
+                    rm_age = c1.number_input("주택연금 가입 나이 (0 = 안 함)", 0, 90, p.get("rm_age", 0),
+                                           help="부부 중 나이 적은 사람 기준, 55세 이상·공시가격 12억 이하 1주택")
+                    ds_age = c2.number_input("집 줄이기 나이 (0 = 안 함)", 0, 90, p.get("ds_age", 0), help="본인 나이 기준, 팔고 작은 집으로 이사")
+                    ds_ratio = c3.slider("새 집 가격 (기존 대비 %)", 20, 90, p.get("ds_ratio", 50), step=10)
+                else:
+                    st.caption("주택연금·집 줄이기는 결과 화면 '바꿔보기'에서 비교할 수 있습니다.")
+            if tier >= 3:
+                with st.expander("부모 부양 (더블케어)", expanded=bool(p.get("parents"))):
+                    st.caption("부모님이 나중에 간병이 필요해질 가능성을 확률로 계산합니다. 자녀 교육비와 겹치는 시기가 가장 빠듯합니다. "
+                               "분담 비율은 형제가 똑같이 나눠 내면 1/형제 수입니다. 부모님 생활비는 넣지 않고 간병비만 봅니다.")
+                    old_par = (p.get("parents") or []) + [{}] * 4
+                    new_par = []
+                    for j in range(4):
+                        d0 = old_par[j] or {}
+                        c1, c2, c3 = st.columns([1, 1, 1.4])
+                        who = c1.selectbox(f"{j + 1}", ["없음", "아버지", "어머니", "장인", "장모"],
+                                           index=(["없음", "아버지", "어머니", "장인", "장모"].index(d0["who"])
+                                                  if d0.get("who") in ("아버지", "어머니", "장인", "장모") else 0),
+                                           key=f"par_who{j}", label_visibility="collapsed" if j else "visible")
+                        p_age = c2.number_input("나이", 40, 110, int(d0.get("age", 78)), key=f"par_age{j}",
+                                                label_visibility="collapsed" if j else "visible")
+                        p_sh = c3.slider("내가 대는 몫 (%)", 0, 100, int(float(d0.get("share", 0.5)) * 100), step=10,
+                                         key=f"par_sh{j}", label_visibility="collapsed" if j else "visible")
+                        if who != "없음" and p_sh > 0:
+                            new_par.append(dict(who=who, age=int(p_age), sex="M" if who in ("아버지", "장인") else "F",
+                                                share=p_sh / 100))
+                with st.expander("계산 가정 (바꾸지 않아도 됩니다)"):
+                    care_growth = st.slider("간병비가 물가보다 더 오르는 정도 (%p/년)", -1.0, 3.0,
+                                            float(p.get("care_growth", 1.0)), step=0.5,
+                                            help="간병은 사람이 하는 일이라 비용이 임금을 따라갑니다. "
+                                                 "장기요양 수가는 2022~2026년 평균 4.05%, 같은 기간 물가는 3.02%로 연 1.0%p 빨랐습니다.")
+                    behaviour = st.checkbox("폭락장에 주식을 줄인다고 가정 (패닉 매도 · 지출을 바로 못 줄이는 경직성은 기본 반영)",
+                                            value=bool(p.get("behaviour")),
+                                            help="켜면 주가가 25% 빠진 다음 해에 주식을 절반으로 줄이고 천천히 돌아오며, "
+                                                 "여행·취미 지출을 한 해에 30%까지만 줄입니다. 끄면 규칙대로 움직이는 가구가 됩니다.")
             with st.expander("큰 지출 계획 (자녀 교육비·결혼 자금·주택 구입 등)", expanded=bool(p.get("events"))):
                 st.caption("나이는 본인 기준, 금액은 오늘 가치(만 원). 주택 구입은 집값 전체, 나머지는 1년 금액 × 기간(년).")
                 kinds = ["없음", "자녀 교육비", "결혼·독립 지원", "주택 구입", "기타"]
@@ -494,36 +674,38 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 biz = c1.number_input("연 사업소득 (만 원)", 0, 100000, p["biz"])
                 biz_until = c2.number_input("그만둘 나이", 40, 90, p["biz_until"])
                 biz_work = c3.checkbox("직원 있음 (직장가입자)", value=p["biz_work"])
-            with st.expander("세금·명의·모델"):
-                c1, c2 = st.columns(2)
-                overseas = c1.slider("주식 중 해외주식 (%)", 0, 100, p["overseas"], step=10)
-                own_equal = c2.checkbox("금융자산 부부 균등 명의", value=p["own_equal"])
-                survivor = st.slider("한 명만 남았을 때 생활비 (%)", 40, 100, p["survivor"], step=5)
-                st.markdown("**생활비를 지키는 방식**")
-                st.caption("통장에 '이만큼은 꼭 남겨둬야 기본생활비를 끝까지 낼 수 있다'는 선을 정하고, "
-                           "그보다 돈이 많을 때만 여행·취미에 씁니다. 이 선을 얼마나 넉넉하게 잡을지 고르세요.")
-                fopts = {"균형형 (추천)": "계리적", "안심형": "보수적"}
-                fsel = st.radio("생활비를 지키는 방식", list(fopts), index=0 if p.get("floor", "계리적") == "계리적" else 1,
-                                horizontal=True, label_visibility="collapsed",
-                                captions=["실제로 몇 살까지 살 가능성이 있는지, 국민연금을 언제부터 받는지 따져서 남겨둘 돈을 정합니다. "
-                                          "생활비를 지키면서 여행도 적당히 즐길 수 있습니다.",
-                                          "'95세까지 꼭 산다, 지금 모자란 돈이 평생 계속된다'고 넉넉하게 잡습니다. "
-                                          "생활비는 더 안전하지만, 여행·취미에 쓸 돈은 많이 줄어듭니다."])
-                floor = fopts[fsel]
-                st.caption("어떤 걸 고를까요? 여행도 즐기고 싶다면 **균형형**, 여행을 줄이더라도 생활비만큼은 꼭 지키고 싶다면 **안심형**.")
-                st.markdown("**계산 방식**")
-                enhanced = st.toggle("현실 반영 계산 (추천)", value=p["enhanced"],
-                                     help="켜두시면 됩니다. 수수료, 가끔 오는 주가 폭락, 물가와 금리가 함께 움직이는 점, 요양·간병 비용, "
-                                          "통계청·한국은행 실제 자료까지 모두 반영합니다. 끄면 이런 요소가 빠져 결과가 실제보다 좋게 나옵니다.")
-                st.caption("켜두시면 됩니다. 끄면 수수료·주가 폭락·간병비 같은 현실 요소가 빠져서 결과가 실제보다 좋게 나옵니다 (예전 결과와 비교할 때만 사용).")
-                paths = st.select_slider("시나리오 수", [2000, 5000, 10000], value=p["paths"])
+            if tier >= 3:
+                with st.expander("세금·명의·모델"):
+                    c1, c2 = st.columns(2)
+                    overseas = c1.slider("주식 중 해외주식 (%)", 0, 100, p["overseas"], step=10)
+                    own_equal = c2.checkbox("금융자산 부부 균등 명의", value=p["own_equal"])
+                    survivor = st.slider("한 명만 남았을 때 생활비 (%)", 40, 100, p["survivor"], step=5)
+                    st.markdown("**생활비를 지키는 방식**")
+                    st.caption("통장에 '이만큼은 꼭 남겨둬야 기본생활비를 끝까지 낼 수 있다'는 선을 정하고, "
+                               "그보다 돈이 많을 때만 여행·취미에 씁니다. 이 선을 얼마나 넉넉하게 잡을지 고르세요.")
+                    fopts = {"균형형 (추천)": "계리적", "안심형": "보수적"}
+                    fsel = st.radio("생활비를 지키는 방식", list(fopts), index=0 if p.get("floor", "계리적") == "계리적" else 1,
+                                    horizontal=True, label_visibility="collapsed",
+                                    captions=["실제로 몇 살까지 살 가능성이 있는지, 국민연금을 언제부터 받는지 따져서 남겨둘 돈을 정합니다. "
+                                              "생활비를 지키면서 여행도 적당히 즐길 수 있습니다.",
+                                              "'95세까지 꼭 산다, 지금 모자란 돈이 평생 계속된다'고 넉넉하게 잡습니다. "
+                                              "생활비는 더 안전하지만, 여행·취미에 쓸 돈은 많이 줄어듭니다."])
+                    floor = fopts[fsel]
+                    st.caption("어떤 걸 고를까요? 여행도 즐기고 싶다면 **균형형**, 여행을 줄이더라도 생활비만큼은 꼭 지키고 싶다면 **안심형**.")
+                    st.markdown("**계산 방식**")
+                    enhanced = st.toggle("현실 반영 계산 (추천)", value=p["enhanced"],
+                                         help="켜두시면 됩니다. 수수료, 가끔 오는 주가 폭락, 물가와 금리가 함께 움직이는 점, 요양·간병 비용, "
+                                              "통계청·한국은행 실제 자료까지 모두 반영합니다. 끄면 이런 요소가 빠져 결과가 실제보다 좋게 나옵니다.")
+                    st.caption("켜두시면 됩니다. 끄면 수수료·주가 폭락·간병비 같은 현실 요소가 빠져서 결과가 실제보다 좋게 나옵니다 (예전 결과와 비교할 때만 사용).")
+                    paths = st.select_slider("시나리오 수", [2000, 5000, 10000], value=p["paths"])
             back, nxt = nav(i, "s7")
             if nxt or back:
                 p.update(parents=new_par, care_growth=float(care_growth), behaviour=bool(behaviour),
                          region=region, h_official=h_off, h_market=h_mkt, h_n=int(h_n), h_joint=bool(h_joint), h_years=int(h_years),
                          h_hi=float(h_hi), rent=int(rent), rm_age=int(rm_age), ds_age=int(ds_age), ds_ratio=int(ds_ratio), events=new_ev, ev_ltv=int(ltv), ev_loan_years=int(lyr), ev_jeonse=float(jb), ev_rent=int(er), biz=int(biz), biz_until=int(biz_until), biz_work=bool(biz_work),
                          overseas=int(overseas), own_equal=bool(own_equal), survivor=int(survivor), floor=floor,
-                         enhanced=bool(enhanced), paths=int(paths)); go(1 if nxt else -1)
+                         enhanced=bool(enhanced), paths=int(paths),
+                         debt=float(dbt), debt_rate=float(drate), debt_years=int(dyr)); go(1 if nxt else -1)
         else:
             need, pension, gap = income_gap(p)
             st.markdown("앞에서 입력한 내용입니다. 이후 계산은 모두 이 가정을 바탕으로 합니다.")
@@ -533,14 +715,18 @@ if ss.step < len(STEPS) and not ss.get("done"):
             c2.markdown(f'<div class="card"><h4>자산</h4><p>금융자산 {total_assets(p):.1f}억 원'
                         + (f'<br>은퇴 전 월 {monthly_saving(p):.0f}만 원 저축' if p["age"] < p["retire_age"] else '')
                         + ('<br>퇴직연금 적립 중' if p.get("ret_contrib") and p["age"] < p["retire_age"] else '')
-                        + (f'<br>주택 시세 {p["h_market"]:.1f}억 원' if p["h_market"] > 0 else '') + '</p></div>', unsafe_allow_html=True)
-            ev_txt = "".join(f'<br>{e_["age"]}세 {e_["kind"]} {e_["amount"]:,.0f}만 원' + ("" if e_["kind"] == "주택 구입" else f' × {e_["years"]}년') for e_ in p.get("events", []))
+                        + (f'<br>주택 시세 {p["h_market"]:.1f}억 원' if p["h_market"] > 0 else '')
+                        + (f'<br>대출 {p["debt"]:.1f}억 원 · {p["debt_years"]}년 남음' if p.get("debt", 0) > 0 else '') + '</p></div>', unsafe_allow_html=True)
+            ev_txt ="".join(f'<br>{e_["age"]}세 {e_["kind"]} {e_["amount"]:,.0f}만 원' + ("" if e_["kind"] == "주택 구입" else f' × {e_["years"]}년') for e_ in p.get("events", []))
             c1.markdown(f'<div class="card"><h4>목표</h4><p>기본생활: 월 {p["essential"]}만 원<br>여행·취미: 연 {p["lifestyle"]:,}만 원'
                         f'<br>남길 자산: {p["legacy"]:.1f}억 원' + (f'<br><b>큰 지출</b>{ev_txt}' if ev_txt else '') + '</p></div>', unsafe_allow_html=True)
             c2.markdown(f'<div class="card"><h4>소득 · 성향</h4><p>연금: 월 {pension:.0f}만 원 ({p["nps_start"]}세부터'
                         + (', 국민연금 자동 추정' if p.get("nps_auto") else '') + ')'
                         + (f'<br>근로소득: 연 {(p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)):,.0f}만 원' if p["age"] < p["retire_age"] and (p.get("salary", 0) or p.get("s_salary", 0)) else '')
                         + f'<br>투자 성향: {p["profile"]}</p></div>', unsafe_allow_html=True)
+            if tier <= 2:
+                st.markdown("**묻지 않고 이렇게 가정했습니다** (3단계에서 바꿀 수 있습니다)")
+                st.markdown("\n".join(f"- {a}" for a in tier_assumptions(p)))
             st.markdown(f"**이 조건으로 계산해 볼까요?** 투자자산이 매달 메워야 할 금액은 약 **{max(gap, 0):.0f}만 원**입니다.")
             c1, c2 = st.columns(2)
             back = c1.form_submit_button("이전", width="stretch")
@@ -555,8 +741,18 @@ if ss.step < len(STEPS) and not ss.get("done"):
 with st.spinner("1만 가지 미래를 계산하는 중"):
     base = run(p)
 s = base["s"]
-if st.button("입력 수정하기"):
-    ss.done = False; ss.step = len(STEPS) - 1; st.rerun()
+_t = int(p.get("tier", 2))
+c_ed, c_up = st.columns(2)
+if c_ed.button("입력 수정하기", width="stretch"):
+    ss.done = False; ss.step = (len(STEPS1) if _t == 1 else len(STEPS)) - 1; st.rerun()
+if _t < 3 and c_up.button(f"더 정확하게 — {_t + 1}단계 · {TIERS[_t + 1][0]}로", width="stretch",
+                          help="지금까지 넣은 값은 그대로 두고, 이 단계에서 가정으로 채운 항목을 직접 넣습니다."):
+    p["tier"] = _t + 1; ss.done = False; ss.step = 0; st.rerun()
+if _t < 3:
+    with st.expander(f"{_t}단계 · {TIERS[_t][0]} — 묻지 않고 가정한 값 보기"):
+        st.markdown("\n".join(f"- {a}" for a in tier_assumptions(p)))
+        st.caption("이 값들은 결과를 조금씩 바꿉니다. 영향이 큰 항목(은퇴 나이·생활비·여행 예산·금융자산·투자 성향·집·대출)은 "
+                   "이미 직접 넣으셨습니다. 아래 '가정 범위'가 주식 수익률·수명·간병 같은 누구도 모르는 값의 영향을 따로 보여줍니다.")
 
 tab1, tab2, tab6, tab3, tab4, tab8, tab5, tab7 = st.tabs(["결과", "바꿔보기", "상품 추가", "위기 상황", "세금", "리포트", "이 계산에 대하여", "설명하기"])
 
