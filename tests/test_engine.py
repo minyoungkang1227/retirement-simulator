@@ -1643,3 +1643,23 @@ def test_mobile_app_wiring():
     cfg = json.loads((root / "mobile" / "capacitor.config.json").read_text(encoding="utf-8"))
     assert cfg["appId"] == "io.github.minyoungkang1227.nohucompass", "앱 ID는 스토어에 한 번 올리면 못 바꾼다"
     assert (root / "mobile" / "debug.keystore").exists(), "서명 키가 없으면 빌드마다 키가 달라져 업데이트 설치가 안 된다"
+
+
+def test_contrast_simple_calculator_and_breakdown():
+    """(v50.7) '다른 계산기였다면': 고정 수익률 계산은 손계산과 같고, 제도를 빼면 맞는 방향으로 움직인다."""
+    from retire_sim import contrast
+    from retire_sim.inputs import defaults
+    p = defaults(); p.update(paths=1000)
+    sp = contrast.simple_projection(p)
+    assert abs(sp["r"] - (0.5 * 0.083 + 0.5 * 0.032)) < 1e-12           # 균형형 = 주식 50%
+    # 손계산: 은퇴 후 연금이 없고 생활비만 나가면 정확히 그 해에 바닥난다
+    q = dict(p, age=60, retire_age=60, deposit=1.0, invest=0.0, ret_acct=0.0, other=0.0,
+             essential=100, lifestyle=0, nps=0, s_nps=0, priv=0)
+    out = contrast.simple_projection(q, r_nominal=0.025)                   # 실질 0% → 1억 / 연 1,200만 = 8.3년
+    assert out["depleted_age"] == 69
+    assert contrast.simple_projection(dict(p, deposit=p["deposit"] + 5))["left"] > sp["left"]
+    b = contrast.breakdown(p, paths=1000)
+    d = {n: diff for n, _, diff in b["rows"]}
+    assert d["세금·건강보험료"] > 0 and d["간병비 (장기요양)"] > 0, "비용을 빼면 확률이 올라야 한다"
+    assert b["tax20"] > 0 and b["hi20"] > 0
+    assert b["none"] >= b["full"] - 0.02

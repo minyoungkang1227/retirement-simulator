@@ -83,6 +83,18 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
 .sec {{ font-size: 1.2rem; font-weight: 800; color: {INK}; margin: 1.9rem 0 .7rem; padding-top: 1.1rem; border-top: 1px solid #E3EAEC; }}
 .goal.tier {{ min-height: 15.5rem; margin-bottom: .5rem; }}
 [data-testid="stForm"] [data-testid="stHorizontalBlock"] {{ align-items: flex-end; }}
+.vs {{ display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; margin: .4rem 0 .8rem; }}
+.vs > div {{ border-radius: 14px; padding: .9rem 1rem; }}
+.vs .a {{ background: #F3F4F5; border: 1px solid #DDE2E4; }}
+.vs .b {{ background: #E6EDEF; border: 1px solid {TEAL}; }}
+.vs .k {{ font-weight: 800; }} .vs .a .k {{ color: {MUTED}; }} .vs .b .k {{ color: {TEAL}; }}
+.vs .m {{ color: {MUTED}; font-size: .84rem; margin: .1rem 0 .45rem; line-height: 1.45; }}
+.vs .v {{ font-size: 1.25rem; font-weight: 800; line-height: 1.35; }}
+table.cmp {{ width: 100%; border-collapse: collapse; font-size: .93rem; margin: .3rem 0; }}
+table.cmp th {{ text-align: left; color: {MUTED}; font-weight: 600; border-bottom: 1px solid #CBD7DB; padding: .35rem .3rem; }}
+table.cmp td {{ border-bottom: 1px solid #EEF2F3; padding: .45rem .3rem; vertical-align: top; }}
+table.cmp td.n {{ white-space: nowrap; text-align: right; }}
+@media (max-width: 640px) {{ .vs {{ grid-template-columns: 1fr; }} }}
 .wf {{ overflow-x: auto; }} .wf svg {{ min-width: 540px; }}
 .sec span {{ font-size: .86rem; font-weight: 400; color: {MUTED}; margin-left: .3rem; }}
 [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {{ color: #4F6164; font-size: .9rem; line-height: 1.6; }}
@@ -323,6 +335,14 @@ def progress_bar(label: str, cur: float, need: float, unit: str, fmt: str = "{:.
             f'<div style="width:{frac * 100:.1f}%;background:{color};height:14px;border-radius:8px"></div></div>'
             f'<div style="display:flex;justify-content:space-between;font-size:.88rem;color:{MUTED};margin-top:4px">'
             f'<span>지금 {fmt.format(cur)}{unit}</span><span>목표 {fmt.format(need)}{unit}</span></div></div>')
+
+
+@st.cache_data(ttl=600, max_entries=32, show_spinner=False)
+def contrast_calc(p_json: str) -> dict:
+    """(v50.7) 같은 가구를 시중 계산기 방식으로 + 한국 제도를 하나씩 뺀 확률. 계산은 contrast 모듈."""
+    from retire_sim import contrast
+    pp = json.loads(p_json)
+    return {"simple": contrast.simple_projection(pp), **contrast.breakdown(pp)}
 
 
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
@@ -1006,6 +1026,40 @@ with tab1:
         ds_ = base.get("debt_share", 0)
         st.caption("큰 지출 반영: " + ", ".join(f'{e_["age"]}세 {e_["kind"]}' for e_ in p["events"])
                    + (f" · 은퇴 때 갚을 빚이 남는 경우 10번 중 {ds_ * 10:.0f}번" if ds_ > 0.05 else ""))
+
+    # 3-3) (v50.7) 다른 계산기였다면 — 같은 입력을 시중 계산기 방식으로, 그리고 한국 제도를 하나씩 빼서
+    with st.spinner("다른 계산 방식과 비교하는 중"):
+        cx = contrast_calc(json.dumps(p, sort_keys=True))
+    sp = cx["simple"]
+    simple_v = (f'{sp["depleted_age"]}세에 돈이 바닥나요' if sp["depleted_age"]
+                else f'95세까지 {sp["left"]:.1f}억 원이 남아요<br><span style="font-size:1rem;font-weight:600">→ "괜찮습니다"</span>')
+    st.markdown(sec("다른 계산기였다면 뭐라고 했을까", "같은 입력, 계산 방식만 다르게")
+                + f'<div class="vs"><div class="a"><div class="k">보통 계산기 방식</div>'
+                  f'<div class="m">수익률 연 {sp["r"] * 100:.1f}%를 매년 똑같이 · 95세까지 산다고 가정 · 세금·건보료·간병·기초연금 없음</div>'
+                  f'<div class="v">{simple_v}</div></div>'
+                  f'<div class="b"><div class="k">노후나침반</div>'
+                  f'<div class="m">같은 평균 수익률이지만 해마다 오르내림 · 수명은 생명표로 · 세금·건보료·간병·기초연금 반영</div>'
+                  f'<div class="v">10번 중 {n_ok}번 끝까지<br><span style="font-size:1rem;font-weight:600">({pct(ok)})</span></div></div></div>',
+                unsafe_allow_html=True)
+    if not sp["depleted_age"] and n_ok < 9:
+        st.markdown(f'평균 수익률은 같아도, 은퇴 직후 주가가 빠지거나 예상보다 오래 살거나 간병이 필요해지는 경우까지 넣으면 '
+                    f'<b>10번 중 {10 - n_ok}번은 모자라요.</b> 보통 계산기는 이런 경우를 보지 않아 "괜찮다"고 답합니다.',
+                    unsafe_allow_html=True)
+    rows_html = ""
+    what = {"세금·건강보험료": f'20년간 세금 {cx["tax20"]:,.0f}만 원 · 건보료 {cx["hi20"]:,.0f}만 원'
+                             + (f' · 보유세 {cx["prop20"]:,.0f}만 원' if cx["prop20"] > 0 else "") + " (오늘 가치)",
+            "간병비 (장기요양)": "나이 들어 간병이 필요해질 위험과 그 비용 (장기요양 통계로 보정)",
+            "기초연금": "소득·재산이 적어지면 받는 기초연금 (재산·소득 인정액 산식)"}
+    for name, pr, d in cx["rows"]:
+        rows_html += (f'<tr><td><b>{name}</b><br><span style="color:{MUTED};font-size:.85rem">{what[name]}</span></td>'
+                      f'<td class="n">{pct(cx["full"])} → <b>{pct(pr)}</b><br>'
+                      f'<span style="color:{CORAL if d > 0 else TEAL}">{d * 100:+.0f}%p</span></td></tr>')
+    st.markdown('<b>차이가 나는 이유 — 하나씩 빼 보면</b>'
+                f'<table class="cmp"><tr><th>노후나침반이 넣은 것</th><th style="text-align:right">빼면 기본생활 유지 확률</th></tr>{rows_html}</table>',
+                unsafe_allow_html=True)
+    st.caption(f"빼서 확률이 오르는 것은 시중 계산기가 놓치는 비용이고, 내려가는 것(기초연금)은 놓치는 도움입니다. "
+               f"셋 다 빼고 수익률·수명만 흔들리게 해도 {pct(cx['none'])} — 수익률을 '정하느냐, 흔들리게 두느냐'만으로도 답이 달라집니다. "
+               "(비교는 3,000개 미래로 계산해 위 숫자와 1~2%p 다를 수 있어요.)")
 
     # 3-2) 가정의 불확실성 — 난수를 늘려도 줄지 않는 폭
     st.markdown(sec("이 숫자는 얼마나 확실한가"), unsafe_allow_html=True)
