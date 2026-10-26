@@ -15,13 +15,31 @@ BRACKETS = [(1400, .06, 0), (5000, .15, 126), (8800, .24, 576), (15000, .35, 154
 ESTATE = [(10000, .10, 0), (50000, .20, 1000), (100000, .30, 6000), (300000, .40, 16000), (np.inf, .50, 46000)]
 
 
+def _table_arrays(table):
+    """(상한, 세율, 누진공제) 표 → searchsorted용 배열. 표 객체(id)별로 한 번만 만든다."""
+    key = id(table)
+    hit = _TABLE_CACHE.get(key)
+    if hit is None or hit[0] is not table:
+        his = np.array([t[0] for t in table], float)
+        rs = np.array([t[1] for t in table], float)
+        deds = np.array([t[2] for t in table], float)
+        hit = (table, his, rs, deds); _TABLE_CACHE[key] = hit
+    return hit[1], hit[2], hit[3]
+
+
+_TABLE_CACHE: dict = {}
+
+
 def progressive(base, table):
-    base = np.maximum(base, 0); out = np.zeros_like(base, dtype=float)
-    lo = 0
-    for hi, r, ded in table:
-        m = (base > lo) & (base <= hi)
-        out = np.where(m, base * r - ded, out); lo = hi
-    return out
+    """누진세: 구간 (lo, hi] 안에서 base × 세율 − 누진공제. base ≤ 0이면 0.
+
+    (v47) 구간마다 np.where를 도는 대신 상한 배열에 searchsorted(side='left')를 써서
+    구간 인덱스를 한 번에 찾는다. side='left'는 lo < base ≤ hi 와 같은 우닫힌 구간이라 결과가 동일하다."""
+    base = np.maximum(np.asarray(base, float), 0)
+    his, rs, deds = _table_arrays(table)
+    idx = np.minimum(np.searchsorted(his, base, side="left"), len(his) - 1)
+    out = base * rs[idx] - deds[idx]
+    return np.where(base > 0, out, 0.0)
 
 
 def pension_deduction(x):
@@ -99,6 +117,8 @@ HI_PROPERTY_GRADES = (
     (483153, 1921), (531468, 1991), (584615, 2061), (643077, 2131), (707385, 2201),
     (778124, 2271), (np.inf, 2341),
 )
+_HI_GRADE_HI = np.array([g[0] for g in HI_PROPERTY_GRADES], float)   # 등급 상한 (searchsorted용)
+_HI_GRADE_PTS = np.array([g[1] for g in HI_PROPERTY_GRADES], float)  # 등급별 부과점수
 HI_POINT_VALUE = 211.5        # 재산보험료부과점수당 금액(원) — 시행령 제44조제2항, 2026년 고시
 HI_PROPERTY_DEDUCT = 10000    # 재산 기본공제액(만원) — 1억원 (2024년 도입)
 
@@ -111,12 +131,9 @@ def hi_property_points(taxable_base, deduct: float = HI_PROPERTY_DEDUCT):
     전월세보증금(30% 산입)·자동차는 반영하지 않는다 — 자가 보유 가구를 전제로 한 보수적 근사.
     """
     net = np.maximum(np.asarray(taxable_base, float) - deduct, 0.0)
-    pts = np.zeros_like(net)
-    lo = 0.0
-    for hi, p in HI_PROPERTY_GRADES:
-        pts = np.where((net > lo) & (net <= hi), float(p), pts)
-        lo = hi
-    return np.where(net > 0, pts, 0.0)
+    # (v47) 등급 60개를 np.where로 훑는 대신 상한 배열에 searchsorted. (lo, hi] 우닫힌 구간이라 결과 동일.
+    idx = np.minimum(np.searchsorted(_HI_GRADE_HI, net, side="left"), len(_HI_GRADE_HI) - 1)
+    return np.where(net > 0, _HI_GRADE_PTS[idx], 0.0)
 
 
 def hi_property_monthly(taxable_base, tc: TaxConfig, deduct: float = HI_PROPERTY_DEDUCT,

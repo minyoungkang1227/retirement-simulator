@@ -11,7 +11,19 @@ from . import engine_tax, metrics
 from .economy_v2 import EconomyV2
 from .inputs import PROFILES, build_case, monthly_saving
 
-ERP_SD = 0.014          # 주식 위험프리미엄 추정 표준오차 (KOSPI 2000~2026)
+ERP_SD = 0.014          # 주식 위험프리미엄 추정 표준오차 (KOSPI 2000~2026, economy_v2.CALIBRATED_EQUITY_2026_08.erp_sd)
+LONGEVITY_SD = 0.05     # 사망률 수준의 로그 표준편차 (SimConfig.longevity_sigma_level과 같은 값)
+CARE_INCIDENCE_SD = 0.20  # 간병 발생률의 판단 폭 ±20%. 공단 통계 보정(calibrate_care.py)에 표준오차가 없어 판단값이다.
+
+# 가정 범위를 만들 때 하나씩 움직이는 가정들. (이름, [낮은 쪽 variant, 높은 쪽 variant])
+# q_mult는 사망률 배수라 >1 이 '수명 짧음', care_mult는 발생률 배수라 >1 이 '간병 많음'.
+def _band_variants(base_erp: float) -> list:
+    import math
+    return [
+        ("주식 위험프리미엄", [{"eco": {"erp": base_erp - ERP_SD}}, {"eco": {"erp": base_erp + ERP_SD}}]),
+        ("수명", [{"q_mult": math.exp(LONGEVITY_SD)}, {"q_mult": math.exp(-LONGEVITY_SD)}]),
+        ("간병 발생률", [{"care_mult": 1 + CARE_INCIDENCE_SD}, {"care_mult": 1 - CARE_INCIDENCE_SD}]),
+    ]
 
 
 def run_case(p: dict, v: dict | None = None):
@@ -65,10 +77,26 @@ def action_ranking(p: dict, paths: int = 3000) -> list:
     return sorted(out, key=lambda x: -x[2])
 
 
-def assumption_band(p: dict) -> tuple:
-    """주식 위험프리미엄을 ±1 표준오차만큼 움직였을 때 '기본생활 지킬 확률'의 범위.
+def assumption_band_detail(p: dict, paths: int | None = None) -> dict:
+    """세 가정(주식 위험프리미엄 · 수명 · 간병 발생률)을 **하나씩** ±1 표준편차(간병은 판단 폭)만큼
+    움직였을 때 '기본생활 유지 확률'이 어디까지 가는지. 가정별 (낮은 쪽, 높은 쪽)과 전체 (min, max)를 돌려준다.
 
-    경로를 늘려도 줄지 않는 불확실성이다. 결과를 숫자 하나로 읽지 않게 하려고 함께 보여준다."""
+    v46까지는 위험프리미엄 하나만 흔들었다. 수명·간병이 측정된 영향 1·3위인데 범위에서 빠져 있어서
+    폭이 과소였다(v47). 세 가정을 동시에 흔들지는 않는다 — 동시에 나쁜 쪽으로 가는 결합확률은 작고,
+    그 경우의 크기는 CTE90 부족액이 따로 보여준다.
+
+    이 폭은 경로를 늘려도 줄지 않는 불확실성이다. 표본오차(1만 경로에서 약 ±1%p)와는 다른 종류다."""
     base_erp = EconomyV2.enhanced().erp
-    vals = [essential_prob(run_case(p, {"eco": {"erp": base_erp + d}})) for d in (-ERP_SD, ERP_SD)]
-    return min(vals), max(vals)
+    extra = {"paths": paths} if paths else {}
+    per = {}
+    for name, (lo_v, hi_v) in _band_variants(base_erp):
+        a = essential_prob(run_case(p, {**lo_v, **extra}))
+        b = essential_prob(run_case(p, {**hi_v, **extra}))
+        per[name] = (min(a, b), max(a, b))
+    lo = min(v[0] for v in per.values()); hi = max(v[1] for v in per.values())
+    return {"overall": (lo, hi), "by_factor": per}
+
+
+def assumption_band(p: dict, paths: int | None = None) -> tuple:
+    """(min, max) — 호환용. 자세한 분해는 assumption_band_detail."""
+    return assumption_band_detail(p, paths)["overall"]

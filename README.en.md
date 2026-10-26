@@ -37,48 +37,48 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 4. **Stochastic economy** — OU real rate and inflation estimated from Bank of Korea (ECOS) data, with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
 5. **Statistically honest comparisons** — paired-difference confidence intervals on common random numbers decide "different / not different"
 
-## Example (model v45 · 10,000 paths · reproduce with `scripts/readme_numbers.py`)
+## Example (model v47 · 10,000 paths · reproduce with `scripts/readme_numbers.py`)
 
 **Couple aged 52 and 50, retiring at 60, KRW 500M financial assets, saving KRW 1.5M/month** (essential KRW 3M/month + lifestyle KRW 12M/year, pensions KRW 1.6M/month, KRW 100M legacy)
 
-- Goal success: essential **52%**, lifestyle funding **65%**, KRW 100M legacy **39%**
+- Goal success: essential **49%**, lifestyle funding **68%**, KRW 100M legacy **38%**
 
 | What if | Change in essential success (95% CI) |
 |---|---|
-| Retire 2 years later | **+10.1pp** (±0.6) |
-| Spend 10% less | +7.6pp (±0.5) |
-| Growth profile (70% equity) | +5.4pp (±0.5) |
-| Save KRW 0.5M more per month | +4.0pp (±0.4) |
-| Conservative profile (30% equity) | −12.6pp (±0.7) |
+| Retire 2 years later | **+10.3pp** (±0.6) |
+| Spend 10% less | +7.4pp (±0.5) |
+| Growth profile (70% equity) | +5.6pp (±0.5) |
+| Save KRW 0.5M more per month | +4.1pp (±0.4) |
+| Conservative profile (30% equity) | −13.2pp (±0.7) |
 
 | Crisis | Change in essential success |
 |---|---|
-| Equities −40% in the first year of retirement | −14.6pp |
-| Equities −40% ten years into retirement | −9.8pp |
-| Three years of 6% inflation | −4.8pp |
+| Equities −40% in the first year of retirement | −15.5pp |
+| Equities −40% ten years into retirement | −10.2pp |
+| Three years of 6% inflation | −5.2pp |
 | Longer life (mortality −20%) | −3.8pp |
-| Long-term care incidence doubled | −4.2pp |
+| Long-term care incidence doubled | −3.9pp |
 
 - For this household **retirement timing is the strongest lever**, and the same crash hurts most right after retirement (sequence-of-returns risk).
-- The largest uncertainty is the **equity risk premium**: within its estimated range (5.2% ± 1.4pp) essential success moves between **42% and 62%**, while Monte Carlo noise is ±0.7pp — about one twentieth of it. That is why differences between choices matter more than levels.
+- **The assumption band is 39%–60%**: the minimum and maximum of moving the equity risk premium, longevity and long-term care incidence one at a time by their estimated ranges (v47). The width is effectively set by the **equity risk premium** — on its own (5.2% ± 1.4pp) it spans 39%–60%, while longevity spans 48%–50% and care incidence (±20%) 48%–51%. Monte Carlo noise of ±0.7pp is about one fifteenth of that, and unlike it this band does not shrink with more paths. That is why differences between choices matter more than levels.
 
 **Young savers (dual-income couple aged 30 and 29, KRW 90M gross income, 15% saving rate, workplace pension, National Pension estimated automatically)**
 
-- Essential success **77%**, lifestyle funding **91%**, KRW 100M legacy **70%**
-- What if: save KRW 0.5M more per month +7.8pp · retire 2 years later +6.3pp · spend 10% less +4.8pp
-- **Without the workplace pension −25.1pp** — at this age nothing else comes close.
+- Essential success **76%**, lifestyle funding **92%**, KRW 100M legacy **70%**
+- What if: save KRW 0.5M more per month +8.1pp · retire 2 years later +6.5pp · spend 10% less +5.1pp
+- **Without the workplace pension −26.1pp** — at this age nothing else comes close.
 
 **House-rich, cash-poor household (couple aged 65 and 63, KRW 300M financial assets, home worth KRW 700M, essential KRW 2.5M/month + lifestyle KRW 12M/year, KRW 300M legacy)**
 
 | Housing strategy | Essential success | Lifestyle funding | KRW 300M legacy | Note |
 |---|---|---|---|---|
-| Keep as is | 17% | 28% | 95% | — |
-| Reverse mortgage now (63) | 74% (+57.2pp) | 95% | 65% | KRW 1.65M/month |
-| Reverse mortgage at 70 | 81% (+64.7pp) | 87% | 69% | KRW 2.25M/month (today's value) |
-| Downsize to half price at 70 | 74% (+56.8pp) | 85% | 85% | KRW 350M released |
+| Keep as is | 12% | 34% | 94% | — |
+| Reverse mortgage now (63) | 73% (+60.5pp) | 96% | 65% | KRW 1.65M/month |
+| Reverse mortgage at 70 | 80% (+67.2pp) | 91% | 68% | KRW 2.25M/month (today's value) |
+| Downsize to half price at 70 | 70% (+57.9pp) | 90% | 84% | KRW 350M released |
 
 - When the home is most of the balance sheet, **whether to use it is the biggest single choice**. A reverse mortgage buys retirement security; downsizing protects the bequest as well.
-- Since v45 counts the property component of health-insurance premiums, this household's figures are 2–5pp lower than before (a household that owns a home carries higher fixed costs in retirement).
+- Since v45 counts the property component of health-insurance premiums, this household's figures are 2–5pp lower than before, and v47's spending rigidity takes another 5pp off (a household that owns a home carries higher fixed costs in retirement, so spending it cannot cut hurts it more).
 
 ![goals](docs/images/goals_whatif.png)
 ![tax strategies](docs/images/tax_strategies.png)
@@ -86,9 +86,11 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 
 ## Recent changes
 
+> **v47 (2026-10-26):** **Spending rigidity is now on by default.** That a household cannot cut its standard of living by more than 30% in a single year is a structural property of household spending, not an investment behaviour, so what v36 had built and left switched off inside the "behavioural assumptions" toggle is now the default (`lifestyle_floor=0.30`). Measured over 80,000 paths: **−1.3pp** for the reference household and **−3.0pp** for a couple just retired at 60. The example households above were re-run — the 52/50 couple 52% → **49%**, the house-rich cash-poor household 17% → **12%** (the larger the fixed costs already are, the more this bites). Alongside: the **assumption band now moves three factors instead of one** (equity risk premium ±1 standard error, mortality level ±1σ, care incidence ±20%, one at a time; the band is the min and max of the six results). Measured, the width is **dominated by the risk premium** — v46's band was not too narrow, but we can now say which assumption creates it and why. `tax.progressive` and `tax.hi_property_points` were rewritten around `searchsorted`, taking one 10,000-path run from **0.94s to 0.78s** with bit-identical results. The economy and mortality chapters of `docs/MODEL.md` were consolidated to the current specification with 20 references, and this English edition was brought in line. Tests 121 → 122.
+
 > **v45 (2026-10-20):** Filled the model's **largest remaining gap** — the **property component of regional health-insurance premiums**. It is worth about -7pp and the default was zero, so unless the user typed in a figure from the insurer's own calculator it silently passed as nothing. The statutory **60-grade score table** from Annex 4 of the National Health Insurance Act Enforcement Decree (grade 1 = 22 points, grade 60 = 2,341 points), the **KRW 211.5 per point** and the **KRW 100M basic deduction** now come straight from the legal text. Measured as a paired comparison: a single-home household with a KRW 500M assessed value goes **45.3% -> 38.5% (-6.78pp, 95% CI [-7.27, -6.29])**, and at KRW 900M **31.4% -> 24.0% (-7.44pp)** - because **twenty years of premiums rise from KRW 15M to KRW 41-56M**, nearly tripling. None of the thresholds are inflation-indexed (as in tax law), so nominal house-price growth pushes a household up the grades by itself: the same quiet tax drift that property taxes have. Seven hand-calculated point tests plus table-shape, non-indexation and engine-integration tests lock it in. The report's **money-flow waterfall also moved into the results tab**, with a test that the app and the report both read from one `reporting.money_flow()`. The reference household owns no home, so its 69.8% is unchanged. Tests 108 -> 116.
 
-Earlier versions (v1–v44) and their measurements are in [CHANGELOG.md](CHANGELOG.md) (Korean).
+Earlier versions (v1–v46) and their measurements are in [CHANGELOG.md](CHANGELOG.md) (Korean).
 
 ## Validation
 

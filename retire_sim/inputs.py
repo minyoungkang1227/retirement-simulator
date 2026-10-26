@@ -194,7 +194,8 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
     if v.get("care_mult"):
         care = (CareMarkov(incidence=tuple((a, x * v["care_mult"]) for a, x in CareMarkov().incidence))
                 if p["enhanced"] else CareShock(lam=0.03 * v["care_mult"]))
-    beh = dict(panic_drop=0.25, lifestyle_floor=0.30) if (v.get("behaviour", p.get("behaviour"))) else {}
+    # (v47) 지출 경직성(lifestyle_floor=0.30)은 SimConfig 기본값이 됐다. '행동' 토글은 이제 패닉 매도만 더한다.
+    beh = dict(panic_drop=0.25) if (v.get("behaviour", p.get("behaviour"))) else {}
     cfg = SimConfig(n_paths=v.get("paths", p["paths"]), seed=42, care=care,
                     nps=NPSRules(basic_region=p.get("region", "대도시")),
                     care_real_growth=v.get("care_growth", p.get("care_growth", 1.0)) / 100, **beh)

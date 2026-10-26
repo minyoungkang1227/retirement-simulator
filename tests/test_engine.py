@@ -604,9 +604,9 @@ def test_spending_rigidity_protects_lifestyle_but_hurts_essentials():
     global CFG
     old = CFG
     try:
-        CFG = SimConfig(care=CareMarkov())
+        CFG = SimConfig(care=CareMarkov(), lifestyle_floor=0.0)      # 즉시 줄일 수 있는 가구
         a = engine_tax.summarize(_run(couple_60()))
-        CFG = SimConfig(care=CareMarkov(), lifestyle_floor=0.30)
+        CFG = SimConfig(care=CareMarkov(), lifestyle_floor=0.30)     # (v47 기본) 한 해 30% 넘게는 못 줄임
         b = engine_tax.summarize(_run(couple_60()))
         assert b["여행·취미 평균 충족률"] > a["여행·취미 평균 충족률"]
         assert b["기본생활 유지 확률"] < a["기본생활 유지 확률"]
@@ -615,10 +615,29 @@ def test_spending_rigidity_protects_lifestyle_but_hurts_essentials():
         CFG = old
 
 
-def test_behaviour_defaults_are_off():
-    """기본값은 '합리적 가구' — 행동 가정은 켜야 적용된다(기존 결과와의 연속성)."""
+def test_behaviour_defaults():
+    """(v47) 패닉 매도는 투자 행동 가정이라 기본 끔, 지출 경직성은 가계의 구조적 성질이라 기본 0.30으로 켬."""
     c = SimConfig()
-    assert c.panic_drop == 0.0 and c.lifestyle_floor == 0.0
+    assert c.panic_drop == 0.0 and c.lifestyle_floor == 0.30
+
+
+def test_assumption_band_covers_three_factors():
+    """(v47) 가정 범위는 위험프리미엄·수명·간병을 하나씩 흔든 결과를 모두 감싸야 하고, 수명이 짧은 쪽이 확률이 높아야 한다."""
+    from retire_sim.advice import assumption_band_detail, assumption_band
+    from retire_sim.inputs import DEFAULTS
+    p = dict(DEFAULTS, paths=1500)
+    d = assumption_band_detail(p)
+    assert set(d["by_factor"]) == {"주식 위험프리미엄", "수명", "간병 발생률"}
+    lo, hi = d["overall"]
+    for a, b in d["by_factor"].values():
+        assert lo <= a <= b <= hi
+    assert assumption_band(p) == (lo, hi)
+    # 수명이 짧아지면(사망률 ↑) 기본생활 유지 확률은 올라가거나 같아야 한다 — 방향 검증
+    from retire_sim.advice import run_case, essential_prob
+    import math
+    short = essential_prob(run_case(p, {"q_mult": math.exp(0.05)}))
+    long_ = essential_prob(run_case(p, {"q_mult": math.exp(-0.05)}))
+    assert short >= long_
 
 
 # ── v37 루프 밖으로 뺀 계산들: 경로에 의존하지 않으므로 단독으로 검증할 수 있다 ──
