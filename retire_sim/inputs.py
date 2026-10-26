@@ -45,6 +45,8 @@ DEFAULTS = dict(
     debt=0.0, debt_rate=0.0, debt_years=10,
     # (v48) 입력 단계: 1 빠른 진단 / 2 내 재산 반영 / 3 전문가 상담. 화면에 보일 항목만 정한다(계산엔 영향 없음)
     tier=2,
+    # (v49) 퇴직급여: 제도("DC" 확정기여형·"DB" 확정급여형·퇴직금), 지금 직장 근속연수(년, 본인·배우자)
+    ret_plan="DC", tenure=0, s_tenure=0,
 )
 
 
@@ -84,6 +86,31 @@ def monthly_saving(p: dict) -> float:
     return float(p["saving"])
 
 
+def severance_estimate(p: dict) -> tuple:
+    """(v49) 은퇴 때 받을 퇴직급여의 대략적인 크기(억 원, 오늘 가치)와 퇴직소득세(만 원, 오늘 가치).
+    화면 안내용 결정론적 근사 — 계산은 엔진이 경로별로 한다. DB는 마지막 월급 × 근속연수,
+    DC는 연봉의 1/12 적립을 실질 2%로 굴린 값."""
+    from .tax import retirement_income_tax
+    if not p.get("ret_contrib") or p["age"] >= p["retire_age"]:
+        return 0.0, 0.0
+    ty = p["retire_age"] - p["age"]; g = p.get("wage_g", 1.0) / 100
+    tot = tax = 0.0
+    people = [(p.get("salary", 0), p.get("tenure", 0))]
+    if p["spouse"]:
+        people.append((p.get("s_salary", 0), p.get("s_tenure", 0)))
+    for sal, ten in people:
+        if sal <= 0:
+            continue
+        last = sal * (1 + g) ** max(ty - 1, 0)
+        if p.get("ret_plan", "DC") == "DB":
+            R = last / 12 * (ten + ty)
+        else:
+            R = sum(sal * (1 + g) ** j / 12 * 1.02 ** (ty - j) for j in range(ty))
+        cpi = 1.0247 ** ty                                        # 공제표·세율표는 명목 고정 → 명목으로 세금을 매기고 오늘 가치로
+        tot += R; tax += float(retirement_income_tax(R * cpi, ten + ty)) / cpi
+    return tot / 10000, tax
+
+
 def income_gap(p: dict) -> tuple:
     """(필요한 생활비, 받는 연금, 차액) — 모두 월 만 원."""
     need = p["essential"] + p["lifestyle"] / 12
@@ -95,10 +122,11 @@ def income_gap(p: dict) -> tuple:
 #: 값이 정해져 있는 항목 — API로 들어온 엉뚱한 값이 엔진 안에서 터지지 않게 앞에서 막는다
 CHOICES = {"sex": ("M", "F"), "s_sex": ("M", "F"), "profile": tuple(PROFILES),
            "region": ("대도시", "중소도시", "농어촌"), "save_mode": ("월 금액", "소득의 %"),
-           "floor": ("계리적", "보수적")}
+           "floor": ("계리적", "보수적"), "ret_plan": ("DC", "DB")}
 RANGES = {"age": (18, 100), "s_age": (18, 100), "retire_age": (30, 100), "nps_start": (55, 75),
           "paths": (100, 200_000), "survivor": (0, 100), "overseas": (0, 100), "children": (0, 10),
-          "care_growth": (-2.0, 5.0), "debt_rate": (0.0, 20.0), "debt_years": (1, 40), "tier": (1, 3)}
+          "care_growth": (-2.0, 5.0), "debt_rate": (0.0, 20.0), "debt_years": (1, 40), "tier": (1, 3),
+          "tenure": (0, 50), "s_tenure": (0, 50)}
 NON_NEGATIVE = ("deposit", "invest", "ret_acct", "other", "saving", "salary", "s_salary",
                 "essential", "lifestyle", "nps", "s_nps", "priv", "legacy",
                 "h_official", "h_market", "h_n", "rent", "biz", "debt")
@@ -157,10 +185,10 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
 
     n1, n2 = nps_values(p)
     members = [mk(p["age"], p["sex"], n1, p["priv"], p["priv_start"], p["priv_years"] if p["priv"] > 0 else 0)]
-    members[0].salary = float(p.get("salary", 0))
+    members[0].salary = float(p.get("salary", 0)); members[0].tenure = float(p.get("tenure", 0))
     if p["spouse"]:
         members.append(mk(p["s_age"], p["s_sex"], n2))
-        members[1].salary = float(p.get("s_salary", 0))
+        members[1].salary = float(p.get("s_salary", 0)); members[1].tenure = float(p.get("s_tenure", 0))
 
     m = v.get("spend_mult", 1.0)
     liquid = max(v.get("assets", total_assets(p)) - p["ret_acct"], 0)
@@ -184,6 +212,7 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
                      + v.get("saving_delta", 0) * 12 / sal_tot) if use_rate else 0.0,
         wage_growth=p.get("wage_g", 1.0) / 100,
         retirement_contrib=bool(p.get("ret_contrib")) and p["age"] < p["retire_age"],
+        ret_plan=p.get("ret_plan", "DC"),
         stock_weight=v.get("stock_weight", PROFILES[p["profile"]]),
         annual_spending=p["essential"] * 12 * m, essential=p["essential"] * 12 * m,
         lifestyle=p["lifestyle"] * m, legacy_target=p["legacy"] * 10000,

@@ -116,6 +116,16 @@ SOURCES = (
               "1,500만 원에서 4,100~5,600만 원으로 늘어나므로, 재산분을 빼면 은퇴 후 고정비를 "
               "크게 과소평가한다. 점수당 금액 고시가 바뀌면 바로 갱신."),
     Source(
+        key="retirement_tax", name="퇴직소득세 — 근속연수공제(2023년 이후 퇴직분), 환산급여공제, 이연퇴직소득 연금수령 시 70%(1~10년차)·60%(11년차~)",
+        org="소득세법 제48조(퇴직소득공제)·제55조(세율)·제146조, 시행령 제40조의2(연금수령한도)",
+        used_for="퇴직금(DB)·퇴직연금(DC)을 은퇴 때 IRP로 받아 연금으로 나눠 쓸 때의 세금",
+        as_of="2026", cycle="세법 개정 시",
+        where="law.go.kr 「소득세법」 제48·55조, 국세청 퇴직소득세 계산 안내",
+        how="retire_sim/tax.py 의 retirement_service_deduction·retirement_conv_deduction·RET_INCOME_PENSION_RATIO 교체 "
+            "→ tests 의 test_retirement_income_tax_hand_calc_v49 손검산 재확인",
+        stale="공제표가 물가연동이 아니라 명목 퇴직금이 커질수록 실효세율이 오른다. 대표 30대 가구에서 퇴직소득세는 "
+              "퇴직급여의 3~4%(연금수령 시 그 70%)로 결과를 1%p 안쪽으로 움직인다."),
+    Source(
         key="widowhood", name="사별 후 사망위험 메타분석 (남 RR 1.22 / 여 1.03, 6개월 이내 1.41)",
         org="Moon et al. (2011) PLOS ONE — 226만 명, 전향 코호트 15편, 연령·성별 보정",
         used_for="배우자 사별 직후 생존자의 사망위험 상승",

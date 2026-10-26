@@ -80,6 +80,41 @@ def income_tax_person(nps, fin, age, tc: TaxConfig, extra=0):
     return np.where(fin > 2000, np.maximum(sep, comb), sep) * 1.1
 
 
+# ── (v49) 퇴직소득세 (소득세법 제48·55조, 근속연수공제는 2023년 이후 퇴직분 기준) ──
+#   ① 근속연수공제  ② 환산급여 = (퇴직소득 − 근속연수공제) × 12 / 근속연수  ③ 환산급여공제
+#   ④ 과세표준 = 환산급여 − 환산급여공제  ⑤ 산출세액 = 기본세율(BRACKETS)(과세표준) × 근속연수 / 12
+#   ⑥ 지방소득세 10%. 금액 단위 만원.
+#   이연퇴직소득(IRP로 받아 연금으로 수령)은 연금수령 1~10년차 산출세액의 70%, 11년차부터 60%를 낸다.
+RET_INCOME_PENSION_RATIO = (0.7, 0.6)
+
+
+def retirement_service_deduction(years):
+    """근속연수공제(만원). 근속연수는 1년 미만 절상."""
+    n = np.maximum(np.ceil(np.asarray(years, float)), 1)
+    return np.where(n <= 5, 100 * n,
+           np.where(n <= 10, 500 + 200 * (n - 5),
+           np.where(n <= 20, 1500 + 250 * (n - 10), 4000 + 300 * (n - 20))))
+
+
+def retirement_conv_deduction(conv):
+    """환산급여공제(만원)."""
+    c = np.maximum(np.asarray(conv, float), 0)
+    return np.where(c <= 800, c,
+           np.where(c <= 7000, 800 + (c - 800) * .60,
+           np.where(c <= 10000, 4520 + (c - 7000) * .55,
+           np.where(c <= 30000, 6170 + (c - 10000) * .45, 15170 + (c - 30000) * .35))))
+
+
+def retirement_income_tax(amount, years, local: bool = True):
+    """퇴직소득세(만원). amount = 퇴직급여 총액, years = 근속연수. local=True면 지방소득세 10% 포함."""
+    R = np.maximum(np.asarray(amount, float), 0)
+    n = np.maximum(np.ceil(np.asarray(years, float)), 1)
+    conv = np.maximum(R - retirement_service_deduction(n), 0) * 12 / n
+    base = np.maximum(conv - retirement_conv_deduction(conv), 0)
+    tax = progressive(base, BRACKETS) * n / 12
+    return np.where(R > 0, tax * (1.1 if local else 1.0), 0.0)
+
+
 def private_pension_tax(taxable, age):
     return np.where(taxable <= 1500, taxable * private_pension_rate(age), taxable * .165)
 

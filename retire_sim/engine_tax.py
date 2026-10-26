@@ -9,7 +9,8 @@ from .config import Household, SimConfig, AddOns, CareMarkov
 from . import mortality, pension
 from .economy_v2 import EconomyV2, generate
 from .tax import (reverse_mortgage_monthly, acquisition_tax_rate, one_house_cgt, TaxConfig, HouseConfig, income_tax_person, private_pension_tax, health_premium,
-                  property_tax, comprehensive_property_tax, rent_tax, gift_tax, hi_property_monthly)
+                  property_tax, comprehensive_property_tax, rent_tax, gift_tax, hi_property_monthly,
+                  retirement_income_tax, RET_INCOME_PENSION_RATIO)
 
 
 def glide_path(hh: Household, T):
@@ -270,6 +271,9 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         od_rate = np.broadcast_to(np.asarray(i0, float), (n,)).copy()
         od_bal = np.full(n, float(hh.debt_balance))
         od_pay = od_bal * od_rate / (1 - (1 + od_rate) ** -N0)
+    # (v49) 퇴직급여: DC 적립(Wdc, 은퇴 전) → 은퇴 때 IRP(Wr)로. Rr = 아직 안 꺼낸 이연퇴직소득 원금, tau = 퇴직소득세 실효율
+    Wdc = np.zeros(n); Wr = np.zeros(n); Rr = np.zeros(n); tau = np.zeros(n); t_ret = None
+    sev_real = np.zeros(n); sev_tax_real = np.zeros(n)
     joint_factor = lambda t0: joint_pv(hh, qx_table, t0)
 
     def sell_from_taxable(amount):
@@ -366,7 +370,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             elig = [a[i] & (hh.members[i].age + t >= 65) for i in range(k)]
             if any(e.any() for e in elig):
                 inc_m = (nps.sum(0) + surv.sum(0) + priv.sum(0) + rent + bz.sum(0)) / 12
-                fin_now = np.maximum(Wt + Wi + Wp + S + D - debt, 0)
+                fin_now = np.maximum(Wt + Wi + Wp + Wr + Wdc + S + D - debt, 0)
                 gross = np.maximum(official - np.where(rm_on, rm_bal, 0.0) - mort_bal - od_bal, 0)
                 a_m = [pension.a_benefit_monthly(m) * cpi[:, t] for m in hh.members]      # A급여액(명목)
                 basic_inc = pension.basic_pension_annual(inc_m, gross, fin_now, elig,
@@ -461,7 +465,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 yrs_left = max(5, hh.planning_age - (youngest + t))
                 ann = (1 - 1.02 ** -yrs_left) / 0.02            # (v12) 실질 2%로 할인한 확정 연금현가계수
                 floor = np.maximum(ess - income_all, 0) * ann
-            life_paid = np.clip(Wt + Wi + Wp + S + D - floor, 0, life_want)
+            life_paid = np.clip(Wt + Wi + Wp + Wr + S + D - floor, 0, life_want)
             if cfg.lifestyle_floor > 0 and prev_life is not None:
                 # (v36) 지출 경직성: 형편이 나빠져도 한 해에 이 비율 넘게는 못 줄인다.
                 #       줄이지 못한 만큼은 그대로 쓰게 되므로 기본생활 쪽 여유가 더 빨리 깎인다.
@@ -479,13 +483,42 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             saving = (sal * hh.saving_rate if hh.saving_rate > 0 else hh.annual_saving * cpi[:, t]) * live
             if rent_save.any():                                   # 은퇴 전: 안 내게 된 월세가 대출 원리금보다 많으면 그 차이만큼 추가 저축
                 saving = saving + np.maximum(rent_save * cpi[:, t] - m_now, 0) * live
-            if hh.retirement_contrib:                             # 퇴직연금: 매년 연봉의 1/12 적립(회사 부담, 과세이연)
-                Wp += sal / 12 * live
+            if hh.retirement_contrib and getattr(hh, "ret_plan", "DC") == "DC":   # DC: 매년 연봉의 1/12 회사 적립(과세이연)
+                Wdc += sal / 12 * live
             if ad.pension_contrib_annual > 0:                     # 저축 일부를 연금계좌로, 세액공제 환급은 과세계좌로
                 pc = ad.pension_contrib_annual * cpi[:, t] * live
                 credit = np.minimum(pc, 900) * ad.pension_credit_rate
                 Wp += pc; saving = saving - pc + credit
         need = spend + care + ci_cost + dl_cost + ev_cost - income_all - saving
+        # (v49) 은퇴 첫해: 퇴직급여를 IRP로. DB는 마지막 월급 × 근속연수, DC는 쌓인 적립금. 퇴직소득세는 사람별로 계산
+        if retired and t_ret is None:
+            t_ret = t
+            if hh.retirement_contrib and hh.retire_age is not None:
+                ty = t                                                 # 은퇴까지 일한 햇수
+                R_i = []
+                sal_t = [m.salary * (1 + hh.wage_growth) ** max(ty - 1, 0) for m in hh.members]
+                if getattr(hh, "ret_plan", "DC") == "DB":
+                    for i, m in enumerate(hh.members):
+                        R_i.append(sal_t[i] / 12 * (m.tenure + ty) * cpi[:, t] * alive[i, :, max(t - 1, 0)])
+                else:
+                    tot = max(sum(sal_t), 1e-9)
+                    R_i = [Wdc * sal_t[i] / tot for i in range(k)]
+                R_tot = sum(R_i)
+                tax_tot = sum(retirement_income_tax(R_i[i], hh.members[i].tenure + ty) for i in range(k))
+                tau = np.where(R_tot > 0, tax_tot / np.maximum(R_tot, 1e-9), 0.0)
+                Wr = Wr + R_tot; Rr = Rr + R_tot; Wdc = np.zeros(n)
+                sev_real = R_tot / cpi[:, t]; sev_tax_real = tax_tot / cpi[:, t]
+        ret_tax_now = np.zeros(n); g_taxable = np.zeros(n); ret_draw = np.zeros(n)
+        if retired and t_ret is not None and Wr.any() and hh.members[0].age + t >= 55:
+            kyr = t - t_ret + 1                                        # 연금수령연차
+            cap = Wr * 1.2 / max(11 - kyr, 1) if kyr <= 10 else Wr     # 연금수령한도
+            # 연금계좌(IRP 포함)에서는 v48까지와 같이 1인당 연 pen_withdraw_cap(1,500만 원)까지만 꺼내고 나머지는 과세계좌에서.
+            # (필요한 만큼 IRP에서 한꺼번에 꺼내면 과세계좌가 그대로 남아 금융소득세·건보료가 늘어난다 — 측정으로 확인)
+            draw = np.minimum(np.minimum(np.maximum(need, 0), np.minimum(cap, tc.pen_withdraw_cap * na)), Wr)
+            part_r = np.minimum(draw, Rr); part_g = draw - part_r      # 이연퇴직소득부터, 그다음 운용수익
+            ret_tax_now = part_r * tau * RET_INCOME_PENSION_RATIO[0 if kyr <= 10 else 1]
+            g_taxable = part_g
+            Wr = Wr - draw; Rr = Rr - part_r; need = need - draw; ret_draw = draw
         pw = np.zeros(n); pw_taxable = np.zeros(n)
         pen_self = ad.pension_contrib_annual > 0 or hh.pension_balance > 0 or hh.retirement_contrib
         # 세금을 끄는 것(tc.enabled=False)은 '세금을 안 매긴다'는 뜻이어야 한다.
@@ -493,9 +526,10 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         pen_active = tc.use_pension or pen_self
         pen_open = (tc.use_pension and t >= tc.pen_wait_years) or (pen_self and retired and hh.members[0].age + t >= 55)
         if pen_active and pen_open:
-            pw = np.clip(np.minimum(need, tc.pen_withdraw_cap * na), 0, Wp)
+            pw = np.clip(np.minimum(need, np.maximum(tc.pen_withdraw_cap * na - ret_draw, 0)), 0, Wp)   # (v49) IRP 인출과 합쳐 한도
             frac = np.where(Wp > 0, np.clip(1 - Pp / np.maximum(Wp, 1e-9), 0, 1), 0)
             Pp = np.maximum(Pp - pw * (1 - frac), 0); Wp -= pw; pw_taxable = pw * frac
+        pw_taxable = pw_taxable + g_taxable                           # (v49) IRP 운용수익은 연금소득
 
         # 7) 세금·건보료·보유세
         taxes = np.zeros(n); hi = np.zeros(n); prop = np.zeros(n)
@@ -544,6 +578,8 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             all_reg = health_premium([nps[i] for i in range(k)], fin_i, tc, rent_i, prop_base, pm)
             mixed_reg = reg_inc * rate + pm * 12 * reg_prop_share
             hi = (hi_w + np.where(any_work, mixed_reg, all_reg + sum(bz[i] for i in range(k)) * rate)) * live
+        if tc.enabled:
+            taxes = taxes + ret_tax_now
         tax_y[:, t] = taxes / cpi[:, t]; hi_y[:, t] = hi / cpi[:, t]; prop_y[:, t] = prop / cpi[:, t]
 
         # 8) 인출: 과세계좌 → ISA → (부족 시) 연금계좌 연금외수령
@@ -562,6 +598,14 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         short = np.maximum(rest, 0) - amt - from_i
         from_d = np.minimum(short, D); D -= from_d; short -= from_d
         from_s = np.minimum(short, S); S -= from_s; short -= from_s
+        if Wr.any():                                                  # (v49) IRP 연금외수령: 퇴직소득세 전액(감면 없음)
+            rate_l = tau if tc.enabled else np.zeros(n)
+            take = np.minimum(short / np.maximum(1 - rate_l, 1e-9), Wr)
+            pr = np.minimum(take, Rr); pg = take - pr
+            ltax = (pr * rate_l + pg * (0.165 if tc.enabled else 0.0))
+            Wr = Wr - take; Rr = Rr - pr
+            tax_y[:, t] += ltax / cpi[:, t]
+            short = np.maximum(short - (take - ltax), 0)
         if pen_active:
             frac2 = np.where(Wp > 0, np.clip(1 - Pp / np.maximum(Wp, 1e-9), 0, 1), 0)
             gross = np.minimum(short / np.maximum(1 - .165 * frac2, 1e-9), Wp)
@@ -583,7 +627,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
 
         # 9) 수익률
         r = w * eco["stock"][:, t] + (1 - w) * eco["bond"][:, t]
-        Wt *= (1 + r); Wi *= (1 + r); Wp *= (1 + r); gift_val *= (1 + r)
+        Wt *= (1 + r); Wi *= (1 + r); Wp *= (1 + r); Wr *= (1 + r); Wdc *= (1 + r); gift_val *= (1 + r)
         rt = eco["rate"][:, t]
         D *= (1 + np.maximum(rt, 0))
         debt *= (1 + np.maximum(rt, 0) + 0.015)
@@ -594,12 +638,12 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             li = (rt + b * (lm - rt) + 0.5 * b * (1 - b) * e.s_sigma ** 2 - 0.5 * s_e ** 2
                   + s_e * rng2.standard_normal(n) + ad.stock_rate_beta * (eco["rate"][:, t + 1] - rt))
             S *= np.exp(li); stock_ret[:, t] = np.expm1(li); port_ret[:, t] = r
-        W_hist[:, t + 1] = (Wt + Wi + Wp + S + D - debt) * (dep_at < 0)
+        W_hist[:, t + 1] = (Wt + Wi + Wp + Wr + Wdc + S + D - debt) * (dep_at < 0)
 
         # 10) 마지막 생존자 사망 → 상속세(10년 내 증여 합산, 기납부 증여세 공제)
         died_all = live & (alive[:, :, t + 1].sum(0) == 0)
         if died_all.any():
-            fin_est = np.maximum(Wt + Wi + Wp + S + D - debt, 0) * (dep_at < 0)
+            fin_est = np.maximum(Wt + Wi + Wp + Wr + Wdc + S + D - debt, 0) * (dep_at < 0)
             est = fin_est + np.maximum(house.market * hp(t + 1) - rm_bal, 0) + np.maximum(extra_house * hidx[:, t + 1] * cpi[:, t + 1] - mort_bal, 0)   # 주택연금·주담대 상환 후
             est = np.maximum(est - od_bal, 0)                                 # (v48) 남은 기존 대출은 상속재산에서 차감
             recent = sum(g for (tg, g, _) in gifts_hist if t + 1 - tg < 10) if gifts_hist else 0
@@ -615,7 +659,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             "estate_real": estate_real, "life_ratio": life_ratio, "stock_ret": stock_ret, "port_ret": port_ret, "short_real": short_real, "cons_u": cons_u, "cons_a": cons_a, "risk_aversion": gamma,
             "floor_tab": floor_tab, "debt_retire": debt_retire_real, "rm_monthly": rm_monthly_real, "ds_cash": ds_cash_real, "annuity_pay": float(np.median(ann_pay[ann_pay > 0])) if (ann_pay > 0).any() else 0.0, "care_premium": ci_prem, "legacy_target": hh.legacy_target, "estate_tax_real": etax_real, "transfer_real": transfer_real,
             "W_nominal": W_hist, "W_real": W_hist / cpi, "death_t": np.where(alive.all(2), -1, alive.argmin(2)),   # (구성원, 경로) 사망 연도, 끝까지 생존이면 -1
-            "hh_alive": hh_alive,
+            "hh_alive": hh_alive, "sev_real": sev_real, "sev_tax_real": sev_tax_real,
             "last_alive_t": hh_alive.sum(1) - 1, "cpi": cpi}
 
 

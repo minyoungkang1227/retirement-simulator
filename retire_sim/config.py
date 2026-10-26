@@ -15,6 +15,7 @@ class Person:
     private_pension_start: int = 60
     private_pension_years: int = 20
     salary: float = 0.0           # (v20) 연 세전 근로소득(만원, 오늘 가치). 은퇴 전 저축·퇴직연금 계산용
+    tenure: float = 0.0           # (v49) 지금 직장 근속연수(년). 퇴직금(DB) 계산과 퇴직소득세 근속연수공제에 쓴다
 
 
 @dataclass
@@ -38,7 +39,11 @@ class Household:
     saving_rate: float = 0.0              # 세전 근로소득 대비 저축률. >0이면 annual_saving 대신 소득 × 저축률
     wage_growth: float = 0.01             # 실질 임금상승률(연)
     pension_balance: float = 0.0          # 퇴직연금·연금저축 적립금(만원) — 55세 이후 연금으로 인출, 인출 시 과세
-    retirement_contrib: bool = False      # 직장 퇴직연금 적립(매년 연봉의 1/12, 은퇴 전)
+    retirement_contrib: bool = False      # 직장 퇴직급여 적립 중 (은퇴 전)
+    # (v49) 퇴직급여 제도. "DC": 매년 연봉의 1/12을 회사가 적립해 운용(확정기여형)
+    #                     "DB": 은퇴 때 마지막 월급 × 근속연수(확정급여형·퇴직금 제도)
+    #   어느 쪽이든 은퇴 시점에 IRP로 옮겨 이연퇴직소득으로 연금 수령 — 퇴직소득세의 70%(1~10년차)·60%(11년차~)
+    ret_plan: str = "DC"
     # ── v21 큰 지출 이벤트 ──
     # [{"label": "자녀 대학", "age": 48, "amount": 1000, "years": 4, "kind": "cost"},        (연 금액)
     #  {"label": "주택 구입", "age": 35, "amount": 60000, "kind": "house", "ltv": 0.6,       (집값)
