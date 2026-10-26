@@ -81,6 +81,12 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
 .dot.bad {{ background: {CORAL}; }} .dot.ok {{ background: {TEAL}; opacity: .85; }}
 .legend, .note {{ color: {MUTED}; font-size: .92rem; line-height: 1.65; }}
 .sec {{ font-size: 1.2rem; font-weight: 800; color: {INK}; margin: 1.9rem 0 .7rem; padding-top: 1.1rem; border-top: 1px solid #E3EAEC; }}
+.goal.tier {{ min-height: 15.5rem; margin-bottom: .5rem; }}
+[data-testid="stForm"] [data-testid="stHorizontalBlock"] {{ align-items: flex-end; }}
+.need {{ border: 1px solid #CBD7DB; border-radius: 12px; padding: .8rem 1rem; margin: .5rem 0; background: white; }}
+.need .t {{ font-weight: 700; }}
+.need .v {{ font-size: 1.05rem; margin-top: .15rem; }}
+.need .s {{ color: {MUTED}; font-size: .88rem; margin-top: .35rem; }}
 .wf {{ overflow-x: auto; }} .wf svg {{ min-width: 540px; }}
 .sec span {{ font-size: .86rem; font-weight: 400; color: {MUTED}; margin-left: .3rem; }}
 [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {{ color: #4F6164; font-size: .9rem; line-height: 1.6; }}
@@ -112,6 +118,7 @@ html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'P
   .tip, .gap {{ padding: .7rem .8rem; }}
   .legend, .note {{ font-size: .88rem; }}
   .sec {{ font-size: 1.08rem; margin-top: 1.4rem; }}
+  .goal.tier {{ min-height: 0; }}
   [data-testid="stTab"] p {{ font-size: .92rem; }}
   [data-testid="stTabs"] button p {{ font-size: .9rem; }}
 }}
@@ -322,15 +329,17 @@ def share_card_svg(p: dict, ok: float, band: tuple, ret_age, cid: str, life: flo
 
 
 def progress_bar(label: str, cur: float, need: float, unit: str, fmt: str = "{:.1f}") -> str:
-    """(v49.1) '필요한 만큼 중 지금 얼마' 진행률 막대(HTML)."""
+    """(v50.5) '지금 얼마 → 얼마면 되나' 한 칸. 막대는 필요한 만큼 중 지금 몇 %인지.
+    v49.1의 '5.0억 / 필요 7.2억 (70%)'는 무엇이 무엇의 70%인지 읽히지 않았다."""
     frac = 0.0 if need <= 0 else min(cur / need, 1.0)
     done = cur >= need
     color = TEAL if done else CORAL
-    return (f'<div style="margin:.35rem 0 .6rem"><div style="display:flex;justify-content:space-between;font-size:.92rem">'
-            f'<span>{label}</span><span><b>{fmt.format(cur)}{unit}</b> / 필요 {fmt.format(need)}{unit}'
-            f'{" ✓" if done else f" ({frac * 100:.0f}%)"}</span></div>'
-            f'<div style="background:#E6EDEF;border-radius:8px;height:12px;margin-top:4px">'
-            f'<div style="width:{frac * 100:.1f}%;background:{color};height:12px;border-radius:8px"></div></div></div>')
+    more = "" if done else f" — <b>{fmt.format(need - cur)}{unit} 더</b>"
+    return (f'<div class="need"><div class="t">{label}</div>'
+            f'<div class="v">지금 {fmt.format(cur)}{unit} → <b>{fmt.format(need)}{unit}</b>이면 돼요{more}</div>'
+            f'<div style="background:#E6EDEF;border-radius:8px;height:12px;margin-top:8px">'
+            f'<div style="width:{frac * 100:.1f}%;background:{color};height:12px;border-radius:8px"></div></div>'
+            f'<div class="s">필요한 만큼의 {frac * 100:.0f}%를 갖고 있어요</div></div>')
 
 
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
@@ -425,7 +434,7 @@ if not ss.get("done") and not ss.get("tier_set"):
     cols = st.columns(3)
     for k, (name, who, desc) in TIERS.items():
         with cols[k - 1]:
-            st.markdown(f'<div class="goal"><div class="h">{k}단계 · {name}</div><div class="t">{who}</div>'
+            st.markdown(f'<div class="goal tier"><div class="h">{k}단계 · {name}</div><div class="t">{who}</div>'
                         f'<div class="legend">{desc}</div></div>', unsafe_allow_html=True)
             if st.button(f"{k}단계로 시작", key=f"tier{k}", type="primary" if k == 1 else "secondary", width="stretch"):
                 p["tier"] = k; ss.tier_set = True; ss.step = 0; st.rerun()
@@ -488,11 +497,11 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
             sav = c2.number_input("한 달 저축·투자액 (만 원)", 0, 5000, int(p["saving"]) if pre else 0, step=10, disabled=not pre,
                                   help="대출 상환하고 남는 돈 중 모으는 금액")
             c1, c2, c3 = st.columns(3)
-            h_mkt = c1.number_input("사는 집 시세 (억 원, 없으면 0)", 0.0, 800.0, float(p["h_market"]), step=0.5)
-            dbt = c2.number_input("갚고 있는 대출 (억 원, 없으면 0)", 0.0, 100.0, float(p.get("debt", 0.0)), step=0.1,
+            h_mkt = c1.number_input("사는 집 시세 (억 원)", 0.0, 800.0, float(p["h_market"]), step=0.5)
+            dbt = c2.number_input("갚고 있는 대출 (억 원)", 0.0, 100.0, float(p.get("debt", 0.0)), step=0.1,
                                   help="주택담보대출·신용대출 남은 원금 합계")
             dyr = c3.number_input("대출 남은 기간 (년)", 1, 40, int(p.get("debt_years", 10)))
-            st.caption("대출은 은퇴 전에는 월급에서 갚는다고 보고, **은퇴 후까지 남는 상환분만** 노후자금에서 나갑니다.")
+            st.caption("집·대출이 없으면 0으로 두세요. 대출은 은퇴 전에는 월급에서 갚는다고 보고, **은퇴 후까지 남는 상환분만** 노후자금에서 나갑니다.")
             jse = st.number_input("전월세 보증금 (억 원, 집이 없을 때)", 0.0, 100.0, float(p.get("jeonse", 0.0)), step=0.1,
                                   help="돌려받을 돈이라 상속재산에 들어가고, 기초연금 재산과 건강보험료 재산(보증금의 30%)에도 잡힙니다. 생활비로 꺼내 쓰지는 않는다고 봅니다.")
             back, nxt = nav(i, "t1s1")
@@ -982,12 +991,14 @@ with tab1:
             req_s = required_saving(json.dumps(p, sort_keys=True))[0] if p["age"] < p["retire_age"] else None
         bars = ""
         if req_a:
-            bars += progress_bar("금융자산 (10번 중 9번에 필요한 만큼)", total_assets(p), req_a, "억")
+            bars += progress_bar("방법 1 · 모아둔 돈을 늘린다면", total_assets(p), req_a, "억 원")
         if req_s:
-            bars += progress_bar("월 저축 (자산 대신 저축으로 채운다면)", monthly_saving(p), req_s, "만", "{:.0f}")
+            bars += progress_bar("방법 2 · 은퇴 전까지 매달 저축을 늘린다면", monthly_saving(p), req_s, "만 원", "{:.0f}")
         if bars:
-            st.markdown(sec("10번 중 9번까지 얼마나 왔나") + bars, unsafe_allow_html=True)
-            st.caption("두 막대는 '둘 중 하나만 바꾼다면'입니다. 실제로는 은퇴 시기·생활비와 섞어서 맞추는 게 보통이에요 — 위의 '바꿔보기' 탭.")
+            st.markdown(sec("10번 중 9번 지키려면 얼마가 필요할까", "기본생활 유지 확률 90% 기준")
+                        + '<div class="legend">지금은 10번 중 ' + str(n_ok) + '번이에요. 9번으로 올리려면 아래 둘 중 <b>하나</b>만 하면 됩니다.</div>'
+                        + bars, unsafe_allow_html=True)
+            st.caption("두 금액은 '그것 하나만 바꿀 때' 기준이에요. 은퇴를 늦추거나 생활비를 줄이는 것과 섞으면 각각 덜 필요해요 — 위의 '바꿔보기' 탭에서 섞어 볼 수 있어요.")
 
     # 4-2) 무엇부터 하면 되나 — 효과 순위
     if n_ok < 9:
@@ -1029,13 +1040,14 @@ with tab1:
             st.caption(f"수익률은 결과를 가장 크게 바꾸는 가정인데, 사람이 고르면 낙관적으로 고르기 쉽습니다. "
                        f"그래서 이 계산기는 KOSPI 2000~2026 자료와 해외 추정치를 합쳐 정하고, 그 불확실성을 위의 '{pct(lo)} ~ {pct(hi)}'로 따로 보여줍니다.")
 
-    # 2-2) 은퇴 후 1년, 돈이 어디로 가나 — 리포트와 같은 숫자로 그린 폭포 그래프
-    wf = report.waterfall_svg(base.get("flow") or [], brand=BRAND)
+    # 2-2) (v50.5) 은퇴 후 한 달 살림 — '들어오는 돈 = 나가는 돈' 두 줄 막대 (리포트와 같은 숫자)
+    wf = report.balance_svg(base.get("flow") or [], brand=BRAND)
     if wf:
-        st.markdown(sec("은퇴 후 1년, 돈이 어디로 가나", "살아 있는 해의 평균, 오늘 돈 가치"), unsafe_allow_html=True)
+        st.markdown(sec("은퇴 후 한 달 살림 — 돈이 어디로 가나", "은퇴 후 평균, 오늘 돈 가치"), unsafe_allow_html=True)
+        st.markdown('<p>' + report.balance_sentence(base.get("flow") or []) + '</p>', unsafe_allow_html=True)
         st.markdown(f'<div class="wf">{wf}</div>', unsafe_allow_html=True)   # 휴대폰에서는 글자가 작아지지 않게 옆으로 밀어 보기
-        st.markdown('<div class="legend">연금으로 들어온 돈에서 생활비·세금·건보료·보유세가 빠지고, 남는 부족분을 '
-                    '모아둔 돈에서 꺼내 씁니다. 건보료는 지역가입자 소득분과 재산분을 모두 반영한 금액이에요.</div>',
+        st.markdown('<div class="legend">두 막대의 길이는 같아요 — 들어오는 돈으로 나가는 돈을 메웁니다. 연금이 모자라는 만큼(옅은 청록)을 '
+                    '모아둔 돈에서 꺼내 쓰고, 그 돈이 바닥나는 때가 위의 "모자라는 나이"예요. 건보료는 소득분과 재산분을 모두 넣은 금액이에요.</div>',
                     unsafe_allow_html=True)
 
     # 5) 나이별 남는 돈 (3개 선)
