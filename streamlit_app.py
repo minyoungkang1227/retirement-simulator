@@ -238,6 +238,93 @@ def required_saving(p_json: str, target: float = 0.9):
 
 
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
+def retire_age_for(p_json: str, target: float = 0.9):
+    """(v49.1) 기본생활을 target 확률로 지키는 가장 이른 은퇴 나이. 은퇴를 늦출수록 확률이 오르므로 정수 이분 탐색.
+    반환 (나이, 그 나이의 확률) — 15년을 늦춰도 안 되면 (None, 그때 확률)."""
+    p = json.loads(p_json); paths = min(p["paths"], 3000)
+    if p["age"] >= p["retire_age"]:
+        return None, None
+    f = lambda a: run(p, {"retire_delta": a - p["retire_age"], "paths": paths})["s"]["기본생활 유지 확률"]
+    lo, hi = max(p["age"] + 1, p["retire_age"] - 10), p["retire_age"] + 15
+    p_hi = f(hi)
+    if p_hi < target:
+        return None, p_hi
+    p_lo = f(lo)
+    if p_lo >= target:
+        return lo, p_lo
+    best = (hi, p_hi)
+    while hi - lo > 1:
+        mid = (lo + hi) // 2; pm = f(mid)
+        if pm >= target:
+            hi, best = mid, (mid, pm)
+        else:
+            lo = mid
+    return best
+
+
+STOCK_MEAN_NOMINAL = 0.083     # 모델의 주식 명목 기대수익률(산술, 보수 차감 후, 2만 경로 측정) — 수익률 직접 정해 보기의 기준
+
+
+@st.cache_data(ttl=600, max_entries=32, show_spinner=False)
+def prob_at_stock_return(p_json: str, r_stock: float) -> float:
+    """(v49.1) 주식 기대수익률을 사용자가 정한 값으로 바꿨을 때의 기본생활 유지 확률.
+    다른 계산기처럼 수익률을 '정해서' 넣으면 결과가 얼마나 움직이는지 보여주기 위한 것 — 위험프리미엄만 옮긴다."""
+    p = json.loads(p_json)
+    erp = EconomyV2.enhanced().erp + (r_stock - STOCK_MEAN_NOMINAL)
+    return run(p, {"eco": {"erp": erp}, "paths": min(p["paths"], 3000)})["s"]["기본생활 유지 확률"]
+
+
+def share_card_svg(p: dict, ok: float, band: tuple, ret_age, cid: str, life: float = None, legacy_ok: float = None) -> str:
+    """(v49.1) 공유용 결과 한 장(1080×1350, SVG). 숫자는 결과 화면과 같은 값을 쓴다."""
+    import html as _h
+    n_ok = int(round(ok * 10)); n_bad = 10 - n_ok
+    esc = lambda x: _h.escape(str(x))
+    font = "Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif"
+    dots = "".join(f'<circle cx="{150 + k * 87}" cy="560" r="30" fill="{CORAL if k < n_bad else TEAL}"/>' for k in range(10))
+    rows = [f"금융자산 {total_assets(p):.1f}억 원" + (f" · 월 저축 {monthly_saving(p):.0f}만 원" if p['age'] < p['retire_age'] else ""),
+            f"기본생활비 월 {p['essential']}만 원 · 연금 월 {income_gap(p)[1]:.0f}만 원",
+            f"현재 {p['age']}세 · {p['retire_age']}세 은퇴" + (" (부부)" if p["spouse"] else "")]
+    if life is not None and p["lifestyle"] > 0:
+        rows.append(f"여행·취미 예산은 {life * 100:.0f}% 정도 쓸 수 있어요")
+    if legacy_ok is not None and p["legacy"] > 0:
+        rows.append(f"{p['legacy']:.1f}억 남기기: 10번 중 {int(round(legacy_ok * 10))}번")
+    body = "".join(f'<text x="90" y="{720 + i * 62}" font-size="38" fill="{INK}">{esc(t)}</text>' for i, t in enumerate(rows))
+    ra = ""
+    if ret_age:
+        ra = (f'<rect x="60" y="{720 + len(rows) * 62 + 10}" width="960" height="110" rx="24" fill="#E6EDEF"/>'
+              f'<text x="90" y="{720 + len(rows) * 62 + 80}" font-size="42" font-weight="700" fill="{TEAL}">'
+              f'{esc(ret_age)}세에 은퇴하면 10번 중 9번 지켜요</text>')
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350" font-family="{font}">
+<rect width="1080" height="1350" fill="#FFFFFF"/>
+<rect width="1080" height="150" fill="{TEAL}"/>
+<text x="60" y="95" font-size="48" font-weight="800" fill="#FFFFFF">🧭 {esc(BRAND.name)} 진단</text>
+<text x="1020" y="95" font-size="30" fill="#FFFFFF" text-anchor="end">{date.today():%Y-%m-%d}</text>
+<text x="60" y="290" font-size="46" fill="{MUTED}">1만 가지 미래 가운데</text>
+<text x="60" y="400" font-size="96" font-weight="800" fill="{INK}">10번 중 <tspan fill="{TEAL if n_ok >= 7 else CORAL}">{n_ok}번</tspan></text>
+<text x="60" y="475" font-size="46" fill="{INK}">기본생활비를 끝까지 낼 수 있어요</text>
+{dots}
+<text x="60" y="650" font-size="30" fill="{MUTED}">주식 수익률·수명·간병을 달리 가정하면 {band[0] * 100:.0f}~{band[1] * 100:.0f}%</text>
+{body}
+{ra}
+<line x1="60" y1="1230" x2="1020" y2="1230" stroke="#CBD7DB" stroke-width="2"/>
+<text x="60" y="1285" font-size="28" fill="{MUTED}">계산 ID {esc(cid)} · 모델 v{esc(MODEL_VERSION)} · 같은 입력이면 같은 결과</text>
+<text x="60" y="1325" font-size="26" fill="{MUTED}">투자 권유가 아니라 같은 시나리오 위에서의 계산입니다</text>
+</svg>'''
+
+
+def progress_bar(label: str, cur: float, need: float, unit: str, fmt: str = "{:.1f}") -> str:
+    """(v49.1) '필요한 만큼 중 지금 얼마' 진행률 막대(HTML)."""
+    frac = 0.0 if need <= 0 else min(cur / need, 1.0)
+    done = cur >= need
+    color = TEAL if done else CORAL
+    return (f'<div style="margin:.35rem 0 .6rem"><div style="display:flex;justify-content:space-between;font-size:.92rem">'
+            f'<span>{label}</span><span><b>{fmt.format(cur)}{unit}</b> / 필요 {fmt.format(need)}{unit}'
+            f'{" ✓" if done else f" ({frac * 100:.0f}%)"}</span></div>'
+            f'<div style="background:#E6EDEF;border-radius:8px;height:12px;margin-top:4px">'
+            f'<div style="width:{frac * 100:.1f}%;background:{color};height:12px;border-radius:8px"></div></div></div>')
+
+
+@st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def action_ranking(p_json: str):
     """효과가 큰 순서 — 계산은 라이브러리(advice)가 하고 여기서는 캐시만 한다."""
     return _action_ranking(json.loads(p_json))
@@ -782,6 +869,14 @@ with tab1:
     need, pension, gap = income_gap(p)
     ok = s["기본생활 유지 확률"]; n_ok = int(round(ok * 10)); n_bad = 10 - n_ok
 
+    # 0) (v49.1) 맨 위 요약 숫자 — 무엇을 넣고 계산했는지 한 줄로
+    chips = [("금융자산", f"{total_assets(p):.1f}억"), ("월 저축", f"{monthly_saving(p):.0f}만" if p["age"] < p["retire_age"] else "—"),
+             ("연금", f"월 {pension:.0f}만"), ("생활비", f"월 {need:.0f}만")]
+    st.markdown('<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.2rem 0 .6rem">' + "".join(
+        f'<div style="flex:1;min-width:110px;border:1px solid #CBD7DB;border-radius:12px;padding:.45rem .7rem;background:white">'
+        f'<div style="color:{MUTED};font-size:.8rem">{k}</div><div style="font-weight:700;font-size:1.05rem">{v}</div></div>'
+        for k, v in chips) + '</div>', unsafe_allow_html=True)
+
     # 1) 한 문장 결론
     if n_bad == 0:
         st.markdown('<div class="hero">지금 계획대로면<br>10번 중 <span style="color:#1F6F78">9번 이상</span> 생활비를 끝까지 낼 수 있어요</div>', unsafe_allow_html=True)
@@ -792,6 +887,21 @@ with tab1:
     st.markdown(f'<div class="dots">{dots}</div><div class="legend"><span class="key" style="background:{CORAL}"></span>모자라는 경우 &nbsp; '
                 f'<span class="key" style="background:{TEAL}"></span>끝까지 괜찮은 경우 &nbsp;·&nbsp; 앞으로 있을 수 있는 여러 미래를 10번으로 줄여 표시했어요</div>',
                 unsafe_allow_html=True)
+    # 1-2) (v49.1) 몇 살에 은퇴하면 10번 중 9번 지키나 — 은퇴 전 가구만
+    ret_age = None
+    if p["age"] < p["retire_age"]:
+        with st.spinner("은퇴 가능 나이를 찾는 중"):
+            ret_age, ret_p = retire_age_for(json.dumps(p, sort_keys=True))
+        if ret_age is None:
+            st.markdown(f'<div class="tip">은퇴를 {p["retire_age"] + 15}세까지 늦춰도 10번 중 9번에는 못 미쳐요 '
+                        f'(그때 {ret_p * 100:.0f}%). 생활비나 저축을 함께 바꿔야 합니다.</div>', unsafe_allow_html=True)
+        else:
+            d_ = ret_age - p["retire_age"]
+            rel = "지금 계획대로도 충분해요" if d_ <= 0 else f"지금 계획보다 <b>{d_}년</b> 늦게"
+            if d_ < 0:
+                rel = f"지금 계획보다 <b>{-d_}년</b> 일찍 은퇴해도 돼요"
+            st.markdown(f'<div class="tip">🎯 <b>{ret_age}세</b>에 은퇴하면 기본생활을 <b>10번 중 9번</b> 지킬 수 있어요 — {rel}.</div>',
+                        unsafe_allow_html=True)
 
     # 2) 매달 부족한 돈: 생활비 − 연금 = 부족분, 그리고 채우는 방법
     short = max(gap, 0)
@@ -822,6 +932,20 @@ with tab1:
     for col, (h_, t_, v_) in zip(st.columns(len(cards)), cards):
         col.markdown(f'<div class="goal"><div class="h">{h_}</div><div class="t">{t_}</div><div class="v">{v_}</div></div>', unsafe_allow_html=True)
 
+    # 3-1) (v49.1) 10번 중 9번까지 얼마나 왔나 — 필요 자산·필요 저축 대비 진행률
+    if n_ok < 9:
+        with st.spinner("필요한 자산을 계산 중"):
+            req_a, _ = required_assets(json.dumps(p, sort_keys=True))
+            req_s = required_saving(json.dumps(p, sort_keys=True))[0] if p["age"] < p["retire_age"] else None
+        bars = ""
+        if req_a:
+            bars += progress_bar("금융자산 (10번 중 9번에 필요한 만큼)", total_assets(p), req_a, "억")
+        if req_s:
+            bars += progress_bar("월 저축 (자산 대신 저축으로 채운다면)", monthly_saving(p), req_s, "만", "{:.0f}")
+        if bars:
+            st.markdown("**10번 중 9번까지 얼마나 왔나**" + bars, unsafe_allow_html=True)
+            st.caption("두 막대는 '둘 중 하나만 바꾼다면'입니다. 실제로는 은퇴 시기·생활비와 섞어서 맞추는 게 보통이에요 — '바꿔보기' 탭.")
+
     # 3-2) 가정의 불확실성 — 난수를 늘려도 줄지 않는 폭
     with st.spinner("가정이 달라질 때의 폭을 계산 중"):
         lo, hi = assumption_band(json.dumps(p, sort_keys=True))
@@ -829,6 +953,21 @@ with tab1:
                 f'위 <b>{pct(ok)}</b>는 <b>{pct(lo)} ~ {pct(hi)}</b> 사이에서 움직입니다. '
                 f'계산을 더 많이 해도 이 폭은 줄지 않으니, <b>숫자 하나보다 선택을 바꿨을 때의 차이</b>를 보세요.</div>',
                 unsafe_allow_html=True)
+    with st.expander("수익률을 직접 정해서 보면? (다른 계산기 방식)"):
+        st.markdown(f"많은 계산기는 기대수익률을 직접 넣게 합니다. 이 계산기는 묻지 않고 한국 자료로 추정합니다 — "
+                    f"주식 연 {STOCK_MEAN_NOMINAL * 100:.1f}%, 채권 3.2%, 물가 2.5%(명목, 보수 차감 후 평균). "
+                    "그 값을 바꾸면 결과가 얼마나 달라지는지 직접 확인해 보세요.")
+        with st.form("ret_form"):
+            r_in = st.slider("주식 기대수익률 (연, 명목)", 3.0, 15.0, float(STOCK_MEAN_NOMINAL * 100), step=0.5, format="%.1f%%")
+            go_r = st.form_submit_button("이 수익률로 계산")
+        if go_r:
+            with st.spinner("계산 중"):
+                pr_ = prob_at_stock_return(json.dumps(p, sort_keys=True), r_in / 100)
+            diff_ = (pr_ - ok) * 100
+            st.markdown(f"주식 기대수익률 **{r_in:.1f}%** 라면 기본생활 유지 **{pct(pr_)}** — 이 계산기의 추정({pct(ok)})보다 "
+                        f"**{diff_:+.0f}%p**.")
+            st.caption(f"수익률은 결과를 가장 크게 바꾸는 가정인데, 사람이 고르면 낙관적으로 고르기 쉽습니다. "
+                       f"그래서 이 계산기는 KOSPI 2000~2026 자료와 해외 추정치를 합쳐 정하고, 그 불확실성을 위의 '{pct(lo)} ~ {pct(hi)}'로 따로 보여줍니다.")
 
     # 4-2) 무엇부터 하면 되나 — 효과 순위
     if n_ok < 9:
@@ -860,6 +999,16 @@ with tab1:
         tooltip=["경우", "나이", alt.Tooltip("억 원:Q", format=".1f")]).properties(height=280), width="stretch")
     st.markdown('<div class="legend">선이 0에 닿는 때가 모아둔 돈을 다 쓰는 때예요. 운이 나쁘면(주가 하락·물가 상승 등) 더 빨리, '
                 '운이 좋으면 더 늦게 닿습니다. 집은 포함하지 않았어요.</div>', unsafe_allow_html=True)
+
+    # 6) (v49.1) 공유용 결과 한 장
+    with st.expander("결과를 한 장으로 저장하기"):
+        card = share_card_svg(p, ok, (lo, hi), ret_age, calc_id(p),
+                              life=s.get("여행·취미 평균 충족률"), legacy_ok=s.get("유산 목표 달성 확률"))
+        preview = card.replace('width="1080" height="1350"', 'width="100%"')
+        st.markdown('<div style="max-width:360px">' + preview + '</div>', unsafe_allow_html=True)
+        st.download_button("결과 카드 내려받기 (.svg)", card, file_name=f"nohu-compass-{calc_id(p)}.svg",
+                           mime="image/svg+xml", width="stretch")
+        st.caption("휴대폰에서는 내려받은 그림을 열어 공유하거나 화면을 캡처하세요. 이름·연락처는 들어가지 않습니다.")
 
 @st.cache_data(ttl=600, max_entries=16, show_spinner=False)
 def product_compare(p_json: str, spec_json: str) -> dict:
