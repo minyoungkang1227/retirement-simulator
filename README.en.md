@@ -37,7 +37,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 4. **Stochastic economy** — OU real rate and inflation estimated from Bank of Korea (ECOS) data, with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
 5. **Statistically honest comparisons** — paired-difference confidence intervals on common random numbers decide "different / not different"
 
-## Example (model v48 · 10,000 paths · reproduce with `scripts/readme_numbers.py`)
+## Example (model v49 · 10,000 paths · reproduce with `scripts/readme_numbers.py`)
 
 **Couple aged 52 and 50, retiring at 60, KRW 500M financial assets, saving KRW 1.5M/month** (essential KRW 3M/month + lifestyle KRW 12M/year, pensions KRW 1.6M/month, KRW 100M legacy)
 
@@ -65,8 +65,8 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 **Young savers (dual-income couple aged 30 and 29, KRW 90M gross income, 15% saving rate, workplace pension, National Pension estimated automatically)**
 
 - Essential success **76%**, lifestyle funding **92%**, KRW 100M legacy **70%**
-- What if: save KRW 0.5M more per month +8.1pp · retire 2 years later +6.5pp · spend 10% less +5.1pp
-- **Without the workplace pension −26.1pp** — at this age nothing else comes close.
+- What if: save KRW 0.5M more per month +8.3pp · retire 2 years later +6.3pp · spend 10% less +5.2pp
+- **Without the workplace pension −25.9pp** — at this age nothing else comes close.
 
 **House-rich, cash-poor household (couple aged 65 and 63, KRW 300M financial assets, home worth KRW 700M, essential KRW 2.5M/month + lifestyle KRW 12M/year, KRW 300M legacy)**
 
@@ -86,13 +86,15 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 
 ## Recent changes
 
+> **v49 (2026-10-26):** **Severance pay, workplace pensions and retirement income tax.** Previously only the DC type existed (1/12 of salary accrues each year). Now the user picks **DC or DB / statutory severance** (final monthly wage × years of service) and enters years of service (tier 1 gets one checkbox and the service years). The benefit is assumed to move into an IRP at retirement and be drawn as a pension; **retirement income tax** follows the Income Tax Act (service-years deduction → annualised pay → its deduction → basic rates × years/12, plus 10% local tax), and pension receipt pays 70% of it in years 1–10 and 60% from year 11. A hand calculation (KRW 100M, 10 years = KRW 4.2625M) is pinned by a test. A 52-year-old earning KRW 60M with 20 years of service gets KRW 150M, lifting essential success from 79.0% to **87.7%**. Drawing the IRP first initially *lowered* results by 2.4pp — the taxable account grew and raised financial-income tax and health premiums — so the withdrawal order was kept as in v48 (pension accounts together capped at KRW 15M per person per year); the only difference from v48 is then the tax rate (+0.4pp).
+
 > **v48 (2026-10-26):** **Input now comes in three tiers**, chosen on the first screen — **1 Quick check** (on your own, 3 minutes), **2 My finances** and **3 With an adviser**. The order of questions was measured: moving each input by the error a default would typically make, retirement age (33.5pp), essential spending (29.7pp), lifestyle budget (24.0pp), financial assets (18.7pp), risk profile (18.3pp), the home and debt dominate, while spending after widowhood (6.2pp), parental care (2.9pp) and overseas equity share (1.2pp) are small. High-impact questions anyone can answer go in tier 1, details needed for tax go in tier 2, judgement calls go in tier 3. Unasked inputs take defaults and the results screen lists exactly what was assumed. Alongside: **existing debt** can now be entered (previously only future loans). Only repayments still due after retirement come out of retirement savings; KRW 200M with 20 years left costs −13.0pp. Without debt results equal v47. The full measurement table is in the CHANGELOG.
 
 > **v47 (2026-10-26):** **Spending rigidity is now on by default.** That a household cannot cut its standard of living by more than 30% in a single year is a structural property of household spending, not an investment behaviour, so what v36 had built and left switched off inside the "behavioural assumptions" toggle is now the default (`lifestyle_floor=0.30`). Measured over 80,000 paths: **−1.3pp** for the reference household and **−3.0pp** for a couple just retired at 60. The example households above were re-run — the 52/50 couple 52% → **49%**, the house-rich cash-poor household 17% → **12%** (the larger the fixed costs already are, the more this bites). Alongside: the **assumption band now moves three factors instead of one** (equity risk premium ±1 standard error, mortality level ±1σ, care incidence ±20%, one at a time; the band is the min and max of the six results). Measured, the width is **dominated by the risk premium** — v46's band was not too narrow, but we can now say which assumption creates it and why. `tax.progressive` and `tax.hi_property_points` were rewritten around `searchsorted`, taking one 10,000-path run from **0.94s to 0.78s** with bit-identical results. The economy and mortality chapters of `docs/MODEL.md` were consolidated to the current specification with 20 references, and this English edition was brought in line. Tests 121 → 122.
 
 > **v45 (2026-10-20):** Filled the model's **largest remaining gap** — the **property component of regional health-insurance premiums**. It is worth about -7pp and the default was zero, so unless the user typed in a figure from the insurer's own calculator it silently passed as nothing. The statutory **60-grade score table** from Annex 4 of the National Health Insurance Act Enforcement Decree (grade 1 = 22 points, grade 60 = 2,341 points), the **KRW 211.5 per point** and the **KRW 100M basic deduction** now come straight from the legal text. Measured as a paired comparison: a single-home household with a KRW 500M assessed value goes **45.3% -> 38.5% (-6.78pp, 95% CI [-7.27, -6.29])**, and at KRW 900M **31.4% -> 24.0% (-7.44pp)** - because **twenty years of premiums rise from KRW 15M to KRW 41-56M**, nearly tripling. None of the thresholds are inflation-indexed (as in tax law), so nominal house-price growth pushes a household up the grades by itself: the same quiet tax drift that property taxes have. Seven hand-calculated point tests plus table-shape, non-indexation and engine-integration tests lock it in. The report's **money-flow waterfall also moved into the results tab**, with a test that the app and the report both read from one `reporting.money_flow()`. The reference household owns no home, so its 69.8% is unchanged. Tests 108 -> 116.
 
-Earlier versions (v1–v47) and their measurements are in [CHANGELOG.md](CHANGELOG.md) (Korean).
+Earlier versions (v1–v48) and their measurements are in [CHANGELOG.md](CHANGELOG.md) (Korean).
 
 ## Validation
 

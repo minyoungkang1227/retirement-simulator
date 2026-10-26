@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 48          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 49          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -35,7 +35,7 @@ from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality, optimize, report, product, sources
 from retire_sim.session import calc_id, save_blob, load_blob
 from retire_sim.inputs import (PROFILES, AVG_SPEND, DEFAULTS, build_case,
-                              total_assets, nps_values, monthly_saving, income_gap)
+                              total_assets, nps_values, monthly_saving, income_gap, severance_estimate)
 from retire_sim.advice import action_ranking as _action_ranking, assumption_band as _assumption_band
 from retire_sim import reporting
 from retire_sim.reporting import build_report, fan_rows
@@ -305,6 +305,8 @@ def tier_assumptions(p: dict) -> list:
             out.append("집은 1채, 공시가격은 시세의 69%, 보유 10년으로 가정")
         if p.get("debt", 0) > 0:
             out.append("대출 금리는 지금 시장금리 + 1.5%p 고정")
+        if p.get("ret_contrib"):
+            out.append("퇴직금은 '마지막 월급 × 근속연수'(퇴직금·DB 제도) 기준, 은퇴 때 IRP로 받아 연금으로 수령")
     if t <= 2:
         out += ["부모님 간병비 분담 없음",
                 f"한 명만 남았을 때 생활비는 부부일 때의 {p.get('survivor', 70)}%",
@@ -413,14 +415,23 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
             nps = c1.number_input("본인 (만 원/월)", 0, 500, 0 if p.get("nps_auto") else int(p["nps"]))
             s_nps = c2.number_input("배우자 (만 원/월)", 0, 500, 0 if p.get("nps_auto") else int(p["s_nps"]), disabled=not p["spouse"])
             c1, c2 = st.columns(2)
-            sal = c1.number_input("본인 세전 연소득 (만 원, 월액을 모를 때)", 0, 100000, int(p.get("salary", 0)), step=100)
+            sal = c1.number_input("본인 세전 연소득 (만 원)", 0, 100000, int(p.get("salary", 0)), step=100,
+                                  help="국민연금 월액을 모를 때 추정하고, 퇴직금을 계산할 때 씁니다")
             ssal = c2.number_input("배우자 세전 연소득 (만 원)", 0, 100000, int(p.get("s_salary", 0)), step=100, disabled=not p["spouse"])
             st.caption("정확한 값은 국민연금공단 '내 연금 알아보기'에서 볼 수 있습니다.")
+            pre1 = p["age"] < p["retire_age"]
+            rc1 = st.checkbox("회사에서 퇴직금·퇴직연금이 쌓이고 있어요", value=bool(p.get("ret_contrib")), disabled=not pre1)
+            c1, c2 = st.columns(2)
+            ten1 = c1.number_input("본인 지금 회사 근속연수 (년)", 0, 50, int(p.get("tenure", 0)), disabled=not pre1)
+            sten1 = c2.number_input("배우자 근속연수 (년)", 0, 50, int(p.get("s_tenure", 0)), disabled=not (pre1 and p["spouse"]))
+            st.caption("은퇴할 때 받을 퇴직금을 '마지막 월급 × 근속연수'로 계산하고, IRP로 받아 연금으로 나눠 쓴다고 봅니다(퇴직소득세 30% 감면). "
+                       "퇴직연금 적립금을 앞에서 금융자산 합계에 이미 넣으셨다면 근속연수는 0으로 두세요 — 앞으로 쌓일 몫만 계산합니다.")
             prof = st.radio("투자 성향", list(PROFILES), index=list(PROFILES).index(p["profile"]), horizontal=True,
                             captions=["주식 약 30%, 안정 위주", "주식 약 50%, 균형", "주식 약 70%, 장기 성장"])
             back, nxt = nav(i, "t1s3")
             if nxt or back:
                 auto = nps == 0 and sal > 0
+                p.update(ret_contrib=bool(rc1) and pre1, ret_plan="DB", tenure=int(ten1), s_tenure=int(sten1))
                 p.update(nps_auto=auto, nps=int(nps), s_nps=int(s_nps), salary=float(sal), s_salary=float(ssal),
                          nps_years=tier1_nps_years(p["age"]), s_nps_years=tier1_nps_years(p["s_age"]),
                          nps_start=65, priv=0, legacy=0.0, profile=prof)
@@ -433,7 +444,8 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
             c2.markdown(f'<div class="card"><h4>자산과 대출</h4><p>금융자산 {total_assets(p):.1f}억 원'
                         + (f'<br>월 {p["saving"]:.0f}만 원 저축' if p["age"] < p["retire_age"] else '')
                         + (f'<br>집 시세 {p["h_market"]:.1f}억 원' if p["h_market"] > 0 else '')
-                        + (f'<br>대출 {p["debt"]:.1f}억 원 · {p["debt_years"]}년 남음' if p.get("debt", 0) > 0 else '') + '</p></div>',
+                        + (f'<br>대출 {p["debt"]:.1f}억 원 · {p["debt_years"]}년 남음' if p.get("debt", 0) > 0 else '')
+                        + (f'<br>은퇴 때 퇴직금 약 {severance_estimate(p)[0]:.1f}억 원 (오늘 가치)' if severance_estimate(p)[0] > 0 else '') + '</p></div>',
                         unsafe_allow_html=True)
             c1.markdown(f'<div class="card"><h4>생활비</h4><p>기본생활 월 {p["essential"]}만 원<br>여행·취미 연 {p["lifestyle"]:,}만 원</p></div>',
                         unsafe_allow_html=True)
@@ -504,14 +516,23 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 c1, c2 = st.columns(2)
                 sav = c1.number_input("한 달 저축·투자액 (만 원)", 0, 5000, int(p["saving"]), step=10)
                 rate = c2.slider("저축률 (세전 소득 대비 %)", 0, 60, int(p.get("save_rate", 15)))
-                rc = st.checkbox("직장 퇴직연금 적립 중 (매년 연봉의 1/12이 퇴직연금으로)", value=bool(p.get("ret_contrib")))
-                st.caption("퇴직연금·연금저축 적립금은 55세 이후 연금으로 꺼내 쓰는 계좌로 따로 계산합니다.")
+                st.markdown("**퇴직급여**")
+                rc = st.checkbox("회사에서 퇴직금·퇴직연금이 쌓이고 있다", value=bool(p.get("ret_contrib")))
+                plans = {"확정기여형(DC)": "DC", "확정급여형(DB)·퇴직금 제도": "DB"}
+                plan = st.radio("제도", list(plans), index=0 if p.get("ret_plan", "DC") == "DC" else 1, horizontal=True,
+                                captions=["회사가 매년 연봉의 1/12을 적립하고 내가 운용", "퇴직할 때 마지막 월급 × 근속연수"])
+                c1, c2 = st.columns(2)
+                ten = c1.number_input("본인 지금 회사 근속연수 (년)", 0, 50, int(p.get("tenure", 0)))
+                sten = c2.number_input("배우자 근속연수 (년)", 0, 50, int(p.get("s_tenure", 0)), disabled=not p["spouse"])
+                st.caption("은퇴 때 퇴직급여를 IRP로 받아 연금으로 나눠 쓴다고 보고 퇴직소득세를 계산합니다(1~10년차 70%, 11년차부터 60%만 냄). "
+                           "**DC형**은 지금까지 쌓인 적립금을 위 '퇴직연금·연금저축 적립금'에 넣고, 여기서는 앞으로 쌓일 몫만 더합니다. "
+                           "**DB형·퇴직금**은 회사 장부에 있어 적립금 칸에 넣지 않습니다 — 근속연수로 전체를 계산합니다.")
             back, nxt = nav(i, "s1")
             if nxt or back:
                 p.update(deposit=dep, invest=inv, ret_acct=ret, other=oth)
                 if pre:
                     p.update(saving=int(sav), salary=float(sal), s_salary=float(ssal), wage_g=float(wg), save_mode=mode,
-                             save_rate=int(rate), ret_contrib=bool(rc))
+                             save_rate=int(rate), ret_contrib=bool(rc), ret_plan=plans[plan], tenure=int(ten), s_tenure=int(sten))
                 else:
                     p.update(saving=0, salary=0, s_salary=0, ret_contrib=False)
                 go(1 if nxt else -1)
@@ -714,7 +735,8 @@ if ss.step < len(STEPS) and not ss.get("done"):
                         + (f'<br>배우자 {p["s_age"]}세' if p["spouse"] else '') + '</p></div>', unsafe_allow_html=True)
             c2.markdown(f'<div class="card"><h4>자산</h4><p>금융자산 {total_assets(p):.1f}억 원'
                         + (f'<br>은퇴 전 월 {monthly_saving(p):.0f}만 원 저축' if p["age"] < p["retire_age"] else '')
-                        + ('<br>퇴직연금 적립 중' if p.get("ret_contrib") and p["age"] < p["retire_age"] else '')
+                        + (f'<br>은퇴 때 퇴직급여 약 {severance_estimate(p)[0]:.1f}억 원 ({"DB·퇴직금" if p.get("ret_plan") == "DB" else "DC 앞으로 쌓일 몫"}, '
+                           f'퇴직소득세 약 {severance_estimate(p)[1]:,.0f}만 원)' if severance_estimate(p)[0] > 0 else '')
                         + (f'<br>주택 시세 {p["h_market"]:.1f}억 원' if p["h_market"] > 0 else '')
                         + (f'<br>대출 {p["debt"]:.1f}억 원 · {p["debt_years"]}년 남음' if p.get("debt", 0) > 0 else '') + '</p></div>', unsafe_allow_html=True)
             ev_txt ="".join(f'<br>{e_["age"]}세 {e_["kind"]} {e_["amount"]:,.0f}만 원' + ("" if e_["kind"] == "주택 구입" else f' × {e_["years"]}년') for e_ in p.get("events", []))

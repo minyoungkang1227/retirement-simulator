@@ -821,6 +821,42 @@ def test_existing_debt_v48():
     assert e1 < e0
 
 
+def test_retirement_income_tax_hand_calc_v49():
+    """(v49) 퇴직소득세 손검산 — 소득세법 제48·55조, 2023년 이후 근속연수공제.
+    1억·10년: 근속공제 1,500만 → 환산급여 (1억−1,500만)×12/10 = 1억 200만 → 환산공제 6,170만+200만×45% = 6,260만
+    → 과표 3,940만 → 기본세율 3,940×15%−126 = 465만 → ×10/12 = 387.5만 → 지방세 포함 426.25만."""
+    from retire_sim.tax import retirement_income_tax, retirement_service_deduction, retirement_conv_deduction
+    assert float(retirement_service_deduction(3)) == 300
+    assert float(retirement_service_deduction(10)) == 1500
+    assert float(retirement_service_deduction(25)) == 5500
+    assert float(retirement_conv_deduction(500)) == 500
+    assert abs(float(retirement_conv_deduction(10200)) - 6260) < 1e-9
+    assert abs(float(retirement_income_tax(10000, 10)) - 426.25) < 1e-6
+    assert abs(float(retirement_income_tax(10000, 10, local=False)) - 387.5) < 1e-6
+    assert float(retirement_income_tax(0, 10)) == 0.0
+    assert float(retirement_income_tax(3000, 30)) == 0.0          # 근속공제 6,500만 > 퇴직금 → 세금 없음
+
+
+def test_severance_v49():
+    """(v49) 퇴직급여: 없으면 결과가 그대로, DB(마지막 월급 × 근속연수)는 확률을 올리고,
+    퇴직소득세가 실제로 매겨지며(세금을 끄면 확률이 더 높다), 근속이 길수록 퇴직급여가 크다."""
+    from retire_sim import advice
+    from retire_sim.inputs import defaults, severance_estimate
+    p = defaults(); p.update(paths=2000, salary=6000)
+    run = lambda **kw: advice.run_case({**p, **kw})
+    prob = lambda r: advice.essential_prob(r)
+    base = run(ret_contrib=False)
+    db10, db25 = run(ret_contrib=True, ret_plan="DB", tenure=10), run(ret_contrib=True, ret_plan="DB", tenure=25)
+    assert prob(db10) > prob(base) + 0.02
+    assert np.median(db25["sev_real"]) > np.median(db10["sev_real"]) > 0
+    assert np.median(db25["sev_tax_real"]) > 0
+    # 화면용 근사: DB는 마지막 월급 × 근속연수와 같다 (오늘 가치)
+    est, _ = severance_estimate({**p, "ret_contrib": True, "ret_plan": "DB", "tenure": 10})
+    ty = p["retire_age"] - p["age"]
+    assert abs(est * 1e4 - 6000 * 1.01 ** (ty - 1) / 12 * (10 + ty)) < 1e-6
+    assert abs(np.median(db10["sev_real"]) / 1e4 - est) / est < 0.05
+
+
 def test_app_tier_choice_and_tier1_flow():
     """(v48) 첫 화면에서 단계를 고르고, 1단계(빠른 진단)는 5화면 만에 결과까지 가며 가정한 값을 보여준다."""
     at = _app(); at.run()
