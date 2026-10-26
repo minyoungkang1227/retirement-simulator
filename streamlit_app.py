@@ -32,7 +32,7 @@ if not _model_ok:
 
 from retire_sim.config import Person
 from retire_sim.economy_v2 import EconomyV2
-from retire_sim import engine_tax, mortality, optimize, report, product, sources
+from retire_sim import engine_tax, mortality, optimize, report, product, sources, verify
 from retire_sim.session import calc_id, save_blob, load_blob
 from retire_sim.inputs import (PROFILES, AVG_SPEND, DEFAULTS, build_case,
                               total_assets, nps_values, monthly_saving, income_gap, severance_estimate)
@@ -1046,6 +1046,12 @@ with tab1:
                            mime="image/svg+xml", width="stretch")
         st.caption("휴대폰에서는 내려받은 그림을 열어 공유하거나 화면을 캡처하세요. 이름·연락처는 들어가지 않습니다.")
 
+@st.cache_data(show_spinner=False)
+def verify_rows(version: str = __import__("retire_sim").__version__) -> list:
+    """검증 장부를 한 번만 돌린다(약 0.3초). 모델 버전이 바뀌면 다시 돌린다."""
+    return verify.run_checks()
+
+
 @st.cache_data(ttl=600, max_entries=16, show_spinner=False)
 def product_compare(p_json: str, spec_json: str) -> dict:
     """실제 연금보험 스펙으로 '연금보험 vs 펀드 vs 예금'을 같은 시나리오에서 비교."""
@@ -1632,11 +1638,35 @@ with tab5:
     st.caption("자료가 새로 나오면 어떻게 반영하는지는 저장소의 docs/SOURCES.md 에 정리해 두었습니다.")
     st.markdown("수식과 검증 결과: [GitHub 저장소](https://github.com/minyoungkang1227/retirement-simulator)")
 
+    # v50.1 검증 장부 — 테스트와 같은 목록(retire_sim/verify.py)을 그대로 보여 준다
+    st.markdown("### 계산이 맞는지 어떻게 확인했나요")
+    vrows = verify_rows()
+    v_ok, v_n, v_areas = verify.summary(vrows)
+    st.markdown("세금·건강보험료·연금은 법에 정해진 계산입니다. 그래서 **법 조문과 고시된 숫자로 직접 계산한 값**과 "
+                "이 프로그램이 계산한 값을 하나씩 맞춰 봤습니다.")
+    st.markdown(f'<div class="gap"><div class="big">{v_n}개 중 <span class="n" style="color:#1F6F78">{v_ok}개</span> 일치</div>'
+                f'<div class="eq">{" · ".join(v_areas)}</div></div>', unsafe_allow_html=True)
+    bad = [r for r in vrows if not r["ok"]]
+    if bad:
+        st.warning("맞지 않는 항목이 있습니다: " + ", ".join(f'{r["area"]} {r["item"]}' for r in bad))
+    with st.expander("맞춰 본 항목 전체 보기"):
+        def _num(v, unit):
+            return f"{v:.1%}" if unit == "비율" else f"{v:,.2f} {unit}".replace(".00 ", " ")
+        st.dataframe(pd.DataFrame([{"영역": r["area"], "항목": r["item"], "근거": r["basis"],
+                                    "직접 계산": r["hand_how"], "직접 계산 값": _num(r["hand"], r["unit"]),
+                                    "프로그램 값": _num(r["model"], r["unit"]), "일치": "✓" if r["ok"] else "✗"}
+                                   for r in vrows]), hide_index=True, width="stretch")
+        st.caption("'직접 계산'은 프로그램을 쓰지 않고 법 조문의 세율·공제액만으로 적은 식입니다. "
+                   "같은 목록이 프로그램을 고칠 때마다 자동 검사로 돌아가므로, 하나라도 어긋나면 고치기 전에는 올라가지 않습니다.")
+    st.caption("아직 하지 않은 것: 국민건강보험공단·국민연금공단 **모의계산기 화면값과의 대조**. "
+               "건보료 재산분에는 자동차와 월세 환산분을 넣지 않았습니다(전월세 보증금은 v50부터 30% 반영). 법이 바뀌면 이 표도 함께 고칩니다.")
+
 with tab7:
     st.markdown("### 고객에게 설명하실 때")
     st.markdown("이 화면은 **설명하시는 분을 위한 것**입니다. 고객께 보여 드리는 화면은 '결과' 탭입니다.")
 
     short = max(income_gap(p)[2], 0)
+    _v_ok, _v_n, _ = verify.summary(verify_rows())
     ok_pct = s["기본생활 유지 확률"]
     n_ok_ = int(round(ok_pct * 10))
     st.markdown(f"""
@@ -1664,6 +1694,11 @@ with tab7:
 **"왜 10번 중 몇 번입니까? 그냥 되는지 안 되는지 알려주세요."**
 "되고 안 되고가 정해져 있으면 계산이 필요 없습니다.
 운이 나쁜 경우에도 버티는지를 보는 것"이라고 말씀해 주세요.
+
+**"세금이나 건보료 계산은 믿을 수 있습니까?"**
+'이 계산에 대하여' 탭의 **'계산이 맞는지 어떻게 확인했나요'**를 보여 주세요.
+법 조문의 세율·공제액으로 직접 계산한 값과 프로그램 값을 나란히 맞춰 둔 표입니다.
+다만 세법을 단순하게 옮긴 부분이 있으니 **"큰 방향은 맞고, 정확한 세액은 세무사 확인"**이라고 덧붙여 주세요.
 
 **"숫자가 저번이랑 다른데요?"**
 입력이 달라졌거나 자료가 갱신된 것입니다.
@@ -1709,6 +1744,8 @@ with tab7:
 #### 6) 설명하실 때 쓰실 수 있는 근거
 
 - **"추측한 숫자는 없습니다."** 자료 출처는 '이 계산에 대하여' 탭에 전부 적혀 있습니다.
+- **"세금·건보료·연금 계산은 법 조문으로 직접 맞춰 봤습니다."** {_v_n}개 항목 중 {_v_ok}개가 일치합니다.
+  표는 '이 계산에 대하여' 탭에 있습니다.
 - **"같은 입력이면 언제 해도 같은 결과입니다."** 리포트의 계산 ID로 확인됩니다.
 - **"선택끼리 비교할 때가 가장 정확합니다."** 같은 1만 가지 미래 위에서 비교하기 때문입니다.
 """)

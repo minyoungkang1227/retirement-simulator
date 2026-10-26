@@ -1485,3 +1485,65 @@ def test_money_flow_is_shared_by_app_and_report():
     app = pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"
     assert "reporting.money_flow(" in app.read_text(), "앱이 money_flow() 를 쓰지 않습니다"
     assert "waterfall_svg" in app.read_text(), "앱이 폭포 그래프를 그리지 않습니다"
+
+
+# ───────────── v48.1: 검증 장부 — 화면과 테스트가 같은 목록을 읽는다 ─────────────
+from retire_sim import verify as _verify
+
+
+@pytest.mark.parametrize("c", _verify.CHECKS, ids=[f"{c.area}:{c.item}" for c in _verify.CHECKS])
+def test_verify_ledger_matches_hand_calculation(c):
+    """장부의 항목 하나하나가 법령·고시값으로 직접 계산한 값과 같아야 한다.
+
+    앱 '이 계산에 대하여' 탭의 'N개 중 N개 일치'는 이 테스트가 통과하는 한 거짓일 수 없다."""
+    got = float(c.model())
+    assert got == pytest.approx(c.hand, rel=c.tol, abs=1e-9), f"{c.area} {c.item}: 직접 계산 {c.hand} ≠ 모델 {got}"
+
+
+def test_verify_ledger_catches_planted_faults(monkeypatch):
+    """검증기 자체의 검증 — 고장을 심으면 정확히 그 항목이 빨갛게 바뀌어야 한다."""
+    from retire_sim import pension, tax
+    bad = lambda: {r["item"] for r in _verify.run_checks() if not r["ok"]}
+    monkeypatch.setattr(tax, "BRACKETS", [(h, r, d + 10 if d == 1544 else d) for h, r, d in tax.BRACKETS])
+    assert bad() == {"과세표준 1억 원"}, "소득세 누진공제 오타를 못 잡는다"
+    monkeypatch.undo()
+    monkeypatch.setattr(tax, "HI_POINT_VALUE", 215.0)
+    assert bad() == {"재산과표 2억 원 — 건강보험 재산분 월액"}, "점수당 금액 변경을 못 잡는다"
+    monkeypatch.undo()
+    monkeypatch.setattr(pension, "NPS_A", 319.0)
+    assert bad() == {"A값 (전체 가입자 평균소득월액)"}, "A값 근사로 돌아간 것을 못 잡는다"
+    monkeypatch.undo()
+    monkeypatch.setattr(tax, "gift_tax", lambda x: 1 / 0)
+    rows = [r for r in _verify.run_checks() if not r["ok"]]
+    assert len(rows) == 1 and "ZeroDivisionError" in rows[0]["error"], "한 항목이 터져도 장부는 끝까지 보여야 한다"
+
+
+def test_verify_ledger_points_at_registered_sources():
+    """장부의 근거는 자료 목록(sources.py)의 항목을 가리켜야 한다 — 출처를 두 곳에 따로 적지 않도록."""
+    from retire_sim.sources import SOURCES
+    keys = {s.key for s in SOURCES}
+    for c in _verify.CHECKS:
+        assert c.source in keys, f"{c.item}: 출처 키 '{c.source}'가 sources.py 에 없다"
+        assert c.kind in ("법령 손계산", "공식 고시값", "닫힌식"), c.kind
+    assert len({c.item for c in _verify.CHECKS}) == len(_verify.CHECKS), "항목 이름이 겹치면 화면에서 구분이 안 된다"
+
+
+def test_analytic_benchmark_uses_the_ledger():
+    """해석해 대조 스크립트와 장부의 엔진 항목이 같은 설정을 쓴다(설정이 두 곳에 있으면 언젠가 어긋난다)."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent / "scripts" / "benchmark_analytic.py").read_text()
+    assert "from retire_sim.verify import analytic_rows" in src
+    assert "EconomyV2(" not in src, "스크립트에 설정이 다시 생겼다"
+
+
+def test_app_about_tab_shows_verification_ledger():
+    """'이 계산에 대하여' 탭에 장부 요약이, '설명하기' 탭에 설계사용 답변이 보여야 한다."""
+    at = _app(); at.run()
+    [b for b in at.button if "60대" in b.label][0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    n = len(_verify.CHECKS)
+    assert "계산이 맞는지 어떻게 확인했나요" in md
+    assert f"{n}개 중" in md and f"{n}개</span> 일치" in md, "장부 요약 숫자가 장부 크기와 다르다"
+    assert f"{n}개 항목 중 {n}개가 일치" in md, "설명하기 탭의 근거 문장이 장부를 따라가지 않는다"
+    assert "모의계산기 화면값과의 대조" in " ".join(c.value for c in at.caption), "아직 안 한 것을 숨기면 안 된다"
