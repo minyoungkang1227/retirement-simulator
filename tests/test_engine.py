@@ -800,8 +800,9 @@ def _app():
     pytest.importorskip("streamlit")
     from streamlit.testing.v1 import AppTest
     import pathlib
-    return AppTest.from_file(str(pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"),
-                             default_timeout=600)
+    at = AppTest.from_file(str(pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"), default_timeout=600)
+    at.session_state["stage_set"] = True          # (v52) 생애 단계 화면은 test_v52_stage_screen 에서 따로 본다
+    return at
 
 
 def test_app_runs_and_example_household_reaches_results():
@@ -1737,3 +1738,70 @@ def test_v51_retirement_timing_risk():
     rows = {n: d for n, _, d in contrast.breakdown(p, paths=1500)["rows"]}
     assert "은퇴 시점 위험" in rows and rows["은퇴 시점 위험"] > 0.02
     assert "은퇴 시점 위험" not in {n for n, _, _ in contrast.breakdown(q0, paths=1500)["rows"]}
+
+
+def test_v52_life_stage_marriage_and_kids():
+    """(v52) 생애 단계: 결혼·자녀 입력이 비어 있으면 v51과 같은 결과(비트 단위). 결혼은 그 나이부터 배우자 소득이 들어오고,
+    자녀는 나이별 양육·교육비 통계로 저축을 줄이며(빚은 안 짐), 독립 후에는 그만큼 더 모인다. 단계별 첫 문장은 stage 모듈이 만든다."""
+    import numpy as np
+    from retire_sim import advice, stage
+    from retire_sim.inputs import KID_COST, KID_END, STAGES, build_case, fill, kid_schedule, kid_total, validate
+    assert KID_END == 22 and 3.8 < sum(KID_COST) / 10000 < 4.0           # 보사연 2012 → 2026 물가 환산, 1인 약 3.9억
+    A = fill(dict(age=28, sex="M", retire_age=60, spouse=False, deposit=0.2, invest=0.2, ret_acct=0.1, essential=150, lifestyle=800,
+                  nps_auto=True, nps_years=2, salary=4000, saving=100, ret_contrib=True, paths=1500))
+    r0 = advice.run_case(A, {}); r1 = advice.run_case(dict(A, kids=[], kid_plan=[], marry_age=0, stage=1), {})
+    assert np.array_equal(r0["W_real"], r1["W_real"]) and r0["depleted_at"].tolist() == r1["depleted_at"].tolist()
+    # 결혼: 이벤트가 생기고, 결혼 전에는 배우자 소득이 저축에 안 들어온다(결혼 나이 전 자산이 '처음부터 부부'보다 적다)
+    Am = dict(A, spouse=True, s_age=27, s_sex="F", s_salary=3500, s_nps_years=1, marry_age=32, marry_cost=3500, marry_assets=0.3, essential=217, lifestyle=1000)
+    hh, *_ = build_case(Am, {})
+    assert any(ev["kind"] == "marry" and ev["age"] == 32 and ev["assets"] == 3000 for ev in hh.events)
+    rm, rf = advice.run_case(Am, {}), advice.run_case(dict(Am, marry_age=0), {})
+    assert np.median(rm["W_real"][:, 3]) < np.median(rf["W_real"][:, 3])           # 31세: 아직 혼자 저축
+    assert np.median(rm["W_real"][:, 4]) > np.median(rm["W_real"][:, 3])           # 32세: 결혼 비용보다 배우자 자산·저축이 큼
+    # 자녀: 계획 자녀는 전액, 지금 있는 자녀는 지금 수준과의 차이만. 확률은 내려가되 0 근처로 무너지지 않는다(저축 0까지만 줄임)
+    sched = kid_schedule(dict(A, kids=[12], kid_plan=[34]))
+    assert len(sched) == 2 and sched[0]["base"] == KID_COST[12] and sched[0]["full"] == [float(x) for x in KID_COST[12:]] and sched[1]["base"] == 0
+    assert abs(kid_total(dict(A, kid_plan=[34])) - sum(KID_COST) / 10000) < 1e-9
+    pk = advice.essential_prob(advice.run_case(dict(Am, kid_plan=[34, 37]), {})); pm = advice.essential_prob(rm)
+    assert pm - 0.4 < pk < pm - 0.05
+    C = fill(dict(age=45, spouse=True, s_age=43, deposit=1.0, invest=1.0, ret_acct=1.0, essential=250, lifestyle=1000, salary=7000, s_salary=3000,
+                  saving=200, nps=120, s_nps=60, h_market=8, h_official=5.5, debt=2.0, debt_years=15, paths=1500))
+    pc, pck = advice.essential_prob(advice.run_case(C, {})), advice.essential_prob(advice.run_case(dict(C, kids=[12, 9]), {}))
+    assert abs(pc - pck) < 0.06                                                   # 지금 있는 자녀: 고·대학 때 더 들고 독립 후 더 모여 상쇄
+    assert advice.essential_prob(advice.run_case(dict(C, kids=[12, 9]), {"kids_off": True})) == pc
+    # 입력 검사
+    import pytest
+    with pytest.raises(ValueError):
+        validate(dict(A, marry_age=32))                                            # 배우자 정보 없이 결혼 계획
+    with pytest.raises(ValueError):
+        validate(dict(Am, marry_age=61))
+    # 단계별 첫 문장
+    assert set(STAGES) == {1, 2, 3, 4}
+    h1 = stage.headline(dict(A, stage=1), paths=1000)
+    assert h1["kind"] == "start" and h1["lo"] < h1["median"] < h1["hi"] and h1["prob_extra"] >= h1["prob"]
+    B = dict(Am, stage=2, jeonse=2.0, events=[dict(kind="주택 구입", age=36, amount=60000, years=1)], ev_rent=80)
+    h2 = stage.headline(B, paths=1000)
+    assert h2["kind"] == "house" and h2["age"] == 36 and h2["price"] == 6.0 and 0 <= h2["prob"] <= 1 and 0 <= h2["prob_rent"] <= 1
+    assert stage.headline(dict(Am, stage=2), paths=500)["kind"] == "house_none"
+    h3 = stage.headline(dict(C, stage=3, kids=[12, 9], parents=[dict(who="어머니", age=75, sex="F", share=0.5)]), paths=1000)
+    assert h3["kind"] == "family" and h3["n_kids"] == 2 and h3["n_parents"] == 1 and h3["prob"] < h3["prob_without"]
+    assert stage.headline(dict(C, stage=4), paths=500)["kind"] == "none"
+
+
+def test_v52_stage_screen():
+    """(v52) 첫 화면에서 단계를 고르면 나이 기본값이 바뀌고 입력 단계 화면으로 간다. 결과 화면에 단계별 첫 문장이 뜬다."""
+    import pathlib
+    from streamlit.testing.v1 import AppTest
+    from retire_sim.inputs import STAGES
+    at = AppTest.from_file(str(pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"), default_timeout=600); at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert all(name in md for name, *_ in STAGES.values())
+    [b for b in at.button if b.key == "stage1"][0].click().run()
+    assert at.session_state["p"]["stage"] == 1 and at.session_state["p"]["age"] == 28 and not at.session_state["p"]["spouse"]
+    assert [b for b in at.button if b.label == "1단계로 시작"], "단계를 고른 뒤 입력 단계 화면이 나와야 한다"
+    # 30대 예시 가구(집 사는 계획 포함) → 결과에 '결혼·내 집 마련' 첫 문장
+    [b for b in at.button if "30대" in b.label][0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert "결혼·내 집 마련</b> 단계에서 먼저 볼 숫자" in md and "전세·월세를 유지하면" in md

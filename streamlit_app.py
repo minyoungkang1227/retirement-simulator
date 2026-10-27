@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 51          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 52          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -34,8 +34,9 @@ from retire_sim.config import Person
 from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality, optimize, report, product, sources, verify
 from retire_sim.session import calc_id, save_blob, load_blob
-from retire_sim.inputs import (EARLY_EXIT, PROFILES, AVG_SPEND, DEFAULTS, build_case,
-                              total_assets, nps_values, monthly_saving, income_gap, severance_estimate)
+from retire_sim.inputs import (EARLY_EXIT, PROFILES, AVG_SPEND, DEFAULTS, STAGES, STAGE_AGES, build_case,
+                              total_assets, nps_values, monthly_saving, income_gap, severance_estimate, kid_total)
+from retire_sim import stage as stage_mod
 from retire_sim.advice import action_ranking as _action_ranking, assumption_band as _assumption_band
 from retire_sim import reporting
 from retire_sim.reporting import build_report, fan_rows
@@ -341,6 +342,51 @@ def progress_bar(label: str, cur: float, need: float, unit: str, fmt: str = "{:.
 
 
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
+def stage_calc(p_json: str) -> dict:
+    """(v52) 생애 단계별 첫 문장 재료. 계산은 stage 모듈."""
+    return stage_mod.headline(json.loads(p_json))
+
+
+def stage_banner(p: dict, ok: float) -> None:
+    """(v52) 단계별로 '지금 결정에 닿는 숫자'를 결론 바로 아래에 한 상자로."""
+    st_ = int(p.get("stage", 0) or 0)
+    if st_ not in (1, 2, 3):
+        return
+    with st.spinner("이 단계에 맞는 숫자를 계산하는 중"):
+        h = stage_calc(json.dumps(p, sort_keys=True))
+    k = h.get("kind")
+    if k == "start":
+        body = (f'지금처럼 매달 모으면 <b>{h["retire_age"]}세</b>에 금융자산은 보통 <b>{h["median"]:.1f}억 원</b>'
+                f' (10번 중 8번은 {h["lo"]:.1f}~{h["hi"]:.1f}억 원, 오늘 돈 가치)이 돼요. '
+                f'매달 <b>{h["extra"]}만 원</b>을 더 모으면 기본생활을 끝까지 지킬 가능성이 {h["prob"] * 100:.0f}% → <b>{h["prob_extra"] * 100:.0f}%</b>가 돼요.')
+        sub = "20대의 저축은 금액보다 '시작했다'가 중요합니다 — 같은 50만 원이 30년 굴러갑니다. 은퇴 나이·생활비는 아직 가정값이니 대략으로 보세요."
+    elif k == "house_none":
+        body = ('집을 사는 계획을 아직 안 넣으셨어요. <b>입력 수정하기 → 추가 정보 → 큰 지출 계획</b>에서 "주택 구입"(나이·집값)을 넣으면, '
+                '전세를 유지할 때와 확률이 얼마나 달라지는지 여기에 보여드려요.' if not h.get("own") else
+                '이미 집이 있어요. 집을 바꾸거나 줄이는 계획은 <b>바꿔보기</b> 탭의 주택 활용에서 비교할 수 있어요.')
+        sub = ""
+    elif k == "house":
+        d = (h["prob"] - h["prob_rent"]) * 100
+        body = (f'<b>{h["age"]}세에 {h["price"]:.1f}억 원 집</b>을 사면 기본생활을 끝까지 지킬 가능성은 <b>{h["prob"] * 100:.0f}%</b>, '
+                f'전세·월세를 유지하면 {h["prob_rent"] * 100:.0f}%예요 ({d:+.0f}%p). 은퇴 때 금융자산은 사면 {h["w_buy"]:.1f}억, 안 사면 {h["w_rent"]:.1f}억 원(집값은 따로).')
+        sub = ("집을 사면 금융자산은 줄지만 집이 남아요 — 은퇴 후 주택연금·집 줄이기로 바꾸면 결과가 달라집니다(바꿔보기 탭). "
+               "집값은 물가보다 연 1.25%p(±1.2) 더 오르되 해마다 10% 흔들린다고 보고(부동산원 2013~ 자료 보정), 대출은 당시 금리 + 1.5%p 고정입니다.")
+    elif k == "family_none":
+        body = '자녀 나이나 부모님 부양을 아직 안 넣으셨어요. <b>입력 수정하기 → 나와 가족</b>(자녀), 3단계의 부모 부양에서 넣으면 넣기 전/후를 여기에 보여드려요.'
+        sub = ""
+    else:
+        d = (h["prob"] - h["prob_without"]) * 100
+        what = " · ".join(x for x in [f'자녀 {h["n_kids"]}명 (앞으로 약 {h["kid_total"]:.1f}억 원)' if h["n_kids"] else "",
+                                     f'부모님 간병 분담 {h["n_parents"]}분' if h["n_parents"] else ""] if x)
+        body = (f'{what}을 넣기 전에는 기본생활을 끝까지 지킬 가능성이 {h["prob_without"] * 100:.0f}%, 넣으면 <b>{h["prob"] * 100:.0f}%</b>예요 ({d:+.0f}%p).')
+        sub = ("자녀 비용은 나이별 통계로 자동 계산했고, 지금 쓰는 몫은 저축액에 이미 들어 있다고 봤어요. "
+               "자녀가 독립하는 해부터는 그만큼 더 모이는 것도 넣었습니다. 부모님 간병은 발생 확률로 계산합니다.")
+    name = STAGES[st_][0]
+    st.markdown(f'<div class="tip"><b>{name}</b> 단계에서 먼저 볼 숫자 — {body}' + (f'<div class="legend" style="margin-top:.3rem">{sub}</div>' if sub else '') + '</div>',
+                unsafe_allow_html=True)
+
+
+@st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def contrast_calc(p_json: str) -> dict:
     """(v50.7) 같은 가구를 시중 계산기 방식으로 + 한국 제도를 하나씩 뺀 확률. 계산은 contrast 모듈."""
     from retire_sim import contrast
@@ -432,6 +478,12 @@ def tier_assumptions(p: dict) -> list:
             out.append("퇴직금은 '마지막 월급 × 근속연수'(퇴직금·DB 제도) 기준, 은퇴 때 IRP로 받아 연금으로 수령")
     if t == 1:
         out.append("배우자는 은퇴 후 일하지 않음")
+    if int(p.get("marry_age", 0) or 0) > p.get("age", 0) and p.get("spouse"):
+        out.append(f"{p['marry_age']}세에 결혼 — 그때부터 배우자 소득이 들어오고(월 금액 저축이면 배우자도 같은 저축률로 보탬), 생활비는 입력한 부부 기준. "
+                   f"결혼 비용 {p.get('marry_cost', 0):,}만 원" + (f", 배우자 금융자산 {p.get('marry_assets', 0):.1f}억 원 합류" if p.get("marry_assets") else ""))
+    if p.get("kids") or p.get("kid_plan"):
+        out.append(f"자녀 양육·교육비는 자녀 나이별 통계(1인 대학 졸업까지 약 3.9억 원, 2026년 물가)로 — 앞으로 약 {kid_total(p):.1f}억 원. "
+                   "지금 있는 자녀는 지금 쓰는 몫이 저축액에 이미 있다고 보고 늘거나 주는 만큼만 저축에서 조정(빚은 지지 않음), 은퇴 후 남는 몫은 노후자금에서")
     if p.get("age", 0) < p.get("retire_age", 0):
         out.append(f"은퇴 나이가 계획대로 될 가능성 '{p.get('early_exit', '보통')}' — {EARLY_EXIT.get(p.get('early_exit', '보통'), 0.3):.0%} 확률로 1~7년 일찍 주된 직장을 그만둔다고 봄 (0%로 두면 계획대로)")
         out.append("자녀 직장 건강보험의 피부양자로 올리지 않는다고 가정 (건보료를 직접 냄)")
@@ -444,9 +496,100 @@ def tier_assumptions(p: dict) -> list:
     return out
 
 
-if not ss.get("done") and not ss.get("tier_set"):
+# ─────────────────────────── (v52) 생애 단계 고르기 ───────────────────────────
+# 계산은 어느 단계든 같은 엔진이 지금 나이부터 끝까지 한 번에 한다. 단계는 '무엇을 묻고, 무엇을 먼저 보여주나'만 바꾼다.
+STAGE_DEFAULTS = {                      # 단계를 고르면 나이와 몇 가지 기본값만 이렇게 바꾼다(이미 바꾼 값은 그대로)
+    1: dict(age=28, s_age=27, spouse=False, retire_age=60, deposit=0.2, invest=0.2, ret_acct=0.1, saving=80, essential=139, lifestyle=600,
+            nps_auto=True, nps_years=2, salary=3600, ret_contrib=True, ret_plan="DB", tenure=1, legacy=0.0, children=0, h_market=0.0, h_official=0.0),
+    2: dict(age=35, s_age=33, spouse=True, retire_age=60, deposit=0.4, invest=0.4, ret_acct=0.3, saving=150, essential=217, lifestyle=1000,
+            nps_auto=True, nps_years=7, s_nps_years=5, salary=5000, s_salary=3600, ret_contrib=True, ret_plan="DB", tenure=5, legacy=0.0, children=0, jeonse=2.0,
+            h_market=0.0, h_official=0.0),
+    3: dict(age=45, s_age=43, spouse=True, retire_age=60, deposit=0.8, invest=1.0, ret_acct=0.8, saving=150, essential=250, lifestyle=1000,
+            nps_auto=True, nps_years=15, s_nps_years=8, salary=7000, s_salary=3000, ret_contrib=True, ret_plan="DB", tenure=10, legacy=1.0, children=2,
+            h_market=6.0, h_official=4.1, debt=2.0, debt_years=15, kids=[12, 9]),
+    4: dict(age=55, s_age=53, spouse=True, retire_age=60),
+}
+
+
+def family_txt(p: dict) -> str:
+    """(v52) 확인 화면 카드용 한 줄: 자녀·출산 계획."""
+    out = ""
+    if p.get("kids"):
+        out += "<br>자녀 " + ", ".join(f"{int(x)}세" for x in p["kids"])
+    if p.get("kid_plan"):
+        out += "<br>출산 계획 " + ", ".join(f"내 {int(x)}세" for x in p["kid_plan"])
+    if out:
+        out += f" (양육·교육비 약 {kid_total(p):.1f}억 원)"
+    return out
+
+
+def family_fields(p: dict, key: str) -> dict:
+    """(v52) 결혼 계획·자녀 — 1단계와 2단계 입력의 '나와 가족' 화면이 같이 쓴다. 폼 안에서 그리고, 값은 돌려준다."""
+    out = {}
+    st_ = int(p.get("stage", 0) or 0)
+    with st.expander("결혼 계획 · 자녀", expanded=st_ in (1, 2, 3) or bool(p.get("kids") or p.get("kid_plan") or p.get("marry_age"))):
+        c1, c2, c3 = st.columns(3)
+        out["marry_age"] = c1.number_input("결혼 예정 나이 (0 = 없음·이미 결혼)", 0, 70, int(p.get("marry_age", 0) or 0), key=f"{key}_ma",
+                                           help="그 나이부터 배우자 소득이 가구에 들어오고, 생활비는 부부 기준으로 바뀝니다. 위 '배우자와 함께'를 켜고 배우자 나이·소득을 넣어 주세요.")
+        out["marry_cost"] = c2.number_input("결혼 비용 — 내 몫 (만 원)", 0, 100000, int(p.get("marry_cost", 0) or 0), step=100, key=f"{key}_mc",
+                                            help="신혼집 보증금은 빼고 예식·혼수·신혼여행 중 내가 내는 몫. 2025년 조사 평균은 둘이 합쳐 약 7,000만 원(가연 결혼비용 리포트)")
+        out["marry_assets"] = c3.number_input("배우자가 가져올 금융자산 (억 원)", 0.0, 50.0, float(p.get("marry_assets", 0.0) or 0.0), step=0.1, key=f"{key}_mas")
+        c1, c2 = st.columns(2)
+        kids_txt = c1.text_input("지금 있는 자녀 나이 (쉼표로, 없으면 비움)", ", ".join(str(int(x)) for x in (p.get("kids") or [])), key=f"{key}_kids",
+                                 placeholder="예: 12, 9")
+        plan_txt = c2.text_input("출산 계획 — 그때 내 나이 (쉼표로)", ", ".join(str(int(x)) for x in (p.get("kid_plan") or [])), key=f"{key}_plan",
+                                 placeholder="예: 34, 37")
+
+        def _ints(txt, lo, hi):
+            vals = []
+            for tok in txt.replace("，", ",").split(","):
+                tok = tok.strip()
+                if tok:
+                    try:
+                        x = int(float(tok))
+                    except ValueError:
+                        continue
+                    if lo <= x <= hi:
+                        vals.append(x)
+            return vals
+        out["kids"] = _ints(kids_txt, 0, 40); out["kid_plan"] = _ints(plan_txt, 18, 60)
+        tmp = {**p, **out}
+        tot = kid_total(tmp)
+        if tot > 0:
+            st.caption(f"자녀 양육·교육비는 자녀 나이별 통계(보건사회연구원, 2026년 물가로 환산 — 1인 대학 졸업까지 약 3.9억 원)로 자동 계산합니다. "
+                       f"앞으로 나갈 자녀 비용 약 **{tot:.1f}억 원**. 지금 있는 자녀는 지금 쓰는 몫이 저축액에 이미 들어 있다고 보고, "
+                       "앞으로 늘거나 줄어드는 만큼만 저축에서 조정합니다(저축이 0이 될 때까지만, 빚은 지지 않음). 은퇴 후에 남는 자녀 비용은 노후자금에서 나갑니다.")
+        else:
+            st.caption("자녀를 넣으면 나이별 양육·교육비 통계(1인 대학 졸업까지 약 3.9억 원, 2026년 물가)로 자동 계산합니다. 금액을 직접 정하려면 '큰 지출 계획'을 쓰세요.")
+    return out
+
+
+if not ss.get("done") and not ss.get("tier_set") and not ss.get("stage_set"):
     st.markdown('<p class="sub">내가 원하는 은퇴생활을 지키려면 무엇이 필요한지, 1만 가지 미래로 확인합니다. '
-                '<b>어떻게 시작할까요?</b></p>', unsafe_allow_html=True)
+                '<b>지금 어느 단계이신가요?</b> 단계마다 묻는 것과 먼저 보여드리는 숫자가 다릅니다 — 계산은 모두 같은 방식입니다.</p>',
+                unsafe_allow_html=True)
+    cols = st.columns(4)
+    for k, (name, who, desc) in STAGES.items():
+        with cols[k - 1]:
+            st.markdown(f'<div class="goal tier"><div class="h">{name}</div><div class="t">{who}</div>'
+                        f'<div class="legend">{desc}</div></div>', unsafe_allow_html=True)
+            if st.button("이 단계로", key=f"stage{k}", type="primary" if k == 4 else "secondary", width="stretch"):
+                p["stage"] = k
+                for kk, vv in STAGE_DEFAULTS[k].items():        # 아직 기본값 그대로인 항목만 단계 기본값으로
+                    if p.get(kk) == DEFAULTS.get(kk):
+                        p[kk] = vv
+                ss.stage_set = True; st.rerun()
+    st.caption("단계는 묻는 순서와 첫 화면의 문장만 바꿉니다. 잘 모르겠으면 나이에 맞는 것을 고르세요 — 나중에 바꿀 수 있습니다.")
+    if st.button("단계 없이 바로 시작", key="stage0"):
+        p["stage"] = 0; ss.stage_set = True; st.rerun()
+    st.markdown('<p class="note">입력하신 정보는 계산에만 쓰이고 저장되지 않습니다.</p>', unsafe_allow_html=True)
+    st.stop()
+
+if not ss.get("done") and not ss.get("tier_set"):
+    _sn = STAGES[int(p.get("stage", 0))][0] if int(p.get("stage", 0) or 0) in STAGES else ""
+    st.markdown('<p class="sub">' + (f'<b>{_sn}</b> 단계 · ' if _sn else '') + '<b>어떻게 시작할까요?</b></p>', unsafe_allow_html=True)
+    if st.button("← 단계 다시 고르기", key="restage"):
+        ss.stage_set = False; st.rerun()
     cols = st.columns(3)
     for k, (name, who, desc) in TIERS.items():
         with cols[k - 1]:
@@ -461,12 +604,13 @@ if not ss.get("done") and not ss.get("tier_set"):
     if e1.button("60대 초반 부부 예시 보기", key="ex_60", width="stretch"):
         ss.p.update(age=60, sex="M", retire_age=60, spouse=True, s_age=58, s_sex="F", deposit=1.5, invest=2.5, ret_acct=1.0, other=0.0,
                     essential=250, lifestyle=1000, nps_auto=False, nps=110, s_nps=50, nps_start=65, priv=600, priv_start=60, priv_years=20,
-                    legacy=1.0, profile="균형형", salary=0, s_salary=0, saving=0, tier=2)
+                    legacy=1.0, profile="균형형", salary=0, s_salary=0, saving=0, tier=2, stage=4)
         ss.tier_set = True; ss.done = True; st.rerun()
     if e2.button("30대 맞벌이 부부 예시 보기", key="ex_30", width="stretch"):
         ss.p.update(age=34, sex="M", retire_age=60, spouse=True, s_age=32, s_sex="F", deposit=0.4, invest=0.4, ret_acct=0.2, other=0.0,
                     essential=300, lifestyle=1200, nps_auto=True, nps_years=5, s_nps_years=4, nps_start=65, priv=0, legacy=1.0, profile="균형형",
-                    salary=5000, s_salary=4000, save_mode="소득의 %", save_rate=15, wage_g=1.0, ret_contrib=True, tier=2)
+                    salary=5000, s_salary=4000, save_mode="소득의 %", save_rate=15, wage_g=1.0, ret_contrib=True, tier=2, stage=2,
+                    jeonse=2.0, events=[dict(kind="주택 구입", age=37, amount=60000, years=1)], ev_ltv=60, ev_loan_years=30, ev_rent=80)
         ss.tier_set = True; ss.done = True; st.rerun()
     with st.expander("저장해 둔 고객 불러오기"):
         up = st.file_uploader("고객 파일(.json)", type="json", key="load_file", label_visibility="collapsed")
@@ -504,10 +648,11 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
                                "통계청 조사에서 주된 일자리를 그만둔 평균 나이는 53세이고, 정년퇴직은 13%뿐입니다. "
                                "'보통'은 30% 확률로 1~7년 일찍 그만둔다고 봅니다.")
             st.caption("은퇴 나이는 결과를 가장 크게 바꾸는 값입니다. 계획 중인 나이를 넣어 주세요.")
+            fam = family_fields(p, "t1")
             back, nxt = nav(i, "t1s0")
             if nxt or back:
-                p.update(age=int(age), sex="M" if sex == "남" else "F", retire_age=int(retire), spouse=bool(spouse),
-                         s_age=int(s_age), s_sex="M" if s_sex == "남" else "F", early_exit=ee)
+                p.update(age=int(age), sex="M" if sex == "남" else "F", retire_age=int(retire), spouse=bool(spouse) or fam["marry_age"] > 0,
+                         s_age=int(s_age), s_sex="M" if s_sex == "남" else "F", early_exit=ee, **fam)
                 go1(1 if nxt else -1)
         elif i == 1:
             pre = p["age"] < p["retire_age"]
@@ -580,7 +725,8 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
             need, pension, gap = income_gap(p)
             c1, c2 = st.columns(2)
             c1.markdown(f'<div class="card"><h4>나와 가족</h4><p>현재 {p["age"]}세 · {p["retire_age"]}세 은퇴'
-                        + (f'<br>배우자 {p["s_age"]}세' if p["spouse"] else '') + '</p></div>', unsafe_allow_html=True)
+                        + (f'<br>배우자 {p["s_age"]}세' + (f' ({p["marry_age"]}세에 결혼)' if int(p.get("marry_age", 0) or 0) > p["age"] else '') if p["spouse"] else '')
+                        + family_txt(p) + '</p></div>', unsafe_allow_html=True)
             c2.markdown(f'<div class="card"><h4>자산과 대출</h4><p>금융자산 {total_assets(p):.1f}억 원'
                         + (f'<br>월 {p["saving"]:.0f}만 원 저축' if p["age"] < p["retire_age"] else '')
                         + (f'<br>집 시세 {p["h_market"]:.1f}억 원' if p["h_market"] > 0 else '')
@@ -620,7 +766,7 @@ if ss.step < len(STEPS) and not ss.get("done"):
         if ss.step > 5: st.caption(f"남길 자산: {p['legacy']:.1f}억 원")
         if ss.step > 6: st.caption(f"투자 성향: {p['profile']}")
 
-    if ss.step == 0 and st.button("← 단계 다시 고르기", key="retier"):
+    if ss.step == 0 and st.button("← 입력 단계 다시 고르기", key="retier"):
         ss.tier_set = False; st.rerun()
 
     i = ss.step
@@ -638,10 +784,11 @@ if ss.step < len(STEPS) and not ss.get("done"):
                                "통계청 조사에서 주된 일자리를 그만둔 평균 나이는 53세이고, 정년퇴직은 13%뿐입니다. "
                                "'보통'은 30% 확률로 1~7년 일찍 그만둔다고 봅니다.")
             st.caption("계획은 95세까지를 기준으로 기본생활비를 보호합니다. 실제 수명은 생명표로 확률적으로 계산합니다.")
+            fam = family_fields(p, "t2")
             back, nxt = nav(i, "s0")
             if nxt or back:
-                p.update(age=int(age), sex="M" if sex == "남" else "F", retire_age=int(retire), spouse=bool(spouse),
-                         s_age=int(s_age), s_sex="M" if s_sex == "남" else "F", early_exit=ee)
+                p.update(age=int(age), sex="M" if sex == "남" else "F", retire_age=int(retire), spouse=bool(spouse) or fam["marry_age"] > 0,
+                         s_age=int(s_age), s_sex="M" if s_sex == "남" else "F", early_exit=ee, **fam)
                 go(1 if nxt else -1)
         elif i == 1:
             st.markdown("집은 빼고, 꺼내 쓸 수 있는 금융자산만 적어주세요. (단위: 억 원)")
@@ -902,7 +1049,8 @@ if ss.step < len(STEPS) and not ss.get("done"):
             st.markdown("앞에서 입력한 내용입니다. 이후 계산은 모두 이 가정을 바탕으로 합니다.")
             c1, c2 = st.columns(2)
             c1.markdown(f'<div class="card"><h4>은퇴</h4><p>현재 {p["age"]}세 · {p["retire_age"]}세 은퇴'
-                        + (f'<br>배우자 {p["s_age"]}세' if p["spouse"] else '') + '</p></div>', unsafe_allow_html=True)
+                        + (f'<br>배우자 {p["s_age"]}세' + (f' ({p["marry_age"]}세에 결혼)' if int(p.get("marry_age", 0) or 0) > p["age"] else '') if p["spouse"] else '')
+                        + family_txt(p) + '</p></div>', unsafe_allow_html=True)
             c2.markdown(f'<div class="card"><h4>자산</h4><p>금융자산 {total_assets(p):.1f}억 원'
                         + (f'<br>은퇴 전 월 {monthly_saving(p):.0f}만 원 저축' if p["age"] < p["retire_age"] else '')
                         + (f'<br>은퇴 때 퇴직급여 약 {severance_estimate(p)[0]:.1f}억 원 ({"DB·퇴직금" if p.get("ret_plan") == "DB" else "DC 앞으로 쌓일 몫"}, '
@@ -989,6 +1137,8 @@ with tab1:
                 rel = f"지금 계획보다 <b>{-d_}년</b> 일찍 은퇴해도 돼요"
             st.markdown(f'<div class="tip">🎯 <b>{ret_age}세</b>에 은퇴하면 기본생활을 <b>10번 중 9번</b> 지킬 수 있어요 — {rel}.</div>',
                         unsafe_allow_html=True)
+
+    stage_banner(p, ok)                                      # (v52) 단계별 첫 문장
 
     # 3) 목표별 결과: 기본 / 여행·취미 / 자녀 — 결론 바로 아래에 둔다(v50.4)
     st.markdown(sec("목표별로 보면"), unsafe_allow_html=True)

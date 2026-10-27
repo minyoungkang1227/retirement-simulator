@@ -33,6 +33,49 @@ EARLY_EXIT_YEARS = 7
 #: 국민연금연구원 「2024년 국민노후보장패널조사」 50세 이상이 생각하는 노후 생활비(월, 만 원)
 AVG_SPEND = {"부부_최소": 217, "부부_적정": 298, "개인_최소": 139, "개인_적정": 198}
 
+#: (v52) 생애 단계 — 화면의 질문 순서·기본값·첫 문장만 바꾼다. 계산에는 영향 없음(tier 와 같은 성격).
+STAGES = {
+    1: ("사회초년생", "20대 · 첫 직장, 재무관리를 시작하는 단계", "저축을 시작했고, 결혼·집은 아직 계획 단계"),
+    2: ("결혼·내 집 마련", "30대 · 결혼, 전세에서 자가로", "집을 살지, 언제 살지가 가장 큰 결정"),
+    3: ("자녀·부모 부양", "40대 · 자녀 교육비와 부모님 간병이 겹치는 시기", "나가는 돈이 가장 많은 10년"),
+    4: ("은퇴 준비·은퇴 후", "50대 이상 · 은퇴가 눈앞이거나 이미 은퇴", "모아둔 돈과 연금으로 끝까지 가는지 확인"),
+}
+STAGE_AGES = {1: 28, 2: 35, 3: 45, 4: 55}            # 단계를 고르면 나이 기본값만 이렇게 바꾼다
+
+#: (v52) 자녀 1인 양육·교육비 — 자녀 나이별 연간(만 원, 2026년 물가).
+#: 한국보건사회연구원 「2012년 전국 출산력 및 가족보건·복지실태조사」: 대학 졸업까지 3억 896만 원
+#: (영아 3,064 · 유아 3,696 · 초등 7,596 · 중 4,122 · 고 4,719 · 대학 7,709만 원)을 2012→2026 소비자물가(×1.27)로 환산.
+#: 식비·주거 분담분까지 든 '총 양육비'다. 지금 있는 자녀는 지금 쓰는 몫이 이미 저축액에 반영돼 있으므로
+#: 엔진에는 '지금 수준과의 차이'만 넣고(kid_schedule), 은퇴 후에는 은퇴 생활비에 자녀 몫이 없으므로 전액을 넣는다.
+KID_COST = [1300] * 3 + [1550] * 3 + [1600] * 6 + [1750] * 3 + [2000] * 3 + [2450] * 4   # 0~21세, 22세부터 0
+KID_END = len(KID_COST)
+
+
+def kid_schedule(p: dict) -> list:
+    """자녀 이벤트 — 지금 있는 자녀(kids: 현재 나이들)와 낳을 계획(kid_plan: 본인 나이들)을 한 자녀씩 엔진 이벤트로.
+
+    반환: [dict(kind="sched", label, age=본인 나이(시작), full=[연간 전액...], base=지금 수준)] — 금액은 오늘 가치(만 원)."""
+    out = []
+    age0 = int(p["age"])
+    for c_age in (p.get("kids") or []):                        # 지금 있는 자녀: 자녀 나이 c_age → 22세까지
+        c_age = int(c_age)
+        if c_age >= KID_END:
+            continue
+        full = KID_COST[c_age:]
+        out.append(dict(kind="sched", label=f"자녀({c_age}세) 양육·교육비", age=age0, full=[float(x) for x in full],
+                        base=float(KID_COST[c_age])))
+    for b_age in (p.get("kid_plan") or []):                    # 낳을 계획: 본인 b_age 세에 출생, 그때부터 22년
+        b_age = int(b_age)
+        if b_age < age0:
+            continue
+        out.append(dict(kind="sched", label=f"{b_age}세 출산 자녀 양육·교육비", age=b_age, full=[float(x) for x in KID_COST], base=0.0))
+    return out
+
+
+def kid_total(p: dict) -> float:
+    """자녀 이벤트가 앞으로 가구에서 나갈 돈의 합(오늘 가치, 억 원) — 화면 설명용. 지금 수준과의 차이가 아니라 전액."""
+    return sum(sum(ev["full"]) for ev in kid_schedule(p)) / 10000
+
 #: 입력의 기본값. API는 받은 값을 이 위에 덮어써서 빠진 항목을 채운다.
 DEFAULTS = dict(
     age=52, sex="M", retire_age=60, spouse=True, s_age=50, s_sex="F",
@@ -59,6 +102,9 @@ DEFAULTS = dict(
     hi_dependent=False,
     # (v51) 은퇴 나이가 계획대로 될 가능성 — EARLY_EXIT 의 키
     early_exit="보통",
+    # (v52) 생애 단계(0 = 안 고름, 1~4 STAGES) — 화면 전용. 결혼 계획: 몇 살에(0 = 없음·이미), 본인 부담 비용(만 원), 배우자가 가져오는 금융자산(억).
+    #       자녀: kids = 지금 있는 자녀의 나이들, kid_plan = 낳을 계획(본인 나이들). 둘 다 비면 v51과 같다.
+    stage=0, marry_age=0, marry_cost=0, marry_assets=0.0, kids=[], kid_plan=[],
 )
 
 
@@ -139,11 +185,12 @@ CHOICES = {"sex": ("M", "F"), "s_sex": ("M", "F"), "profile": tuple(PROFILES), "
 RANGES = {"age": (18, 100), "s_age": (18, 100), "retire_age": (30, 100), "nps_start": (55, 75),
           "paths": (100, 200_000), "survivor": (0, 100), "overseas": (0, 100), "children": (0, 10),
           "care_growth": (-2.0, 5.0), "debt_rate": (0.0, 20.0), "debt_years": (1, 40), "tier": (1, 3),
-          "tenure": (0, 50), "s_tenure": (0, 50), "post_until": (0, 100), "s_post_until": (0, 100)}
+          "tenure": (0, 50), "s_tenure": (0, 50), "post_until": (0, 100), "s_post_until": (0, 100),
+          "stage": (0, 4), "marry_age": (0, 100)}
 NON_NEGATIVE = ("deposit", "invest", "ret_acct", "other", "saving", "salary", "s_salary",
                 "essential", "lifestyle", "nps", "s_nps", "priv", "legacy",
                 "h_official", "h_market", "h_n", "rent", "biz", "debt",
-                "post_inc", "s_post_inc", "jeonse")
+                "post_inc", "s_post_inc", "jeonse", "marry_cost", "marry_assets")
 
 
 def validate(p: dict) -> dict:
@@ -167,9 +214,20 @@ def validate(p: dict) -> dict:
                     bad.append(f"{k}={p[k]} — 0 이상이어야 합니다")
             except (TypeError, ValueError):
                 bad.append(f"{k}={p[k]!r} — 숫자여야 합니다")
-    for key in ("events", "parents"):
+    for key in ("events", "parents", "kids", "kid_plan"):
         if not isinstance(p.get(key, []), list):
             bad.append(f"{key} — 목록이어야 합니다")
+    for c in (p.get("kids") or []):
+        if not (0 <= float(c) <= 40):
+            bad.append(f"kids — 자녀 나이는 0~40이어야 합니다: {c!r}")
+    for b in (p.get("kid_plan") or []):
+        if not (18 <= float(b) <= 60):
+            bad.append(f"kid_plan — 출산 시 본인 나이는 18~60이어야 합니다: {b!r}")
+    if int(p.get("marry_age", 0) or 0) > 0:
+        if not p.get("spouse"):
+            bad.append("marry_age — 결혼 계획이 있으면 spouse=True 로 배우자 정보를 넣어야 합니다")
+        if int(p["marry_age"]) >= int(p["retire_age"]):
+            bad.append("marry_age — 은퇴 나이보다 앞이어야 합니다")
     for d in (p.get("parents") or []):
         if not isinstance(d, dict) or not (18 <= float(d.get("age", -1)) <= 110):
             bad.append(f"parents — 나이가 18~110이어야 합니다: {d!r}")
@@ -213,6 +271,8 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
 
     events = []
     for ev in p.get("events", []):
+        if ev["kind"] == "주택 구입" and v.get("house_ev_off"):   # (v52) 단계별 비교용: 집 사는 계획을 뺀다
+            continue
         if ev["kind"] == "주택 구입":
             events.append(dict(label=ev["kind"], age=int(ev["age"]), amount=float(ev["amount"]), kind="house",
                                ltv=p.get("ev_ltv", 60) / 100, loan_years=int(p.get("ev_loan_years", 30)),
@@ -221,6 +281,14 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
         else:
             events.append(dict(label=ev["kind"], age=int(ev["age"]), amount=float(ev["amount"]),
                                years=int(ev["years"]), kind="cost"))
+    # (v52) 결혼: 그 나이부터 배우자 소득이 가구에 들어오고, 그해 비용이 나가며 배우자 금융자산이 들어온다.
+    #       자녀: 나이별 양육·교육비 스케줄(지금 있는 자녀는 지금 수준과의 차이만). 변형 marry_off / kids_off 로 뺄 수 있다.
+    marry = int(p.get("marry_age", 0) or 0)
+    if marry > p["age"] and p["spouse"] and not v.get("marry_off"):
+        events.append(dict(label="결혼", age=marry, kind="marry", amount=float(p.get("marry_cost", 0) or 0),
+                           assets=float(p.get("marry_assets", 0) or 0) * 10000))
+    if not v.get("kids_off"):
+        events += kid_schedule(p)
 
     hh = Household(
         members=members, liquid_assets=liquid * 10000, pension_balance=p["ret_acct"] * 10000, events=events,
@@ -237,8 +305,8 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
         retire_early_years=EARLY_EXIT_YEARS,
         annual_saving=(v.get("saving_monthly", p["saving"]) + v.get("saving_delta", 0)) * 12,
         survivor_spending_ratio=p["survivor"] / 100,
-        dependents=[dict(age=int(d["age"]), sex=d.get("sex", "F"), share=float(d.get("share", 1.0)) )
-                    for d in (p.get("parents") or [])],
+        dependents=[] if v.get("parents_off") else [dict(age=int(d["age"]), sex=d.get("sex", "F"), share=float(d.get("share", 1.0)))
+                                                    for d in (p.get("parents") or [])],
         floor_method="fixed95" if p.get("floor") == "보수적" else "actuarial",
         debt_balance=float(p.get("debt", 0)) * 10000,
         debt_rate=(float(p["debt_rate"]) / 100) if p.get("debt_rate") else None,

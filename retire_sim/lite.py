@@ -17,7 +17,7 @@ import json
 import numpy as np
 
 from . import __version__, advice, engine_tax
-from .inputs import AVG_SPEND, EARLY_EXIT, fill, income_gap, monthly_saving, severance_estimate, total_assets, validate
+from .inputs import AVG_SPEND, EARLY_EXIT, fill, income_gap, kid_total, monthly_saving, severance_estimate, total_assets, validate
 from .session import calc_id
 
 TIER1_SPLIT = (0.3, 0.4, 0.3)     # 금융자산 합계 → 예금 · 주식·펀드 · 연금계좌 (웹 앱 1단계와 같은 비율)
@@ -69,6 +69,11 @@ def to_inputs(form: dict) -> dict:
         nps_start=65, priv=0, legacy=0.0, profile=f.get("profile", "균형형"),
         early_exit=f.get("early_exit", "보통"),
     )
+    for key in ("stage", "marry_age", "marry_cost", "marry_assets", "kids", "kid_plan"):   # (v52) 단계·결혼·자녀 — 있으면 그대로
+        if key in f:
+            p[key] = f[key]
+    if int(p.get("marry_age", 0) or 0) > 0:
+        p["spouse"] = True
     if "paths" in f:
         p["paths"] = int(f["paths"])
     return validate(p)
@@ -87,6 +92,12 @@ def assumptions(p: dict) -> list:
         out.append("대출 금리는 지금 시장금리 + 1.5%p 고정")
     if p.get("ret_contrib"):
         out.append("퇴직금은 '마지막 월급 × 근속연수'(퇴직금·DB 제도) 기준, 은퇴 때 IRP로 받아 연금으로 수령")
+    if int(p.get("marry_age", 0) or 0) > p["age"] and p.get("spouse"):
+        out.append(f"{p['marry_age']}세에 결혼 — 그때부터 배우자 소득이 들어오고(월 금액 저축이면 배우자도 같은 저축률로 보탬), 생활비는 입력한 부부 기준. "
+                   f"결혼 비용 {p.get('marry_cost', 0):,}만 원" + (f", 배우자 금융자산 {p.get('marry_assets', 0):.1f}억 원 합류" if p.get("marry_assets") else ""))
+    if p.get("kids") or p.get("kid_plan"):
+        out.append(f"자녀 양육·교육비는 자녀 나이별 통계(1인 대학 졸업까지 약 3.9억 원, 2026년 물가)로 — 앞으로 약 {kid_total(p):.1f}억 원. "
+                   "지금 있는 자녀는 지금 쓰는 몫이 저축액에 이미 있다고 보고 늘거나 주는 만큼만 저축에서 조정(빚은 지지 않음), 은퇴 후 남는 몫은 노후자금에서")
     if p["age"] < p["retire_age"]:
         out.append(f"은퇴 나이가 계획대로 될 가능성 '{p.get('early_exit', '보통')}' — {EARLY_EXIT.get(p.get('early_exit', '보통'), 0.3):.0%} 확률로 1~7년 일찍 주된 직장을 그만둔다고 봄 (0%로 두면 계획대로)")
     out += ["배우자는 은퇴 후 일하지 않음",

@@ -316,6 +316,9 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     sev_real = np.zeros(n); sev_tax_real = np.zeros(n)
     jeonse = np.full(n, float(getattr(house, 'jeonse', 0.0)))   # (v50) 전월세 보증금(오늘 가치) — 집을 사면 그 자금으로 들어가고 0
     joint_factor = lambda t0: joint_pv(hh, qx_table, t0)
+    # (v52) 결혼 이벤트: 배우자(members[1])는 결혼 나이 전까지 가구 밖이다 — 소득·저축에 들어오지 않고 계좌 한도(ISA·연금)도 1인분.
+    #       수명·연금·세금은 처음부터 두 사람으로 계산한다(결혼 전 나이에서는 영향이 거의 없다). 이벤트가 없으면 v51과 비트 단위로 같다.
+    join_age = next((int(ev["age"]) for ev in hh.events if ev.get("kind") == "marry"), None)
 
     def sell_from_taxable(amount):
         """과세계좌에서 매도: 실현이익 반환(해외주식분만 과세 대상)."""
@@ -338,6 +341,11 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             w = w_target
         a = alive[:, :, t]; na = a.sum(0); live = na > 0
         R = age0_ + t >= ret_age_p                         # (v51) 이 해에 은퇴한 경로
+        if join_age is not None and k > 1 and age0_ + t < join_age:   # (v52) 결혼 전: 배우자는 아직 가구 밖
+            aj = a.copy(); aj[1] = False
+        else:
+            aj = a
+        naj = aj.sum(0)                                     # 가구 안 생존자 수(계좌 한도·저축용)
         # 명의 재분배(사망자 몫은 생존자에게)
         def redistribute(base):
             sh = base[:, None] * a; orphan = sh.sum(0) == 0
@@ -385,7 +393,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             rm_pay = np.where(elig, 12 * m_pay, 0.0); rm_on = elig; rm_bal = np.where(elig, 0.01 * V, 0.0)
             rm_monthly_real = float(np.median(m_pay[elig] / cpi[elig, t])) if elig.any() else 0.0
         rm_inc = rm_pay * live
-        ev_cost = np.zeros(n)
+        ev_cost = np.zeros(n); kid_pre = 0.0                 # (v52) kid_pre: 은퇴 전 자녀 비용의 지금 대비 증감(오늘 가치, 스칼라)
         for ev in hh.events:                                   # 큰 지출 이벤트 (본인 나이 기준)
             age0 = hh.members[0].age + t
             if ev.get("kind") == "house":
@@ -401,6 +409,21 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                     jeonse = np.zeros(n)
                     extra_house = extra_house + ev["amount"] * live
                     rent_save = rent_save + ev.get("rent_saving", 0) * live
+            elif ev.get("kind") == "marry":                           # (v52) 결혼: 그해 비용, 배우자 금융자산 합류
+                if age0 == ev["age"]:
+                    ev_cost += ev.get("amount", 0.0) * cpi[:, t] * live
+                    bring = ev.get("assets", 0.0) * cpi[:, t] * live
+                    Wt = Wt + bring; Bt = Bt + bring
+            elif ev.get("kind") == "sched":                           # (v52) 자녀 양육·교육비: 나이별 스케줄
+                # 은퇴 전: '지금 수준과의 차이'만큼 저축이 줄거나 는다(지금 쓰는 몫은 저축액에 이미 반영). 양육비에는 식비·주거 몫이
+                # 들어 있어 실제 가구는 다른 지출을 줄여 맞추므로, 저축이 0이 될 때까지만 줄이고 빚은 지지 않는다(아래 saving 에서 차감).
+                # 은퇴 후: 은퇴 생활비에 자녀 몫이 없으므로 전액이 노후자금에서 나간다.
+                idx = age0 - int(ev["age"]); full = ev["full"]; base_ = float(ev.get("base", 0.0))
+                if 0 <= idx < len(full):
+                    kid_pre = kid_pre + (full[idx] - base_)
+                    ev_cost += np.where(R, full[idx], 0.0) * cpi[:, t] * live
+                elif idx >= len(full):
+                    kid_pre = kid_pre - base_                             # 자녀가 독립한 뒤: 그만큼 더 모인다
             elif ev["age"] <= age0 < ev["age"] + ev.get("years", 1):
                 ev_cost += ev["amount"] * cpi[:, t] * live
         m_now = np.where(mort_bal > 1e-6, np.minimum(mort_pay, mort_bal * (1 + mort_rate)), 0.0) * live
@@ -442,11 +465,11 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         # 3) 계좌 이전 (생활비 버퍼 유지)
         buf = np.maximum(Wt - buffer_years * spend_base * cpi[:, t], 0)
         if tc.enabled and tc.use_isa:
-            room = np.minimum(tc.isa_annual * na, np.maximum(tc.isa_total * na - isa_in, 0))
+            room = np.minimum(tc.isa_annual * naj, np.maximum(tc.isa_total * naj - isa_in, 0))
             amt, gain = sell_from_taxable(np.minimum(room, buf) * live); realized += gain
             Wi += amt; isa_in += amt; buf -= amt
         if tc.enabled and tc.use_pension:
-            amt, gain = sell_from_taxable(np.minimum(tc.pen_annual * na, buf) * live); realized += gain
+            amt, gain = sell_from_taxable(np.minimum(tc.pen_annual * naj, buf) * live); realized += gain
             Wp += amt; Pp += amt
 
         # 4) 과세계좌 금융소득
@@ -528,8 +551,17 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 life_ratio[:, t] = np.where(live & R, life_paid / np.maximum(life_want, 1e-9), np.nan)
         if not R.all():    # 아직 일하는 경로: 저축·퇴직급여 적립
             PR = ~R
-            sal = sum(a[i] * m.salary * (1 + hh.wage_growth) ** t for i, m in enumerate(hh.members)) * cpi[:, t]
-            saving = (sal * hh.saving_rate if hh.saving_rate > 0 else hh.annual_saving * cpi[:, t]) * (live & PR)
+            sal = sum(aj[i] * m.salary * (1 + hh.wage_growth) ** t for i, m in enumerate(hh.members)) * cpi[:, t]
+            if hh.saving_rate > 0:
+                saving = sal * hh.saving_rate
+            elif join_age is not None and k > 1 and hh.members[0].salary > 0:
+                # (v52) 월 금액 저축 + 결혼 이벤트: 입력한 저축액은 본인 몫. 배우자는 합류한 뒤 같은 저축률로 보탠다.
+                saving = hh.annual_saving * cpi[:, t] * (1 + aj[1] * hh.members[1].salary / hh.members[0].salary)
+            else:
+                saving = hh.annual_saving * cpi[:, t]
+            saving = saving * (live & PR)
+            if kid_pre:                                           # (v52) 자녀 비용: 저축이 0이 될 때까지만 줄인다(늘면 그만큼 더 모은다)
+                saving = np.maximum(saving - kid_pre * cpi[:, t] * (live & PR), 0.0)
             if rent_save.any():                                   # 은퇴 전: 안 내게 된 월세가 대출 원리금보다 많으면 그 차이만큼 추가 저축
                 saving = saving + np.maximum(rent_save * cpi[:, t] - m_now, 0) * (live & PR)
             if hh.retirement_contrib and getattr(hh, "ret_plan", "DC") == "DC":   # DC: 매년 연봉의 1/12 회사 적립(과세이연)
