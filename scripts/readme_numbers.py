@@ -40,7 +40,7 @@ def couple_52():
                               Person(50, "F", nps_monthly=50, nps_start_age=65, nps_years=20)],
                      liquid_assets=50_000, stock_weight=0.5, annual_spending=4800,
                      essential=3600, lifestyle=1200, legacy_target=10_000,
-                     retire_age=60, annual_saving=1800)
+                     retire_age=60, annual_saving=1800, retire_early_prob=0.3)   # (v51) 앱 기본 '보통'
 
 
 def couple_30():
@@ -49,7 +49,7 @@ def couple_30():
                               Person(29, "F", nps_monthly=n2, salary=4000, nps_years=32)],
                      liquid_assets=5000, stock_weight=0.5, annual_spending=4800,
                      essential=3600, lifestyle=1200, legacy_target=10_000,
-                     retire_age=60, saving_rate=0.15, pension_balance=1000, retirement_contrib=True)
+                     retire_age=60, saving_rate=0.15, pension_balance=1000, retirement_contrib=True, retire_early_prob=0.3)
 
 
 def couple_65():
@@ -73,6 +73,8 @@ for lab, h2 in [("은퇴 2년 늦추기", replace(hh, retire_age=62)),
                 ("월 저축 50만 원 늘리기", replace(hh, annual_saving=2400))]:
     d, ci = diff(run(h2), base)
     print(f"    {lab:22s} {d*100:+6.1f}%p (±{ci*100:.1f})")
+d, ci = diff(run(replace(hh, retire_early_prob=0.0)), base)
+print(f"    {'계획대로 꼭 60세에 은퇴한다면':22s} {d*100:+6.1f}%p (±{ci*100:.1f})   ← (v51) 은퇴 시점 위험을 빼면")
 print("  위기 상황:")
 ra = hh.retire_age - hh.members[0].age
 for lab, kw in [("은퇴 첫해 주가 −40%", dict(stock_shocks={ra: -0.40})),

@@ -822,11 +822,12 @@ def test_existing_debt_v48():
     from retire_sim import advice
     from retire_sim.inputs import defaults
     p = defaults(); p.update(paths=2000)
-    run = lambda **kw: advice.run_case({**p, **kw})
+    run = lambda **kw: advice.run_case({**p, **kw}, {"early_exit_prob": 0.0})   # (v51) 은퇴 시점 위험을 끄고 — 일찍 그만둔 경로에는 57세까지의 상환도 노후자금에서 나간다
     prob = lambda r: advice.essential_prob(r)
     base = run()
     assert prob(run(debt=0.0)) == prob(base)                       # 없으면 비트 단위로 같다
     assert prob(run(debt=1.0, debt_years=5)) == prob(base)         # 52세 → 57세에 끝: 은퇴(60) 전 상환
+    assert advice.essential_prob(advice.run_case({**p, "debt": 1.0, "debt_years": 5})) < advice.essential_prob(advice.run_case(p))   # 위험을 켜면 그 대출도 영향
     long = run(debt=2.0, debt_years=20)                            # 72세까지 → 은퇴 후 12년 상환
     assert prob(long) < prob(base) - 0.02
     e0, e1 = np.nanmedian(base["estate_real"]), np.nanmedian(long["estate_real"])
@@ -1706,3 +1707,33 @@ def test_official_calculator_cases():
     assert not bad, f"공식 계산기와 다르다: {bad}"
     known = set(official.recorded())
     assert known <= {r["id"] for r in rs}, f"없는 사례의 값이 기록돼 있다: {known - {r['id'] for r in rs}}"
+
+
+def test_v51_retirement_timing_risk():
+    """(v51) 은퇴 시점 위험: 확률 0이면 결과가 그대로이고, 확률이 커질수록 기본생활 유지 확률이 내려가며,
+    경로별 은퇴 나이가 계획 아래 1~7년 안에 분포한다. 이미 은퇴한 가구에는 영향이 없다."""
+    from dataclasses import replace
+    from retire_sim import advice, contrast, engine_tax
+    from retire_sim.inputs import EARLY_EXIT, build_case, defaults
+    p = defaults(); p.update(paths=2000)
+    hh, cfg, eco, tc, hs, biz, q, ad = build_case(p, {"early_exit_prob": 0.0})
+    run = lambda pe: engine_tax.run(replace(hh, retire_early_prob=pe), cfg, e=eco, tc=tc, house=hs, qx_table=q, biz=biz, addons=ad)
+    r0, r3, r5 = run(0.0), run(0.3), run(0.5)
+    ok = lambda r: float((r["depleted_at"] < 0).mean())
+    assert (r0["retire_age_path"] == p["retire_age"]).all()
+    assert ok(r0) > ok(r3) + 0.03 > ok(r5) + 0.03
+    ra = r3["retire_age_path"]
+    assert abs((ra < p["retire_age"]).mean() - 0.3) < 0.03
+    assert ra.min() >= p["retire_age"] - 7 and ra.max() == p["retire_age"]
+    # 기본값은 '보통'(30%) — 앱 입력으로 들어가고, 변형으로 끌 수 있다
+    assert EARLY_EXIT["보통"] == 0.3
+    hh2, *_ = build_case(p, {}); assert hh2.retire_early_prob == 0.3
+    hh3, *_ = build_case({**p, "early_exit": "안정적 (공무원·교사·전문직)"}, {}); assert hh3.retire_early_prob == 0.1
+    # 이미 은퇴한 가구: 위험이 있어도 결과 불변
+    q0 = dict(p, age=62, retire_age=60)
+    a = advice.essential_prob(advice.run_case(q0, {})); b = advice.essential_prob(advice.run_case(q0, {"early_exit_prob": 0.0}))
+    assert a == b
+    # '다른 계산기였다면' 표에 줄이 생기고, 빼면 확률이 오른다
+    rows = {n: d for n, _, d in contrast.breakdown(p, paths=1500)["rows"]}
+    assert "은퇴 시점 위험" in rows and rows["은퇴 시점 위험"] > 0.02
+    assert "은퇴 시점 위험" not in {n for n, _, _ in contrast.breakdown(q0, paths=1500)["rows"]}

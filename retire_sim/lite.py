@@ -17,7 +17,7 @@ import json
 import numpy as np
 
 from . import __version__, advice, engine_tax
-from .inputs import AVG_SPEND, fill, income_gap, monthly_saving, severance_estimate, total_assets, validate
+from .inputs import AVG_SPEND, EARLY_EXIT, fill, income_gap, monthly_saving, severance_estimate, total_assets, validate
 from .session import calc_id
 
 TIER1_SPLIT = (0.3, 0.4, 0.3)     # 금융자산 합계 → 예금 · 주식·펀드 · 연금계좌 (웹 앱 1단계와 같은 비율)
@@ -67,6 +67,7 @@ def to_inputs(form: dict) -> dict:
         nps_auto=(nps == 0 and sal > 0), nps=nps, s_nps=s_nps, salary=sal, s_salary=ssal,
         nps_years=tier1_nps_years(age), s_nps_years=tier1_nps_years(int(f.get("s_age", p["s_age"]))),
         nps_start=65, priv=0, legacy=0.0, profile=f.get("profile", "균형형"),
+        early_exit=f.get("early_exit", "보통"),
     )
     if "paths" in f:
         p["paths"] = int(f["paths"])
@@ -86,6 +87,8 @@ def assumptions(p: dict) -> list:
         out.append("대출 금리는 지금 시장금리 + 1.5%p 고정")
     if p.get("ret_contrib"):
         out.append("퇴직금은 '마지막 월급 × 근속연수'(퇴직금·DB 제도) 기준, 은퇴 때 IRP로 받아 연금으로 수령")
+    if p["age"] < p["retire_age"]:
+        out.append(f"은퇴 나이가 계획대로 될 가능성 '{p.get('early_exit', '보통')}' — {EARLY_EXIT.get(p.get('early_exit', '보통'), 0.3):.0%} 확률로 1~7년 일찍 주된 직장을 그만둔다고 봄 (0%로 두면 계획대로)")
     out += ["배우자는 은퇴 후 일하지 않음",
             "자녀 직장 건강보험의 피부양자로 올리지 않는다고 가정 (건보료를 직접 냄)",
             "여행·취미 지출은 75세부터 줄어 85세에 절반, 기본생활비는 평생 같음 (나이에 따른 지출 변화)",

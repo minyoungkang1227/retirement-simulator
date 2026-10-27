@@ -24,6 +24,12 @@ from .tax import HouseConfig, TaxConfig
 #: 투자 성향 → 주식 비중
 PROFILES = {"보수형": 0.3, "균형형": 0.5, "성장형": 0.7}
 
+#: (v51) 은퇴 시점 위험 — 계획한 나이보다 일찍 주된 직장을 잃을 확률(그때 1~7년 일찍, 고르게).
+#: 통계청 2026-05 고령층 부가조사: 주된 일자리를 그만둔 평균 53.0세, 사유는 폐업·건강·돌봄·권고사직이 72%, 정년 13%.
+#: 계획 대비 조기 이탈 확률 자체는 통계가 없어 판단값이다 — 세 단계로 고르게 하고 '보통'을 기본으로 둔다.
+EARLY_EXIT = {"안정적 (공무원·교사·전문직)": 0.10, "보통": 0.30, "불안정 (자영업·경기 민감 업종)": 0.50}
+EARLY_EXIT_YEARS = 7
+
 #: 국민연금연구원 「2024년 국민노후보장패널조사」 50세 이상이 생각하는 노후 생활비(월, 만 원)
 AVG_SPEND = {"부부_최소": 217, "부부_적정": 298, "개인_최소": 139, "개인_적정": 198}
 
@@ -51,6 +57,8 @@ DEFAULTS = dict(
     post_inc=0, post_until=0, s_post_inc=0, s_post_until=0, jeonse=0.0, spend_profile="lifestyle",
     # (v50.9) 자녀 직장건보 피부양자로 등록할 수 있나 (소득 2,000만·재산 기준은 엔진이 해마다 판정)
     hi_dependent=False,
+    # (v51) 은퇴 나이가 계획대로 될 가능성 — EARLY_EXIT 의 키
+    early_exit="보통",
 )
 
 
@@ -124,7 +132,7 @@ def income_gap(p: dict) -> tuple:
 
 
 #: 값이 정해져 있는 항목 — API로 들어온 엉뚱한 값이 엔진 안에서 터지지 않게 앞에서 막는다
-CHOICES = {"sex": ("M", "F"), "s_sex": ("M", "F"), "profile": tuple(PROFILES),
+CHOICES = {"sex": ("M", "F"), "s_sex": ("M", "F"), "profile": tuple(PROFILES), "early_exit": tuple(EARLY_EXIT),
            "region": ("대도시", "중소도시", "농어촌"), "save_mode": ("월 금액", "소득의 %"),
            "floor": ("계리적", "보수적"), "ret_plan": ("DC", "DB"),
            "spend_profile": ("flat", "lifestyle", "all")}
@@ -225,6 +233,8 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
         annual_spending=p["essential"] * 12 * m, essential=p["essential"] * 12 * m,
         lifestyle=p["lifestyle"] * m, legacy_target=p["legacy"] * 10000,
         retire_age=retire if p["age"] < retire else None,
+        retire_early_prob=float(v.get("early_exit_prob", EARLY_EXIT.get(p.get("early_exit", "보통"), 0.30))),
+        retire_early_years=EARLY_EXIT_YEARS,
         annual_saving=(v.get("saving_monthly", p["saving"]) + v.get("saving_delta", 0)) * 12,
         survivor_spending_ratio=p["survivor"] / 100,
         dependents=[dict(age=int(d["age"]), sex=d.get("sex", "F"), share=float(d.get("share", 1.0)) )

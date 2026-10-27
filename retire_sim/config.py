@@ -35,6 +35,9 @@ class Household:
     lifestyle: float = 0.0                # 여행·취미 등 선택 지출(연, 만원). 자산이 부족하면 먼저 줄임
     legacy_target: float = 0.0            # 남기고 싶은 금액(만원, 현재가치)
     retire_age: Optional[int] = None      # 본인(첫 구성원) 은퇴 나이. None이면 이미 은퇴
+    # (v51) 은퇴 시점 위험: 계획보다 일찍 주된 직장을 잃을 확률과, 그때 몇 년 일찍인지(1~N년 고르게). 0이면 계획대로.
+    retire_early_prob: float = 0.0
+    retire_early_years: int = 7
     annual_saving: float = 0.0            # 은퇴 전 연 저축액(만원, 현재가치)
     planning_age: int = 95                # (v12 방식) 기본생활비 보호선 계산용 계획 나이
     # ── v20 적립기 강화 (20~40대) ──

@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 50          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 51          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -34,7 +34,7 @@ from retire_sim.config import Person
 from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality, optimize, report, product, sources, verify
 from retire_sim.session import calc_id, save_blob, load_blob
-from retire_sim.inputs import (PROFILES, AVG_SPEND, DEFAULTS, build_case,
+from retire_sim.inputs import (EARLY_EXIT, PROFILES, AVG_SPEND, DEFAULTS, build_case,
                               total_assets, nps_values, monthly_saving, income_gap, severance_estimate)
 from retire_sim.advice import action_ranking as _action_ranking, assumption_band as _assumption_band
 from retire_sim import reporting
@@ -432,6 +432,8 @@ def tier_assumptions(p: dict) -> list:
             out.append("퇴직금은 '마지막 월급 × 근속연수'(퇴직금·DB 제도) 기준, 은퇴 때 IRP로 받아 연금으로 수령")
     if t == 1:
         out.append("배우자는 은퇴 후 일하지 않음")
+    if p.get("age", 0) < p.get("retire_age", 0):
+        out.append(f"은퇴 나이가 계획대로 될 가능성 '{p.get('early_exit', '보통')}' — {EARLY_EXIT.get(p.get('early_exit', '보통'), 0.3):.0%} 확률로 1~7년 일찍 주된 직장을 그만둔다고 봄 (0%로 두면 계획대로)")
         out.append("자녀 직장 건강보험의 피부양자로 올리지 않는다고 가정 (건보료를 직접 냄)")
     if t <= 2:
         out += ["여행·취미 지출은 75세부터 줄어 85세에 절반, 기본생활비는 평생 같음 (나이에 따른 지출 변화)",
@@ -497,11 +499,15 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
             spouse = st.checkbox("배우자와 함께", value=p["spouse"])
             c1, c2 = st.columns(2)
             s_age = c1.number_input("배우자 나이", 20, 90, p["s_age"]); s_sex = c2.radio("배우자 성별", ["남", "여"], index=0 if p["s_sex"] == "M" else 1, horizontal=True)
+            ee = st.radio("은퇴 나이가 계획대로 될 가능성", list(EARLY_EXIT), index=list(EARLY_EXIT).index(p.get("early_exit", "보통")), horizontal=True,
+                          help="주된 직장을 계획보다 일찍 그만두는 경우(폐업·건강·권고사직 등)를 확률로 넣습니다. "
+                               "통계청 조사에서 주된 일자리를 그만둔 평균 나이는 53세이고, 정년퇴직은 13%뿐입니다. "
+                               "'보통'은 30% 확률로 1~7년 일찍 그만둔다고 봅니다.")
             st.caption("은퇴 나이는 결과를 가장 크게 바꾸는 값입니다. 계획 중인 나이를 넣어 주세요.")
             back, nxt = nav(i, "t1s0")
             if nxt or back:
                 p.update(age=int(age), sex="M" if sex == "남" else "F", retire_age=int(retire), spouse=bool(spouse),
-                         s_age=int(s_age), s_sex="M" if s_sex == "남" else "F")
+                         s_age=int(s_age), s_sex="M" if s_sex == "남" else "F", early_exit=ee)
                 go1(1 if nxt else -1)
         elif i == 1:
             pre = p["age"] < p["retire_age"]
@@ -627,11 +633,15 @@ if ss.step < len(STEPS) and not ss.get("done"):
             spouse = st.checkbox("배우자와 함께", value=p["spouse"])
             c1, c2 = st.columns(2)
             s_age = c1.number_input("배우자 나이", 20, 90, p["s_age"]); s_sex = c2.radio("배우자 성별", ["남", "여"], index=0 if p["s_sex"] == "M" else 1, horizontal=True)
+            ee = st.radio("은퇴 나이가 계획대로 될 가능성", list(EARLY_EXIT), index=list(EARLY_EXIT).index(p.get("early_exit", "보통")), horizontal=True,
+                          help="주된 직장을 계획보다 일찍 그만두는 경우(폐업·건강·권고사직 등)를 확률로 넣습니다. "
+                               "통계청 조사에서 주된 일자리를 그만둔 평균 나이는 53세이고, 정년퇴직은 13%뿐입니다. "
+                               "'보통'은 30% 확률로 1~7년 일찍 그만둔다고 봅니다.")
             st.caption("계획은 95세까지를 기준으로 기본생활비를 보호합니다. 실제 수명은 생명표로 확률적으로 계산합니다.")
             back, nxt = nav(i, "s0")
             if nxt or back:
                 p.update(age=int(age), sex="M" if sex == "남" else "F", retire_age=int(retire), spouse=bool(spouse),
-                         s_age=int(s_age), s_sex="M" if s_sex == "남" else "F")
+                         s_age=int(s_age), s_sex="M" if s_sex == "남" else "F", early_exit=ee)
                 go(1 if nxt else -1)
         elif i == 1:
             st.markdown("집은 빼고, 꺼내 쓸 수 있는 금융자산만 적어주세요. (단위: 억 원)")
@@ -1050,10 +1060,10 @@ with tab1:
                 else f'95세까지 {sp["left"]:.1f}억 원이 남아요<br><span style="font-size:1rem;font-weight:600">→ "괜찮습니다"</span>')
     st.markdown(sec("다른 계산기였다면 뭐라고 했을까", "같은 입력, 계산 방식만 다르게")
                 + f'<div class="vs"><div class="a"><div class="k">보통 계산기 방식</div>'
-                  f'<div class="m">수익률 연 {sp["r"] * 100:.1f}%를 매년 똑같이 · 95세까지 산다고 가정 · 세금·건보료·간병·기초연금 없음</div>'
+                  f'<div class="m">수익률 연 {sp["r"] * 100:.1f}%를 매년 똑같이 · 계획한 나이에 꼭 은퇴 · 95세까지 산다고 가정 · 세금·건보료·간병·기초연금 없음</div>'
                   f'<div class="v">{simple_v}</div></div>'
                   f'<div class="b"><div class="k">노후나침반</div>'
-                  f'<div class="m">같은 평균 수익률이지만 해마다 오르내림 · 수명은 생명표로 · 세금·건보료·간병·기초연금 반영</div>'
+                  f'<div class="m">같은 평균 수익률이지만 해마다 오르내림 · 일찍 그만둘 수도 · 수명은 생명표로 · 세금·건보료·간병·기초연금 반영</div>'
                   f'<div class="v">10번 중 {n_ok}번 끝까지<br><span style="font-size:1rem;font-weight:600">({pct(ok)})</span></div></div></div>',
                 unsafe_allow_html=True)
     if not sp["depleted_age"] and n_ok < 9:
@@ -1064,6 +1074,7 @@ with tab1:
     what = {"세금·건강보험료": f'20년간 세금 {cx["tax20"]:,.0f}만 원 · 건보료 {cx["hi20"]:,.0f}만 원'
                              + (f' · 보유세 {cx["prop20"]:,.0f}만 원' if cx["prop20"] > 0 else "") + " (오늘 가치)",
             "간병비 (장기요양)": "나이 들어 간병이 필요해질 위험과 그 비용 (장기요양 통계로 보정)",
+            "은퇴 시점 위험": "계획보다 일찍 주된 직장을 잃을 가능성 (통계청: 주된 일자리를 그만둔 평균 53세, 정년퇴직은 13%)",
             "기초연금": "소득·재산이 적어지면 받는 기초연금 (재산·소득 인정액 산식)"}
     for name, pr, d in cx["rows"]:
         rows_html += (f'<tr><td><b>{name}</b><br><span style="color:{MUTED};font-size:.85rem">{what[name]}</span></td>'
@@ -1073,7 +1084,7 @@ with tab1:
                 f'<table class="cmp"><tr><th>노후나침반이 넣은 것</th><th style="text-align:right">빼면 기본생활 유지 확률</th></tr>{rows_html}</table>',
                 unsafe_allow_html=True)
     st.caption(f"빼서 확률이 오르는 것은 시중 계산기가 놓치는 비용이고, 내려가는 것(기초연금)은 놓치는 도움입니다. "
-               f"셋 다 빼고 수익률·수명만 흔들리게 해도 {pct(cx['none'])} — 수익률을 '정하느냐, 흔들리게 두느냐'만으로도 답이 달라집니다. "
+               f"{'넷' if len(cx['rows']) == 4 else '셋'} 다 빼고 수익률·수명만 흔들리게 해도 {pct(cx['none'])} — 수익률을 '정하느냐, 흔들리게 두느냐'만으로도 답이 달라집니다. "
                "(비교는 3,000개 미래로 계산해 위 숫자와 1~2%p 다를 수 있어요.)")
 
     # 3-2) 가정의 불확실성 — 난수를 늘려도 줄지 않는 폭

@@ -65,12 +65,15 @@ def breakdown(p: dict, paths: int = 3000) -> dict:
     full = advice.essential_prob(base)
     s = engine_tax.summarize(base)
     rows = []
-    for name, v in (("세금·건강보험료", {"tax": {"enabled": False}}),
-                    ("간병비 (장기요양)", {"care_off": True}),
-                    ("기초연금", {"basic_off": True})):
+    items = [("세금·건강보험료", {"tax": {"enabled": False}}),
+             ("간병비 (장기요양)", {"care_off": True}),
+             ("기초연금", {"basic_off": True})]
+    if p["age"] < p["retire_age"]:                                  # (v51) 은퇴 전 가구만 — 이미 은퇴했으면 없는 위험
+        items.insert(2, ("은퇴 시점 위험", {"early_exit_prob": 0.0}))
+    for name, v in items:
         pr = advice.essential_prob(advice.run_case(p, {**v0, **v}))
         rows.append((name, pr, pr - full))
-    allv = {**v0, "tax": {"enabled": False}, "care_off": True, "basic_off": True}
+    allv = {**v0, "tax": {"enabled": False}, "care_off": True, "basic_off": True, "early_exit_prob": 0.0}
     none = advice.essential_prob(advice.run_case(p, allv))          # 셋 다 빼고 수익률·수명만 흔들리게
     return {"full": full, "rows": rows, "none": none, "tax20": float(s["20년 세금"]), "hi20": float(s["20년 건보료"]),
             "prop20": float(s["20년 보유세"])}

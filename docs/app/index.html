@@ -151,7 +151,7 @@ const AVG = { couple: { essential: 217, lifestyle: 1000 }, single: { essential: 
 const WEB_APP = "https://retire-compass.streamlit.app";
 const EXAMPLE = { age: 52, sex: "M", retire_age: 60, spouse: true, s_age: 50, s_sex: "F", total: 5.0, saving: 150,
   h_market: 0, debt: 0, debt_years: 10, jeonse: 0, essential: 217, lifestyle: 1000, nps: 110, s_nps: 50,
-  salary: 0, s_salary: 0, ret_contrib: false, tenure: 0, s_tenure: 0, post_inc: 0, post_until: 65, profile: "균형형" };
+  salary: 0, s_salary: 0, ret_contrib: false, tenure: 0, s_tenure: 0, post_inc: 0, post_until: 65, profile: "균형형", early_exit: "보통" };
 const BLANK = { ...EXAMPLE, total: 0, saving: 0, nps: 0, s_nps: 0, essential: 217, lifestyle: 1000 };
 const STEPS = ["나와 가족", "자산과 대출", "생활비", "연금과 투자", "최종 확인"];
 const S = { view: "home", step: 0, f: { ...BLANK }, res: {}, engine: "loading", meta: null, runId: 0 };
@@ -244,7 +244,9 @@ function stepView() {
       ${toggle("spouse", "배우자와 함께")}
       ${num("s_age", "배우자 나이", { unit: "세", min: 20, max: 90, off: !f.spouse })}
       ${seg("s_sex", "배우자 성별", [["M", "남"], ["F", "여"]], { off: !f.spouse })}
-    </div>`;
+    </div>
+    <div style="margin-top:16px">${seg("early_exit", "은퇴 나이가 계획대로 될 가능성", [["안정적 (공무원·교사·전문직)", "안정적", "공무원·교사·전문직 · 10%"], ["보통", "보통", "30%"], ["불안정 (자영업·경기 민감 업종)", "불안정", "자영업·경기 민감 · 50%"]],
+      { tall: true, help: "폐업·건강·권고사직으로 계획보다 1~7년 일찍 그만둘 확률이에요. 통계청 조사에서 주된 일자리를 그만둔 평균 나이는 53세, 정년퇴직은 13%뿐이에요." })}</div>`;
   } else if (i === 1) {
     body = `<div class="grid">
       ${num("total", "금융자산 합계", { unit: "억 원", dec: 1, inc: 0.1, max: 500, help: "예금·적금, 주식·펀드, 퇴직연금·연금저축을 모두 더한 금액. 집은 빼고요." })}

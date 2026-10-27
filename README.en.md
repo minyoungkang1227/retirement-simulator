@@ -38,36 +38,37 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 4. **Stochastic economy** — OU real rate and inflation estimated from Bank of Korea (ECOS) data, with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
 5. **Statistically honest comparisons** — paired-difference confidence intervals on common random numbers decide "different / not different"
 
-## Example (model v50 · 10,000 paths · reproduce with `scripts/readme_numbers.py`)
+## Example (model v51 · 10,000 paths · reproduce with `scripts/readme_numbers.py`)
 
 **Couple aged 52 and 50, retiring at 60, KRW 500M financial assets, saving KRW 1.5M/month** (essential KRW 3M/month + lifestyle KRW 12M/year, pensions KRW 1.6M/month, KRW 100M legacy)
 
-- Goal success: essential **53%**, lifestyle funding **70%**, KRW 100M legacy **43%**
+- Goal success: essential **46%**, lifestyle funding **61%**, KRW 100M legacy **36%** (from v51 the default assumes a 30% chance of leaving the main job 1–7 years early; with retirement exactly at 60 it is 53%)
 
 | What if | Change in essential success (95% CI) |
 |---|---|
-| Retire 2 years later | **+10.9pp** (±0.6) |
-| Spend 10% less | +8.4pp (±0.6) |
-| Growth profile (70% equity) | +5.0pp (±0.5) |
-| Save KRW 0.5M more per month | +4.4pp (±0.4) |
-| Conservative profile (30% equity) | −13.0pp (±0.7) |
+| Retire 2 years later | **+11.0pp** (±0.6) |
+| Spend 10% less | +8.0pp (±0.5) |
+| Retire exactly at 60 (no timing risk) | +6.7pp (±0.5) |
+| Growth profile (70% equity) | +5.9pp (±0.5) |
+| Save KRW 0.5M more per month | +3.9pp (±0.4) |
+| Conservative profile (30% equity) | −12.3pp (±0.7) |
 
 | Crisis | Change in essential success |
 |---|---|
-| Equities −40% in the first year of retirement | −15.9pp |
-| Equities −40% ten years into retirement | −10.0pp |
-| Three years of 6% inflation | −5.0pp |
-| Longer life (mortality −20%) | −3.4pp |
-| Long-term care incidence doubled | −4.1pp |
+| Equities −40% in the first year of retirement | −14.6pp |
+| Equities −40% ten years into retirement | −9.5pp |
+| Three years of 6% inflation | −5.3pp |
+| Longer life (mortality −20%) | −3.2pp |
+| Long-term care incidence doubled | −4.0pp |
 
 - For this household **retirement timing is the strongest lever**, and the same crash hurts most right after retirement (sequence-of-returns risk).
-- **The assumption band is 42%–64%**: the minimum and maximum of moving the equity risk premium, longevity and long-term care incidence one at a time by their estimated ranges (v47). The width is effectively set by the **equity risk premium** — on its own (5.2% ± 1.4pp) it spans 42%–64%, while longevity spans 52%–54% and care incidence (±20%) 52%–54%. Monte Carlo noise of ±0.7pp is about one fifteenth of that, and unlike it this band does not shrink with more paths. That is why differences between choices matter more than levels.
+- **The assumption band is 36%–56%**: the minimum and maximum of moving the equity risk premium, longevity and long-term care incidence one at a time by their estimated ranges (v47). The width is effectively set by the **equity risk premium** — on its own (5.2% ± 1.4pp) it spans 36%–56%, while longevity spans 45%–47% and care incidence (±20%) 45%–48%. Monte Carlo noise of ±0.7pp is about one thirtieth of that, and unlike it this band does not shrink with more paths. That is why differences between choices matter more than levels.
 
 **Young savers (dual-income couple aged 30 and 29, KRW 90M gross income, 15% saving rate, workplace pension, National Pension estimated automatically)**
 
-- Essential success **79%**, lifestyle funding **93%**, KRW 100M legacy **74%**
-- What if: save KRW 0.5M more per month +7.8pp · retire 2 years later +5.9pp · spend 10% less +5.0pp
-- **Without the workplace pension −25.2pp** — at this age nothing else comes close.
+- Essential success **74%**, lifestyle funding **89%**, KRW 100M legacy **68%**
+- What if: save KRW 0.5M more per month +9.2pp · retire 2 years later +7.5pp · spend 10% less +6.0pp
+- **Without the workplace pension −25.9pp** — at this age nothing else comes close.
 
 **House-rich, cash-poor household (couple aged 65 and 63, KRW 300M financial assets, home worth KRW 700M, essential KRW 2.5M/month + lifestyle KRW 12M/year, KRW 300M legacy)**
 
