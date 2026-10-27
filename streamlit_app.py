@@ -207,7 +207,7 @@ def _term_years(pp: dict) -> int:
 def assumption_band(p_json: str) -> tuple:
     """가정(주식 위험프리미엄)을 ±1 표준오차만큼 움직였을 때의 범위. 계산은 advice 가 한다."""
     pp = json.loads(p_json)
-    # (v51) 6번 다시 돌리는 계산이라 5,000개 미래로 — 범위 끝값이 ±1%p쯤 흔들리지만 '대략 이 정도 폭'을 보여주는 용도라 충분하다(13.4 → 약 10초)
+    # (v50.10) 6번 다시 돌리는 계산이라 5,000개 미래로 — 범위 끝값이 ±1%p쯤 흔들리지만 '대략 이 정도 폭'을 보여주는 용도라 충분하다(13.4 → 약 10초)
     return _assumption_band(pp, paths=min(pp["paths"], 5000))
 
 
@@ -234,7 +234,7 @@ def solve_for(f, lo: float, hi: float, target: float, tol: float = 0.004, max_it
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def required_assets(p_json: str, target: float = 0.9):
     """기본생활 유지 확률이 target이 되는 금융자산(억 원) — 같은 시나리오 위에서 보간 탐색."""
-    p = json.loads(p_json); paths = min(p["paths"], 3000)   # (v51) 역산은 6~8번 다시 돌려 3,000개로 — 금액이 몇 %만 달라진다
+    p = json.loads(p_json); paths = min(p["paths"], 3000)   # (v50.10) 역산은 6~8번 다시 돌려 3,000개로 — 금액이 몇 %만 달라진다
     f = lambda a: run(p, {"assets": a, "paths": paths})["s"]["기본생활 유지 확률"]
     return solve_for(f, 0.0, max(total_assets(p) * 3, 20.0), target)
 
@@ -242,7 +242,7 @@ def required_assets(p_json: str, target: float = 0.9):
 @st.cache_data(ttl=600, max_entries=32, show_spinner=False)
 def required_saving(p_json: str, target: float = 0.9):
     """은퇴 전 월 저축액(만원) 역산: 기본생활 유지 확률이 target이 되는 최소 저축액."""
-    p = json.loads(p_json); paths = min(p["paths"], 3000)   # (v51) 역산은 6~8번 다시 돌려 3,000개로 — 금액이 몇 %만 달라진다
+    p = json.loads(p_json); paths = min(p["paths"], 3000)   # (v50.10) 역산은 6~8번 다시 돌려 3,000개로 — 금액이 몇 %만 달라진다
     inc = (p.get("salary", 0) + (p.get("s_salary", 0) if p["spouse"] else 0)) / 12
     if p.get("save_mode") == "소득의 %" and inc > 0:        # 저축률 방식: 소득과 함께 늘어나는 저축률을 역산 → 첫해 월액으로 표시
         f = lambda r: run(p, {"save_rate_override": r, "paths": paths})["s"]["기본생활 유지 확률"]
@@ -939,7 +939,7 @@ if _t < 3:
         st.caption("이 값들은 결과를 조금씩 바꿉니다. 영향이 큰 항목(은퇴 나이·생활비·여행 예산·금융자산·투자 성향·집·대출)은 "
                    "이미 직접 넣으셨습니다. 아래 '가정 범위'가 주식 수익률·수명·간병 같은 누구도 모르는 값의 영향을 따로 보여줍니다.")
 
-# (v51) 탭 8개 → 5개: 위기 상황·세금은 '바꿔보기' 안 펼침 칸(누를 때만 계산), 설명하기는 '이 계산에 대하여' 안 펼침 칸으로
+# (v50.10) 탭 8개 → 5개: 위기 상황·세금은 '바꿔보기' 안 펼침 칸(누를 때만 계산), 설명하기는 '이 계산에 대하여' 안 펼침 칸으로
 tab1, tab2, tab6, tab8, tab5 = st.tabs(["결과", "바꿔보기", "상품 추가", "리포트", "이 계산에 대하여"])
 
 with tab1:
@@ -1557,7 +1557,7 @@ with tab6:
             st.caption("특정 상품의 가입 권유가 아닙니다. 상품설명서의 숫자를 직접 넣어 비교해 보는 도구입니다. "
                        "실제 상품에는 사망보장·중도인출·연금전환 옵션 등 여기 반영되지 않은 조건이 있습니다.")
 
-# (v51) 예전 '위기 상황'·'세금' 탭 — 처음 화면을 열 때 계산하지 않고, 펼쳐서 버튼을 누를 때만 계산한다(첫 결과 약 10초 단축)
+# (v50.10) 예전 '위기 상황'·'세금' 탭 — 처음 화면을 열 때 계산하지 않고, 펼쳐서 버튼을 누를 때만 계산한다(첫 결과 약 10초 단축)
 with tab2.expander("위기가 오면? — 주가 폭락·고물가·장수·간병"):
     st.markdown("정해진 위기가 온다고 가정했을 때 목표가 얼마나 흔들리는지 봅니다.")
     if st.button("위기 상황 계산", key="crisis_go"):
@@ -1713,10 +1713,22 @@ with tab5:
                                    for r in vrows]), hide_index=True, width="stretch")
         st.caption("'직접 계산'은 프로그램을 쓰지 않고 법 조문의 세율·공제액만으로 적은 식입니다. "
                    "같은 목록이 프로그램을 고칠 때마다 자동 검사로 돌아가므로, 하나라도 어긋나면 고치기 전에는 올라가지 않습니다.")
-    st.caption("아직 하지 않은 것: 국민건강보험공단·국민연금공단 **모의계산기 화면값과의 대조**. "
-               "건보료 재산분에는 자동차와 월세 환산분을 넣지 않았습니다(전월세 보증금은 v50부터 30% 반영). 법이 바뀌면 이 표도 함께 고칩니다.")
+    # (v50.11) 공식 계산기 대조 — 기관이 운영하는 모의계산기 화면값과 모델 값을 나란히. 값은 retire_sim/data/official_checks.csv 에서 읽는다
+    from retire_sim import official as _off
+    _orows = _off.rows(); _o_ok, _o_done, _o_n = _off.summary(_orows)
+    st.markdown("**공식 계산기와도 맞는지 — 같은 값을 기관 계산기에 넣어 본 결과**")
+    st.markdown(f'<p class="legend">국민연금공단·국민건강보험공단·홈택스·복지로·주택금융공사가 운영하는 모의계산기에 같은 값을 넣고, '
+                f'화면에 나온 금액을 모델 값과 비교합니다. <b>{_o_n}개 사례 중 {_o_done}개 확인, {_o_ok}개 일치</b>'
+                + (f" · 나머지 {_o_n - _o_done}개는 확인 중" if _o_done < _o_n else "") + '.</p>', unsafe_allow_html=True)
+    st.dataframe(pd.DataFrame([{"계산기": r["calc"], "넣은 값": r["inputs"],
+                                "모델": f'{r["model"]:,.2f} {r["unit"]}',
+                                "공식 계산기": "확인 중" if r["official"] is None else f'{r["official"]:,.2f} {r["unit"]}',
+                                "결과": {"일치": "✓ 일치", "불일치": "✗ 다름", "대기": "—"}[r["status"]]} for r in _orows]),
+                 hide_index=True, width="stretch")
+    _pending = "아직 하지 않은 것: 국민건강보험공단·국민연금공단 등 **모의계산기 화면값과의 대조** 일부. " if _o_done < _o_n else ""
+    st.caption(_pending + "건보료 재산분에는 자동차와 월세 환산분을 넣지 않았습니다(전월세 보증금은 v50부터 30% 반영). 법이 바뀌면 이 표도 함께 고칩니다.")
 
-# ── 설계사용 (v51) 예전 '설명하기' 탭 — '이 계산에 대하여' 맨 아래 펼침 칸
+# ── 설계사용 (v50.10) 예전 '설명하기' 탭 — '이 계산에 대하여' 맨 아래 펼침 칸
 _advisor = tab5.expander("설계사용 — 고객에게 설명하실 때 (설명 순서·하지 말아야 할 말)")
 with _advisor:
     st.markdown("### 고객에게 설명하실 때")

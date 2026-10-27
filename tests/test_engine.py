@@ -1690,3 +1690,19 @@ def test_v50_9_dependent_and_policy_scenarios():
     rows = {r["name"]: r for r in contrast.policy_scenarios(p, paths=1500)}
     assert rows["기초연금 부부감액 폐지"]["diff"] >= rows["기초연금 부부감액 20% → 15%"]["diff"] >= 0
     assert rows["상속세 일괄공제 5억 → 8억"]["estate_tax_diff"] <= 0
+
+
+def test_official_calculator_cases():
+    """(v50.11) 공식 계산기 대조: 모델 값은 모두 계산되고, 받아 온 공식값이 있으면 허용 오차 안에서 맞아야 한다.
+
+    공식값은 retire_sim/data/official_checks.csv 에 사람이 채운다. 어긋나면 이 테스트가 실패해
+    '모델이 틀렸나, 계산기 입력이 달랐나'를 확인하게 한다."""
+    import math
+    from retire_sim import official
+    rs = official.rows()
+    assert len({r["id"] for r in rs}) == len(rs), "사례 id 가 겹친다"
+    assert all(math.isfinite(r["model"]) and r["model"] >= 0 for r in rs)
+    bad = [(r["id"], r["model"], r["official"]) for r in rs if r["status"] == "불일치"]
+    assert not bad, f"공식 계산기와 다르다: {bad}"
+    known = set(official.recorded())
+    assert known <= {r["id"] for r in rs}, f"없는 사례의 값이 기록돼 있다: {known - {r['id'] for r in rs}}"
