@@ -1805,3 +1805,42 @@ def test_v52_stage_screen():
     assert not at.exception, [e.value for e in at.exception]
     md = " ".join(m.value for m in at.markdown)
     assert "결혼·내 집 마련</b> 단계에서 먼저 볼 숫자" in md and "전세·월세를 유지하면" in md
+
+
+def test_v53_tier1_dont_know_and_quick_result():
+    """(v53) 1단계: 자산을 구간으로 고르고, 생활비를 '모름→평균'으로 두고, 두 번째 화면에서 바로 결과로 가면
+    구간 가운데 값·평균 생활비로 계산하고 그렇게 가정했다고 결과에 적는다."""
+    from retire_sim.inputs import AVG_SPEND
+    at = _app(); at.run()
+    [b for b in at.button if b.label == "1단계로 시작"][0].click().run()
+    [b for b in at.button if b.label == "다음"][-1].click().run()                    # 0 → 1
+    assert not at.exception, [e.value for e in at.exception]
+    assert any(b.label.startswith("여기까지만 넣고 바로 결과 보기") for b in at.button)
+    [s for s in at.selectbox if s.key == "t1_arng"][0].select("3억~5억")
+    [b for b in at.button if b.label == "다음"][-1].click().run()                    # 1 → 2
+    assert at.session_state["p"]["assets_range"] == "3억~5억"
+    assert abs(sum(at.session_state["p"][k] for k in ("deposit", "invest", "ret_acct")) - 4.0) < 0.05
+    [c for c in at.checkbox if c.label.startswith("잘 모르겠어요")][0].check()
+    [b for b in at.button if b.label.startswith("여기까지만 넣고 바로 결과 보기")][-1].click().run()   # 2 → 결과
+    assert not at.exception, [e.value for e in at.exception]
+    p = at.session_state["p"]
+    assert p["spend_avg"] and p["essential"] == AVG_SPEND["부부_최소"] and p["skipped_step"] == 2
+    md = " ".join(m.value for m in at.markdown)
+    assert "지금 계획대로면" in md
+    assert "구간의 가운데 값" in md and "평균값(기본생활 월" in md and "연금 화면을 건너뛰어" in md
+
+
+def test_v53_tier1_nps_unknown_needs_income():
+    """(v53) 국민연금을 '몰라요'로 두면 소득이 있어야 넘어가고, 구간으로 고르면 가운데 값으로 추정한다."""
+    at = _app(); at.run()
+    [b for b in at.button if b.label == "1단계로 시작"][0].click().run()
+    for _ in range(3):
+        [b for b in at.button if b.label == "다음"][-1].click().run()                # 0→1→2→3
+    assert any(c.label.startswith("예상액을 몰라요") for c in at.checkbox)
+    [c for c in at.checkbox if c.label.startswith("예상액을 몰라요")][0].check()
+    [n for n in at.number_input if n.label.startswith("본인 세전 연소득")][0].set_value(0)
+    [s for s in at.selectbox if s.key == "t1_srng"][0].select("5천만~7천만 원")
+    [b for b in at.button if b.label == "다음"][-1].click().run()                    # 3 → 4
+    assert not at.exception, [e.value for e in at.exception]
+    p = at.session_state["p"]
+    assert p["nps_auto"] and p["nps_unknown"] and p["salary"] == 6000 and p["sal_range"] == "5천만~7천만 원"

@@ -105,6 +105,9 @@ DEFAULTS = dict(
     # (v52) 생애 단계(0 = 안 고름, 1~4 STAGES) — 화면 전용. 결혼 계획: 몇 살에(0 = 없음·이미), 본인 부담 비용(만 원), 배우자가 가져오는 금융자산(억).
     #       자녀: kids = 지금 있는 자녀의 나이들, kid_plan = 낳을 계획(본인 나이들). 둘 다 비면 v51과 같다.
     stage=0, marry_age=0, marry_cost=0, marry_assets=0.0, kids=[], kid_plan=[],
+    # (v53) 1단계 '잘 모름'·구간 선택 — 화면 전용(계산에는 고른 값이 이미 들어가 있다). 결과 화면의 '가정' 목록에 그대로 보여주려고 남긴다.
+    #       nps_unknown: 국민연금 예상액을 몰라 소득으로 추정 · spend_avg: 생활비를 평균으로 · assets_range/sal_range/s_sal_range: 구간으로 고른 라벨 · skipped_step: 몇 번째 화면에서 바로 결과로 갔나(0 = 끝까지)
+    nps_unknown=False, spend_avg=False, assets_range="", sal_range="", s_sal_range="", skipped_step=0,
 )
 
 

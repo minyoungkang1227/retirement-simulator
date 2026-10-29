@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 52          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 53          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -434,6 +434,13 @@ def nav(i, form_key):
     return back, nxt
 
 
+def nav1(i, form_key):
+    """(v53) 1단계 이동 버튼 — 자산·생활비 화면에서는 '여기까지만 넣고 바로 결과 보기'가 더 붙는다(나머지는 평균 가정)."""
+    back, nxt = nav(i, form_key)
+    skip = st.form_submit_button("여기까지만 넣고 바로 결과 보기 (나머지는 평균으로)", width="stretch") if i in (1, 2) else False
+    return back, nxt, skip
+
+
 def go(delta):
     ss.step = max(0, min(len(STEPS) - 1, ss.step + delta)); st.rerun()
 
@@ -453,6 +460,18 @@ TIERS = {
     3: ("전문가 상담", "설계사·전문가와 함께",
         "부모님 간병 분담, 한 명만 남았을 때 생활비, 해외주식·명의, 생활비를 지키는 방식과 계산 가정까지 모두 조정합니다."),
 }
+# (v53) 정확한 금액을 모르거나 말하기 꺼려지는 사람을 위한 구간 선택 — 구간 가운데 값으로 계산하고, 그렇게 했다고 결과에 적는다.
+ASSET_RANGES = {"5천만 원 미만": 0.3, "5천만 원~1억": 0.75, "1억~3억": 2.0, "3억~5억": 4.0, "5억~10억": 7.5, "10억~20억": 15.0, "20억 이상": 30.0}   # 억 원
+SALARY_RANGES = {"3천만 원 미만": 2500, "3천만~5천만 원": 4000, "5천만~7천만 원": 6000, "7천만~1억 원": 8500, "1억 원 이상": 12000}              # 만 원/년 (세전)
+RANGE_EXACT = "정확히 입력할게요"
+
+
+def range_pick(label: str, options: dict, current: str, key: str, help_: str = "", disabled: bool = False) -> str:
+    """구간 고르기(폼 안). 안 고르면 RANGE_EXACT 를 돌려준다."""
+    opts = [RANGE_EXACT] + list(options)
+    return st.selectbox(label, opts, index=opts.index(current) if current in opts else 0, key=key, help=help_ or None, disabled=disabled)
+
+
 TIER1_SPLIT = (0.3, 0.4, 0.3)        # 1단계: 금융자산 합계를 예금·투자·연금계좌로 나누는 비율(기본 가구와 같은 비율)
 
 
@@ -475,7 +494,21 @@ def tier_assumptions(p: dict) -> list:
         if p.get("debt", 0) > 0:
             out.append("대출 금리는 지금 시장금리 + 1.5%p 고정")
         if p.get("ret_contrib"):
-            out.append("퇴직금은 '마지막 월급 × 근속연수'(퇴직금·DB 제도) 기준, 은퇴 때 IRP로 받아 연금으로 수령")
+            out.append("퇴직금은 '마지막 월급 × 근속연수'(퇴직금·DB 제도) 기준, 은퇴 때 IRP(퇴직금을 넣어 두는 연금 계좌)로 받아 연금으로 수령")
+        if p.get("assets_range"):
+            out.append(f"금융자산은 '{p['assets_range']}' 구간의 가운데 값 {total_assets(p):.1f}억 원으로 계산 — 정확한 금액을 넣으면 결과가 달라질 수 있습니다")
+        if p.get("sal_range") or p.get("s_sal_range"):
+            out.append("연소득은 고른 구간의 가운데 값으로 계산 (본인 " + (p.get("sal_range") or "직접 입력") + ", 배우자 " + (p.get("s_sal_range") or "직접 입력") + ")")
+        if p.get("nps_unknown") and p.get("nps_auto"):
+            out.append("국민연금 예상액을 모른다고 해서 소득으로 추정했습니다 — 국민연금공단 '내 연금 알아보기'의 실제 예상액을 넣으면 더 정확합니다")
+        if p.get("spend_avg"):
+            out.append(f"생활비를 모른다고 해서 평균값(기본생활 월 {p['essential']}만 원, 여행·취미 연 {p['lifestyle']:,}만 원, 국민연금연구원 2024년 조사의 '최소생활비' 기준)으로 계산")
+        sk = int(p.get("skipped_step", 0) or 0)
+        if sk == 1:
+            out.append(f"생활비 화면도 건너뛰어 기본생활비 월 {p['essential']}만 원, 여행·취미 연 {p['lifestyle']:,}만 원(평균 또는 직전 값)으로 계산")
+        if 0 < sk < 3:
+            out.append(f"연금 화면을 건너뛰어 국민연금은 기본값(본인 월 {p['nps']}만 원"
+                       + (f", 배우자 월 {p['s_nps']}만 원" if p.get("spouse") else "") + "), 투자 성향은 '" + str(p.get("profile", "균형형")) + "'로 계산 — 소득을 넣으면 추정으로 바뀝니다")
     if t == 1:
         out.append("배우자는 은퇴 후 일하지 않음")
     if int(p.get("marry_age", 0) or 0) > p.get("age", 0) and p.get("spouse"):
@@ -658,9 +691,11 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
             pre = p["age"] < p["retire_age"]
             c1, c2 = st.columns(2)
             tot = c1.number_input("금융자산 합계 (억 원)", 0.0, 500.0, float(round(total_assets(p), 1)), step=0.1,
-                                  help="예금·적금, 주식·펀드, 퇴직연금·연금저축을 모두 더한 금액. 집은 빼고요.")
+                                  help="예금·적금, 주식·펀드, 퇴직연금·연금저축을 모두 더한 금액. 집은 빼고요. 퇴직연금은 '지금 계좌에 쌓여 있는 돈'만 더하세요 — 나중에 매달 받을 금액이 아닙니다.")
             sav = c2.number_input("한 달 저축·투자액 (만 원)", 0, 5000, int(p["saving"]) if pre else 0, step=10, disabled=not pre,
                                   help="대출 상환하고 남는 돈 중 모으는 금액")
+            a_rng = range_pick("정확한 금액이 부담되면 — 대략 구간으로 고르기", ASSET_RANGES, p.get("assets_range", ""), "t1_arng",
+                               "구간을 고르면 위 금액 칸 대신 구간의 가운데 값으로 계산합니다. 정확히 넣으려면 '정확히 입력할게요'로 두세요.")
             c1, c2, c3 = st.columns(3)
             h_mkt = c1.number_input("사는 집 시세 (억 원)", 0.0, 800.0, float(p["h_market"]), step=0.5)
             dbt = c2.number_input("갚고 있는 대출 (억 원)", 0.0, 100.0, float(p.get("debt", 0.0)), step=0.1,
@@ -669,13 +704,18 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
             st.caption("집·대출이 없으면 0으로 두세요. 대출은 은퇴 전에는 월급에서 갚는다고 보고, **은퇴 후까지 남는 상환분만** 노후자금에서 나갑니다.")
             jse = st.number_input("전월세 보증금 (억 원, 집이 없을 때)", 0.0, 100.0, float(p.get("jeonse", 0.0)), step=0.1,
                                   help="돌려받을 돈이라 상속재산에 들어가고, 기초연금 재산과 건강보험료 재산(보증금의 30%)에도 잡힙니다. 생활비로 꺼내 쓰지는 않는다고 봅니다.")
-            back, nxt = nav(i, "t1s1")
-            if nxt or back:
+            back, nxt, skip = nav1(i, "t1s1")
+            if nxt or back or skip:
+                if a_rng != RANGE_EXACT:
+                    tot = ASSET_RANGES[a_rng]
+                p.update(assets_range="" if a_rng == RANGE_EXACT else a_rng)
                 p.update(deposit=round(tot * TIER1_SPLIT[0], 2), invest=round(tot * TIER1_SPLIT[1], 2),
                          ret_acct=round(tot * TIER1_SPLIT[2], 2), other=0.0,
                          saving=int(sav) if pre else 0, save_mode="월 금액",
                          h_market=float(h_mkt), h_official=round(float(h_mkt) * 0.69, 1), h_n=1, h_years=10,
                          debt=float(dbt), debt_years=int(dyr), debt_rate=0.0, jeonse=float(jse))
+                if skip:
+                    p.update(skipped_step=1, tier=1); ss.done = True; st.rerun()
                 go1(1 if nxt else -1)
         elif i == 2:
             a_ess, a_life = avg_essential(p["spouse"]), avg_lifestyle(p["spouse"])
@@ -686,25 +726,41 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
             st.caption(f"잘 모르시면 평균값을 쓰셔도 됩니다 — {'부부' if p['spouse'] else '혼자'} 기준 기본생활비 월 **{a_ess}만 원**, "
                        f"여행·취미 연 **{a_life:,}만 원** (국민연금연구원 2024년 조사). 생활비와 여행 예산은 결과를 크게 바꾸는 값이라 "
                        "지금 쓰는 돈을 떠올려 넣으면 더 정확합니다.")
-            back, nxt = nav(i, "t1s2")
-            if nxt or back:
-                p.update(essential=int(ess), lifestyle=int(life)); go1(1 if nxt else -1)
+            avg_chk = st.checkbox("잘 모르겠어요 — 평균값으로 계산할게요", value=bool(p.get("spend_avg")),
+                                  help="체크하면 위 두 칸 대신 평균값(최소생활비 기준)을 씁니다. 결과 화면에 그렇게 가정했다고 적어 드립니다.")
+            back, nxt, skip = nav1(i, "t1s2")
+            if nxt or back or skip:
+                if avg_chk:
+                    ess, life = a_ess, a_life
+                p.update(essential=int(ess), lifestyle=int(life), spend_avg=bool(avg_chk))
+                if skip:
+                    p.update(skipped_step=2, tier=1); ss.done = True; st.rerun()
+                go1(1 if nxt else -1)
         elif i == 3:
-            st.markdown("**국민연금 예상 월액** — 모르면 0으로 두고 아래에 세전 연소득을 넣으면 추정합니다.")
+            st.markdown("**국민연금 예상 월액** — 모르는 분이 대부분입니다. 모르면 아래 체크만 하고 연소득을 대략 고르세요.")
+            nps_unk = st.checkbox("예상액을 몰라요 — 연소득으로 추정해 주세요", value=bool(p.get("nps_unknown") or p.get("nps_auto")),
+                                  help="체크하면 아래 월액 칸은 무시하고, 소득과 가입 기간으로 국민연금 공식에 따라 추정합니다.")
             c1, c2 = st.columns(2)
-            nps = c1.number_input("본인 (만 원/월)", 0, 500, 0 if p.get("nps_auto") else int(p["nps"]))
-            s_nps = c2.number_input("배우자 (만 원/월)", 0, 500, 0 if p.get("nps_auto") else int(p["s_nps"]), disabled=not p["spouse"])
+            nps = c1.number_input("예상액을 안다면 — 본인 (만 원/월)", 0, 500, 0 if p.get("nps_auto") else int(p["nps"]))
+            s_nps = c2.number_input("예상액을 안다면 — 배우자 (만 원/월)", 0, 500, 0 if p.get("nps_auto") else int(p["s_nps"]), disabled=not p["spouse"])
             c1, c2 = st.columns(2)
             sal = c1.number_input("본인 세전 연소득 (만 원)", 0, 100000, int(p.get("salary", 0)), step=100,
                                   help="국민연금 월액을 모를 때 추정하고, 퇴직금을 계산할 때 씁니다")
             ssal = c2.number_input("배우자 세전 연소득 (만 원)", 0, 100000, int(p.get("s_salary", 0)), step=100, disabled=not p["spouse"])
+            c1, c2 = st.columns(2)
+            with c1:
+                sal_rng = range_pick("본인 연소득을 대략 구간으로", SALARY_RANGES, p.get("sal_range", ""), "t1_srng",
+                                     "구간을 고르면 위 금액 칸 대신 구간의 가운데 값으로 계산합니다.")
+            with c2:
+                ssal_rng = range_pick("배우자 연소득을 대략 구간으로", SALARY_RANGES, p.get("s_sal_range", ""), "t1_ssrng",
+                                      "구간을 고르면 위 금액 칸 대신 구간의 가운데 값으로 계산합니다.", disabled=not p["spouse"])
             st.caption("정확한 값은 국민연금공단 '내 연금 알아보기'에서 볼 수 있습니다.")
             pre1 = p["age"] < p["retire_age"]
             rc1 = st.checkbox("회사에서 퇴직금·퇴직연금이 쌓이고 있어요", value=bool(p.get("ret_contrib")), disabled=not pre1)
             c1, c2 = st.columns(2)
             ten1 = c1.number_input("본인 지금 회사 근속연수 (년)", 0, 50, int(p.get("tenure", 0)), disabled=not pre1)
             sten1 = c2.number_input("배우자 근속연수 (년)", 0, 50, int(p.get("s_tenure", 0)), disabled=not (pre1 and p["spouse"]))
-            st.caption("은퇴할 때 받을 퇴직금을 '마지막 월급 × 근속연수'로 계산하고, IRP로 받아 연금으로 나눠 쓴다고 봅니다(퇴직소득세 30% 감면). "
+            st.caption("은퇴할 때 받을 퇴직금을 '마지막 월급 × 근속연수'로 계산하고, IRP(퇴직금을 넣어 두는 연금 계좌)로 받아 연금으로 나눠 쓴다고 봅니다(퇴직소득세 30% 감면). "
                        "퇴직연금 적립금을 앞에서 금융자산 합계에 이미 넣으셨다면 근속연수는 0으로 두세요 — 앞으로 쌓일 몫만 계산합니다.")
             c1, c2 = st.columns(2)
             pin1 = c1.number_input("은퇴 후에도 일한다면 월 소득 (만 원, 세전)", 0, 2000, int(p.get("post_inc", 0)), step=10,
@@ -714,9 +770,15 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
                             captions=["주식 약 30%, 안정 위주", "주식 약 50%, 균형", "주식 약 70%, 장기 성장"])
             back, nxt = nav(i, "t1s3")
             if nxt or back:
-                auto = nps == 0 and sal > 0
+                if sal_rng != RANGE_EXACT: sal = SALARY_RANGES[sal_rng]
+                if ssal_rng != RANGE_EXACT and p["spouse"]: ssal = SALARY_RANGES[ssal_rng]
+                if nxt and nps_unk and sal <= 0:
+                    st.warning("예상액을 모르시면 본인 연소득(구간이라도)을 골라야 추정할 수 있어요. 소득도 모르시면 위 체크를 풀고 월액 칸에 대략 넣어 주세요.")
+                    st.stop()
+                auto = (nps_unk or nps == 0) and sal > 0
                 p.update(ret_contrib=bool(rc1) and pre1, ret_plan="DB", tenure=int(ten1), s_tenure=int(sten1),
-                         post_inc=int(pin1), post_until=int(pun1) if pin1 > 0 else 0)
+                         post_inc=int(pin1), post_until=int(pun1) if pin1 > 0 else 0, skipped_step=0, nps_unknown=bool(nps_unk and auto),
+                         sal_range="" if sal_rng == RANGE_EXACT else sal_rng, s_sal_range="" if ssal_rng == RANGE_EXACT else ssal_rng)
                 p.update(nps_auto=auto, nps=int(nps), s_nps=int(s_nps), salary=float(sal), s_salary=float(ssal),
                          nps_years=tier1_nps_years(p["age"]), s_nps_years=tier1_nps_years(p["s_age"]),
                          nps_start=65, priv=0, legacy=0.0, profile=prof)
@@ -804,7 +866,7 @@ if ss.step < len(STEPS) and not ss.get("done"):
                 c1, c2, c3 = st.columns(3)
                 sal = c1.number_input("본인 연 소득 (세전, 만 원)", 0, 100000, int(p.get("salary", 0)), step=100)
                 ssal = c2.number_input("배우자 연 소득 (세전, 만 원)", 0, 100000, int(p.get("s_salary", 0)), step=100, disabled=not p["spouse"])
-                wg = c3.number_input("실질 임금상승률 (%/년)", 0.0, 5.0, float(p.get("wage_g", 1.0)), step=0.5)
+                wg = c3.number_input("임금상승률 — 물가 오른 만큼은 뺀 값 (%/년)", 0.0, 5.0, float(p.get("wage_g", 1.0)), step=0.5)
                 mode = st.radio("저축 입력 방식", ["월 금액", "소득의 %"], index=0 if p.get("save_mode", "월 금액") == "월 금액" else 1, horizontal=True)
                 c1, c2 = st.columns(2)
                 sav = c1.number_input("한 달 저축·투자액 (만 원)", 0, 5000, int(p["saving"]), step=10)
