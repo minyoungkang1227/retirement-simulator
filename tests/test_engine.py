@@ -1868,3 +1868,20 @@ def test_v53_quick_start_first_screen():
     md = " ".join(m.value for m in at.markdown)
     assert "지금 계획대로면" in md
     assert "첫 화면의 여섯 가지만 물었습니다" in md and "구간의 가운데 값" in md
+
+
+def test_v53_living_cost_labels_and_minimum_note():
+    """(v53.2) 결과 화면: 위 칩은 '기본생활비', 필요한 생활비 옆에 기본+여행 내역이 붙고, 최소생활비 수준이면 적정 기준 확률을 보여준다."""
+    import pathlib
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"), default_timeout=600); at.run()
+    [b for b in at.button if b.label == "바로 결과 보기"][0].click().run()          # 기본 가구: 부부, 기본생활비 217만(최소), 여행 연 1,000만
+    assert not at.exception, [e.value for e in at.exception]
+    md = " ".join(m.value for m in at.markdown)
+    assert "기본생활비" in md and "(기본생활 217만 + 여행·취미 83만)" in md
+    assert "최소생활비</b>(217만 원) 수준이에요" in md and "적정생활비 298만 원</b>으로 잡으면" in md
+    # 적정 이상이면 안내가 사라진다
+    at.session_state["p"]["essential"] = 300
+    at.run()
+    md2 = " ".join(m.value for m in at.markdown)
+    assert "적정생활비" not in md2 or "최소생활비</b>(217만 원) 수준" not in md2

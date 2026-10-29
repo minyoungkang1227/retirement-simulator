@@ -38,6 +38,7 @@ from retire_sim.pension import estimate_nps_monthly
 from retire_sim.inputs import (EARLY_EXIT, PROFILES, AVG_SPEND, DEFAULTS, STAGES, STAGE_AGES, build_case,
                               total_assets, nps_values, monthly_saving, income_gap, severance_estimate, kid_total)
 from retire_sim import stage as stage_mod
+from retire_sim import advice
 from retire_sim.advice import action_ranking as _action_ranking, assumption_band as _assumption_band
 from retire_sim import reporting
 from retire_sim.reporting import build_report, fan_rows
@@ -346,6 +347,21 @@ def progress_bar(label: str, cur: float, need: float, unit: str, fmt: str = "{:.
 def stage_calc(p_json: str) -> dict:
     """(v52) 생애 단계별 첫 문장 재료. 계산은 stage 모듈."""
     return stage_mod.headline(json.loads(p_json))
+
+
+@st.cache_data(ttl=600, max_entries=32, show_spinner=False)
+def living_note_calc(p_json: str) -> dict:
+    """(v53.2) 기본생활비가 '적정생활비'보다 낮을 때, 적정으로 잡으면 확률이 얼마나 바뀌는지(같은 난수 위에서)."""
+    p_ = json.loads(p_json)
+    sp = bool(p_.get("spouse"))
+    mn = AVG_SPEND["부부_최소"] if sp else AVG_SPEND["개인_최소"]
+    ad = AVG_SPEND["부부_적정"] if sp else AVG_SPEND["개인_적정"]
+    if int(p_["essential"]) >= ad:
+        return {}
+    v0 = {"paths": min(int(p_.get("paths", 3000)), 3000)}
+    a = advice.essential_prob(advice.run_case(p_, v0))
+    b = advice.essential_prob(advice.run_case({**p_, "essential": ad}, v0))
+    return {"ess": int(p_["essential"]), "min": mn, "adq": ad, "prob": a, "prob_adq": b, "spouse": sp}
 
 
 def stage_banner(p: dict, ok: float) -> None:
@@ -1223,7 +1239,7 @@ with tab1:
 
     # 0) (v49.1) 맨 위 요약 숫자 — 무엇을 넣고 계산했는지 한 줄로
     chips = [("금융자산", f"{total_assets(p):.1f}억"), ("월 저축", f"{monthly_saving(p):.0f}만" if p["age"] < p["retire_age"] else "—"),
-             ("연금", f"월 {pension:.0f}만"), ("생활비", f"월 {need:.0f}만")]
+             ("연금", f"월 {pension:.0f}만"), ("기본생활비", f"월 {p['essential']}만")]
     st.markdown('<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.2rem 0 .6rem">' + "".join(
         f'<div style="flex:1;min-width:110px;border:1px solid #CBD7DB;border-radius:12px;padding:.45rem .7rem;background:white">'
         f'<div style="color:{MUTED};font-size:.8rem">{k}</div><div style="font-weight:700;font-size:1.05rem">{v}</div></div>'
@@ -1257,6 +1273,16 @@ with tab1:
 
     stage_banner(p, ok)                                      # (v52) 단계별 첫 문장
 
+    # (v53.2) 기본생활비가 '최소'에 가까우면 그 사실과 적정 기준일 때의 숫자를 바로 보여준다 — 기본값이 결과를 후하게 보이게 하지 않도록
+    ln = living_note_calc(json.dumps(p, sort_keys=True))
+    if ln:
+        who = "부부" if ln["spouse"] else "혼자"
+        near = ln["ess"] <= ln["min"] * 1.05
+        st.markdown(f'<div class="tip">💡 기본생활비 월 <b>{ln["ess"]}만 원</b>은 국민연금연구원 2024년 조사의 {who} '
+                    + ('<b>최소생활비</b>(' + f'{ln["min"]}만 원) 수준이에요. ' if near else f'최소 {ln["min"]}만 원 ~ 적정 {ln["adq"]}만 원 사이예요. ')
+                    + f'<b>적정생활비 {ln["adq"]}만 원</b>으로 잡으면 기본생활 유지 확률이 <b>{ln["prob"] * 100:.0f}%</b>에서 <b>{ln["prob_adq"] * 100:.0f}%</b>로 바뀝니다.</div>',
+                    unsafe_allow_html=True)
+
     # 3) 목표별 결과: 기본 / 여행·취미 / 자녀 — 결론 바로 아래에 둔다(v50.4)
     st.markdown(sec("목표별로 보면"), unsafe_allow_html=True)
     cards = [("🏠 기본 생활", "먹고 사는 데 꼭 필요한 돈", f'10번 중 <span class="hl">{n_ok}번</span> 끝까지 가능해요')]
@@ -1276,7 +1302,8 @@ with tab1:
     else:
         fill = "연금만으로 생활비가 충분해요. 모아둔 돈은 여행·취미와 남길 돈에 쓸 수 있어요."
         big = "매달 연금으로 생활비가 충분해요"
-    st.markdown(f'<div class="gap"><div class="eq">필요한 생활비 <b>월 {need:.0f}만 원</b><br>받는 연금 <b>월 {pension:.0f}만 원</b> (오늘 돈 가치 기준)</div>'
+    _parts = (f" (기본생활 {p['essential']}만 + 여행·취미 {p['lifestyle'] / 12:.0f}만)" if p["lifestyle"] > 0 else "")
+    st.markdown(f'<div class="gap"><div class="eq">필요한 생활비 <b>월 {need:.0f}만 원</b>{_parts}<br>받는 연금 <b>월 {pension:.0f}만 원</b> (오늘 돈 가치 기준)</div>'
                 f'<div class="big">{big}</div><div class="eq">{fill}</div></div>', unsafe_allow_html=True)
 
     # 3-1) (v49.1) 10번 중 9번까지 얼마나 왔나 — 필요 자산·필요 저축 대비 진행률
