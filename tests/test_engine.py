@@ -1795,6 +1795,8 @@ def test_v52_stage_screen():
     from retire_sim.inputs import STAGES
     at = AppTest.from_file(str(pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"), default_timeout=600); at.run()
     assert not at.exception, [e.value for e in at.exception]
+    [b for b in at.button if b.key == "to_full"][0].click().run()          # (v53.1) 첫 화면은 숫자 여섯 개 — 단계별 입력은 '더 자세히'로
+    assert not at.exception, [e.value for e in at.exception]
     md = " ".join(m.value for m in at.markdown)
     assert all(name in md for name, *_ in STAGES.values())
     [b for b in at.button if b.key == "stage1"][0].click().run()
@@ -1844,3 +1846,25 @@ def test_v53_tier1_nps_unknown_needs_income():
     assert not at.exception, [e.value for e in at.exception]
     p = at.session_state["p"]
     assert p["nps_auto"] and p["nps_unknown"] and p["salary"] == 6000 and p["sal_range"] == "5천만~7천만 원"
+
+
+def test_v53_quick_start_first_screen():
+    """(v53.1) 첫 화면에서 단계·입력 단계를 고르지 않고 숫자 여섯 개만 넣으면 바로 결과가 나오고, 묻지 않은 것은 가정 목록에 적힌다."""
+    import pathlib
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"), default_timeout=600); at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert [b for b in at.button if b.label == "바로 결과 보기" or b.key == "to_full"], "첫 화면에 바로 결과 보기와 '더 자세히'가 있어야 한다"
+    [n for n in at.number_input if n.key == "q_age"][0].set_value(40)
+    [n for n in at.number_input if n.key == "q_ret"][0].set_value(60)
+    [s for s in at.selectbox if s.key == "q_arng"][0].select("1억~3억")
+    [s for s in at.selectbox if s.key == "q_inc"][0].select("5천만~7천만 원")
+    [c for c in at.checkbox if c.key == "q_avg"][0].check()
+    [b for b in at.button if b.label == "바로 결과 보기"][0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    p = at.session_state["p"]
+    assert p["quick_start"] and p["age"] == 40 and p["assets_range"] == "1억~3억" and p["spend_avg"] and p["salary"] == 6000 and p["nps"] > 0
+    assert abs(p["deposit"] + p["invest"] + p["ret_acct"] - 2.0) < 0.05
+    md = " ".join(m.value for m in at.markdown)
+    assert "지금 계획대로면" in md
+    assert "첫 화면의 여섯 가지만 물었습니다" in md and "구간의 가운데 값" in md

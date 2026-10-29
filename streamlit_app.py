@@ -34,6 +34,7 @@ from retire_sim.config import Person
 from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality, optimize, report, product, sources, verify
 from retire_sim.session import calc_id, save_blob, load_blob
+from retire_sim.pension import estimate_nps_monthly
 from retire_sim.inputs import (EARLY_EXIT, PROFILES, AVG_SPEND, DEFAULTS, STAGES, STAGE_AGES, build_case,
                               total_assets, nps_values, monthly_saving, income_gap, severance_estimate, kid_total)
 from retire_sim import stage as stage_mod
@@ -503,6 +504,14 @@ def tier_assumptions(p: dict) -> list:
             out.append("국민연금 예상액을 모른다고 해서 소득으로 추정했습니다 — 국민연금공단 '내 연금 알아보기'의 실제 예상액을 넣으면 더 정확합니다")
         if p.get("spend_avg"):
             out.append(f"생활비를 모른다고 해서 평균값(기본생활 월 {p['essential']}만 원, 여행·취미 연 {p['lifestyle']:,}만 원, 국민연금연구원 2024년 조사의 '최소생활비' 기준)으로 계산")
+        if p.get("quick_start"):
+            out.append("첫 화면의 여섯 가지만 물었습니다. 집·대출·전월세 보증금·퇴직금·사적연금·남길 자산은 없다고 가정 — 해당되면 '더 정확하게'에서 넣어 주세요")
+            if p.get("sal_range"):
+                out.append(f"국민연금은 본인 연소득 '{p['sal_range']}' 구간의 가운데 값으로 추정한 월 {p['nps']}만 원"
+                           + (f", 배우자는 기본값 월 {p['s_nps']}만 원" if p.get("spouse") else ""))
+            else:
+                out.append(f"국민연금은 기본값(본인 월 {p['nps']}만 원" + (f", 배우자 월 {p['s_nps']}만 원" if p.get("spouse") else "")
+                           + ") — 나이와 소득에 맞지 않을 수 있으니 소득을 넣거나 실제 예상액을 넣으면 더 정확합니다")
         sk = int(p.get("skipped_step", 0) or 0)
         if sk == 1:
             out.append(f"생활비 화면도 건너뛰어 기본생활비 월 {p['essential']}만 원, 여행·취미 연 {p['lifestyle']:,}만 원(평균 또는 직전 값)으로 계산")
@@ -596,6 +605,52 @@ def family_fields(p: dict, key: str) -> dict:
             st.caption("자녀를 넣으면 나이별 양육·교육비 통계(1인 대학 졸업까지 약 3.9억 원, 2026년 물가)로 자동 계산합니다. 금액을 직접 정하려면 '큰 지출 계획'을 쓰세요.")
     return out
 
+
+# ─────────────────────────── (v53.1) 첫 화면: 숫자 여섯 개로 바로 결과 ───────────────────────────
+# 인터뷰(5~10분 안에 첫 결과)에 맞춰, 단계·입력 단계를 고르기 전에 결과부터 보여준다. 단계별 질문과 상세 입력은 결과를 본 뒤에 고른다.
+INCOME_UNKNOWN = "잘 모르겠어요"
+if not ss.get("done") and not ss.get("tier_set") and not ss.get("stage_set") and not ss.get("full_flow"):
+    st.markdown('<p class="sub">내가 원하는 은퇴생활을 지키려면 무엇이 필요한지, 1만 가지 미래로 확인합니다. '
+                '<b>숫자 몇 개만 넣으면 바로 첫 결과</b>를 보여드리고, 더 정확하게 하고 싶으면 그다음에 이어서 넣으시면 됩니다.</p>',
+                unsafe_allow_html=True)
+    with st.form("quick"):
+        c1, c2, c3 = st.columns(3)
+        q_age = c1.number_input("현재 나이", 20, 90, int(p["age"]), key="q_age")
+        q_ret = c2.number_input("은퇴 (예정) 나이", 40, 90, int(p["retire_age"]), key="q_ret", help="이미 은퇴했다면 현재 나이 이하로 입력")
+        q_hh = c3.radio("가구", ["부부", "혼자"], index=0 if p["spouse"] else 1, horizontal=True, key="q_hh")
+        c1, c2, c3 = st.columns(3)
+        q_tot = c1.number_input("금융자산 합계 (억 원)", 0.0, 500.0, float(round(total_assets(p), 1)), step=0.1, key="q_tot",
+                                help="예금·주식·퇴직연금·연금저축을 모두 더한 금액. 집은 빼고요. 퇴직연금은 '지금 계좌에 쌓여 있는 돈'만 더하세요 — 나중에 매달 받을 금액이 아닙니다.")
+        with c2:
+            q_rng = range_pick("또는 대략 구간으로", ASSET_RANGES, "", "q_arng", "구간을 고르면 왼쪽 금액 칸 대신 구간의 가운데 값으로 계산합니다.")
+        q_sav = c3.number_input("한 달 저축·투자액 (만 원)", 0, 5000, int(p["saving"]), step=10, key="q_sav", help="은퇴 전까지 매달 모으는 금액. 이미 은퇴했다면 0")
+        c1, c2, c3 = st.columns(3)
+        q_ess = c1.number_input("월 기본생활비 (만 원)", 0, 5000, int(p["essential"]), step=10, key="q_ess",
+                                help="식비·주거·공과금·통신·보험료·병원비. 국민연금연구원 2024년 조사: 부부 월 217만 원(최소) ~ 298만 원(적정), 혼자 139만 ~ 198만 원")
+        q_life = c2.number_input("연 여행·취미 예산 (만 원)", 0, 50000, int(p["lifestyle"]), step=100, key="q_life")
+        q_inc = c3.selectbox("본인 연소득 (세전)", [INCOME_UNKNOWN] + list(SALARY_RANGES), index=0, key="q_inc",
+                             help="국민연금 예상액을 소득으로 추정합니다. 모르면 '잘 모르겠어요' — 평균값(월 110만 원)을 씁니다.")
+        q_avg = st.checkbox("생활비를 잘 모르겠어요 — 평균값(최소생활비 기준)으로 계산할게요", value=False, key="q_avg")
+        go_q = st.form_submit_button("바로 결과 보기", type="primary", width="stretch")
+    if go_q:
+        pre_q = int(q_age) < int(q_ret)
+        tot_q = ASSET_RANGES[q_rng] if q_rng != RANGE_EXACT else float(q_tot)
+        sp_q = q_hh == "부부"
+        ess_q = avg_essential(sp_q) if q_avg else int(q_ess)
+        life_q = avg_lifestyle(sp_q) if q_avg else int(q_life)
+        p.update(age=int(q_age), retire_age=int(q_ret), spouse=sp_q, s_age=max(20, int(q_age) - 2) if sp_q else p["s_age"],
+                 deposit=round(tot_q * TIER1_SPLIT[0], 2), invest=round(tot_q * TIER1_SPLIT[1], 2), ret_acct=round(tot_q * TIER1_SPLIT[2], 2), other=0.0,
+                 assets_range="" if q_rng == RANGE_EXACT else q_rng, saving=int(q_sav) if pre_q else 0, save_mode="월 금액",
+                 essential=ess_q, lifestyle=life_q, spend_avg=bool(q_avg), stage=0, tier=1, skipped_step=0, quick_start=True,
+                 h_market=0.0, h_official=0.0, debt=0.0, jeonse=0.0, legacy=0.0, priv=0, ret_contrib=False, post_inc=0, post_until=0, nps_auto=False, nps_unknown=False, sal_range="", s_sal_range="")
+        if q_inc != INCOME_UNKNOWN:
+            sal_q = float(SALARY_RANGES[q_inc])
+            p.update(nps=int(round(estimate_nps_monthly(sal_q, tier1_nps_years(int(q_age)), int(q_age), int(q_ret)))), salary=sal_q, sal_range=q_inc, nps_unknown=True)
+        ss.tier_set = True; ss.stage_set = True; ss.done = True; st.rerun()
+    st.markdown('<p class="note">입력하신 정보는 계산에만 쓰이고 저장되지 않습니다.</p>', unsafe_allow_html=True)
+    if st.button("나이대·재산에 맞춰 더 자세히 입력하기 →", key="to_full"):
+        ss.full_flow = True; st.rerun()
+    st.stop()
 
 if not ss.get("done") and not ss.get("tier_set") and not ss.get("stage_set"):
     st.markdown('<p class="sub">내가 원하는 은퇴생활을 지키려면 무엇이 필요한지, 1만 가지 미래로 확인합니다. '
