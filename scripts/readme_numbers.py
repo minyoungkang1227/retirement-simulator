@@ -35,11 +35,11 @@ def diff(res, base):
 
 
 def couple_52():
-    """52·50세 부부, 60세 은퇴, 금융자산 5억, 월 저축 150만 원."""
+    """52·50세 부부, 60세 은퇴, 금융자산 5억, 월 저축 150만 원 — 앱 기본값(기본생활비 월 217만 원 = 노후보장패널 부부 최소생활비, 여행·취미 연 1,000만 원)."""
     return Household(members=[Person(52, "M", nps_monthly=110, nps_start_age=65, nps_years=25),
                               Person(50, "F", nps_monthly=50, nps_start_age=65, nps_years=20)],
-                     liquid_assets=50_000, stock_weight=0.5, annual_spending=4800,
-                     essential=3600, lifestyle=1200, legacy_target=10_000,
+                     liquid_assets=50_000, stock_weight=0.5, annual_spending=3604,
+                     essential=2604, lifestyle=1000, legacy_target=10_000,
                      retire_age=60, annual_saving=1800, retire_early_prob=0.3)   # (v51) 앱 기본 '보통'
 
 
@@ -67,7 +67,7 @@ print("【A】 52·50세 부부, 60세 은퇴, 금융자산 5억, 월 저축 150
 print(f"  기본생활 유지 {b[0]*100:.0f}% · 여행·취미 충족 {b[1]*100:.0f}% · 1억 남기기 {b[2]*100:.0f}%")
 print("  무엇을 바꾸면:")
 for lab, h2 in [("은퇴 2년 늦추기", replace(hh, retire_age=62)),
-                ("생활비 10% 줄이기", replace(hh, essential=3240, annual_spending=4440)),
+                ("생활비 10% 줄이기", replace(hh, essential=2344, annual_spending=3344)),
                 ("투자 성향 성장형(70%)", replace(hh, stock_weight=0.7)),
                 ("투자 성향 보수형(30%)", replace(hh, stock_weight=0.3)),
                 ("월 저축 50만 원 늘리기", replace(hh, annual_saving=2400))]:

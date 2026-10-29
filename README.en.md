@@ -40,29 +40,29 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 
 ## Example (model v51 · 10,000 paths · reproduce with `scripts/readme_numbers.py`)
 
-**Couple aged 52 and 50, retiring at 60, KRW 500M financial assets, saving KRW 1.5M/month** (essential KRW 3M/month + lifestyle KRW 12M/year, pensions KRW 1.6M/month, KRW 100M legacy)
+**Couple aged 52 and 50, retiring at 60, KRW 500M financial assets, saving KRW 1.5M/month** (app defaults as shipped: essential KRW 2.17M/month + lifestyle KRW 10M/year, pensions KRW 1.6M/month, KRW 100M legacy — KRW 2.17M is the 'minimum' couple living cost from the National Pension Research Institute panel; raising it to KRW 3M, close to their 'adequate' level, drops essential success to 50%)
 
-- Goal success: essential **46%**, lifestyle funding **61%**, KRW 100M legacy **36%** (from v51 the default assumes a 30% chance of leaving the main job 1–7 years early; with retirement exactly at 60 it is 53%)
+- Goal success: essential **76%**, lifestyle funding **89%**, KRW 100M legacy **64%** (from v51 the default assumes a 30% chance of leaving the main job 1–7 years early; with retirement exactly at 60 it is 82%)
 
 | What if | Change in essential success (95% CI) |
 |---|---|
-| Retire 2 years later | **+11.0pp** (±0.6) |
-| Spend 10% less | +8.0pp (±0.5) |
-| Retire exactly at 60 (no timing risk) | +6.7pp (±0.5) |
-| Growth profile (70% equity) | +5.9pp (±0.5) |
-| Save KRW 0.5M more per month | +3.9pp (±0.4) |
-| Conservative profile (30% equity) | −12.3pp (±0.7) |
+| Retire 2 years later | **+7.4pp** (±0.5) |
+| Spend 10% less | +6.1pp (±0.5) |
+| Retire exactly at 60 (no timing risk) | +6.2pp (±0.5) |
+| Growth profile (70% equity) | +0.2pp (±0.4) |
+| Save KRW 0.5M more per month | +2.6pp (±0.3) |
+| Conservative profile (30% equity) | −4.0pp (±0.5) |
 
 | Crisis | Change in essential success |
 |---|---|
-| Equities −40% in the first year of retirement | −14.6pp |
-| Equities −40% ten years into retirement | −9.5pp |
-| Three years of 6% inflation | −5.3pp |
-| Longer life (mortality −20%) | −3.2pp |
-| Long-term care incidence doubled | −4.0pp |
+| Equities −40% in the first year of retirement | −12.0pp |
+| Equities −40% ten years into retirement | −6.9pp |
+| Three years of 6% inflation | −4.2pp |
+| Longer life (mortality −20%) | −3.7pp |
+| Long-term care incidence doubled | −7.1pp |
 
 - For this household **retirement timing is the strongest lever**, and the same crash hurts most right after retirement (sequence-of-returns risk).
-- **The assumption band is 36%–56%**: the minimum and maximum of moving the equity risk premium, longevity and long-term care incidence one at a time by their estimated ranges (v47). The width is effectively set by the **equity risk premium** — on its own (5.2% ± 1.4pp) it spans 36%–56%, while longevity spans 45%–47% and care incidence (±20%) 45%–48%. Monte Carlo noise of ±0.7pp is about one thirtieth of that, and unlike it this band does not shrink with more paths. That is why differences between choices matter more than levels.
+- **The assumption band is 69%–83%**: the minimum and maximum of moving the equity risk premium, longevity and long-term care incidence one at a time by their estimated ranges (v47). The width is effectively set by the **equity risk premium** — on its own (5.2% ± 1.4pp) it spans 69%–83%, while longevity spans 76%–78% and care incidence (±20%) 75%–79%. Monte Carlo noise of ±0.8pp is about one seventeenth of that, and unlike it this band does not shrink with more paths. That is why differences between choices matter more than levels.
 
 **Young savers (dual-income couple aged 30 and 29, KRW 90M gross income, 15% saving rate, workplace pension, National Pension estimated automatically)**
 
