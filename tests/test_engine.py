@@ -814,7 +814,7 @@ def test_app_runs_and_example_household_reaches_results():
     btn[0].click().run()
     assert not at.exception, [e.value for e in at.exception]
     md = " ".join(m.value for m in at.markdown)
-    assert "지금 계획대로면" in md
+    assert "10번 중" in md and "꼭 필요한 생활비" in md
 
 
 def test_existing_debt_v48():
@@ -912,10 +912,12 @@ def test_app_tier_choice_and_tier1_flow():
         [b for b in at.button if b.label in ("다음", "이 조건으로 계산하기")][-1].click().run()
         assert not at.exception, [e.value for e in at.exception]
     md = " ".join(m.value for m in at.markdown)
-    assert "지금 계획대로면" in md
+    assert "10번 중" in md and "꼭 필요한 생활비" in md
     assert any(b.label.startswith("더 정확하게") for b in at.button)
     # (v49.1) 다른 계산기에서 가져온 것: 은퇴 가능 나이, 진행률 막대, 수익률 직접 정해 보기, 공유 카드
-    assert "에 은퇴하면 기본생활을" in md or "늦춰도 10번 중 9번에는" in md
+    assert "10번 중 9번이 되는 은퇴 나이" in md
+    at.toggle(key="detail_tg").set_value(True).run()                                  # (v54) 나머지는 '자세히 보기'
+    md = " ".join(m.value for m in at.markdown)
     assert "10번 중 9번 지키려면 얼마가 더 필요할까" in md
     assert "<svg" in md and any(d.label.startswith("결과 카드") for d in at.get("download_button"))
     assert any(e.label.startswith("주식 수익률을 내가 정하면") for e in at.expander)
@@ -1484,6 +1486,10 @@ def test_app_results_tab_shows_money_flow_waterfall():
     at = _app(); at.run()
     [b for b in at.button if "60대" in b.label][0].click().run()
     assert not at.exception, [e.value for e in at.exception]
+    md0 = " ".join(m.value for m in at.markdown)
+    assert "돈이 어디로 가나" not in md0, "(v54) 자세히 보기를 켜기 전에는 폭포 그래프를 그리지 않는다"
+    at.toggle(key="detail_tg").set_value(True).run()                                  # (v54) 나머지는 '자세히 보기'를 켜야 계산·표시
+    assert not at.exception, [e.value for e in at.exception]
     md = " ".join(m.value for m in at.markdown)
     assert "돈이 어디로 가나" in md, "결과 탭에 폭포 그래프 제목이 없습니다"
     assert "은퇴 후 1년 돈의 흐름" in md, "폭포 그래프 SVG가 그려지지 않았습니다"
@@ -1835,7 +1841,7 @@ def test_v53_tier1_dont_know_and_quick_result():
     p = at.session_state["p"]
     assert p["spend_avg"] and p["essential"] == AVG_SPEND["부부_최소"] and p["skipped_step"] == 2
     md = " ".join(m.value for m in at.markdown)
-    assert "지금 계획대로면" in md
+    assert "10번 중" in md and "꼭 필요한 생활비" in md
     assert "구간의 가운데 값" in md and "평균값(기본생활 월" in md and "연금 화면을 건너뛰어" in md
 
 
@@ -1873,8 +1879,8 @@ def test_v53_quick_start_first_screen():
     assert p["quick_start"] and p["age"] == 40 and p["assets_range"] == "1억~3억" and p["spend_avg"] and p["salary"] == 6000 and p["nps"] > 0
     assert abs(p["deposit"] + p["invest"] + p["ret_acct"] - 2.0) < 0.05
     md = " ".join(m.value for m in at.markdown)
-    assert "지금 계획대로면" in md
-    assert "첫 화면의 여섯 가지만 물었습니다" in md and "구간의 가운데 값" in md
+    assert "10번 중" in md and "꼭 필요한 생활비" in md
+    assert "첫 화면의 숫자 몇 개만 물었습니다" in md and "구간의 가운데 값" in md
 
 
 def test_v53_living_cost_labels_and_minimum_note():
@@ -1885,10 +1891,44 @@ def test_v53_living_cost_labels_and_minimum_note():
     [b for b in at.button if b.label == "바로 결과 보기"][0].click().run()          # 기본 가구: 부부, 기본생활비 217만(최소), 여행 연 1,000만
     assert not at.exception, [e.value for e in at.exception]
     md = " ".join(m.value for m in at.markdown)
-    assert "기본생활비" in md and "(기본생활 217만 + 여행·취미 83만)" in md
-    assert "최소생활비</b>(217만 원) 수준이에요" in md and "적정생활비 298만 원</b>으로 잡으면" in md
+    assert "기본생활비 월 217만" in md and "최소생활비</b>(217만 원, 국민연금연구원 2024년 조사)예요" in md and "적정생활비 298만 원</b>으로 잡으면" in md
+    at.toggle(key="detail_tg").set_value(True).run()                                  # (v54) 내역은 '자세히 보기'에
+    md = " ".join(m.value for m in at.markdown)
+    assert "(기본생활 217만 + 여행·취미 83만)" in md
     # 적정 이상이면 안내가 사라진다
     at.session_state["p"]["essential"] = 300
     at.run()
     md2 = " ".join(m.value for m in at.markdown)
     assert "적정생활비" not in md2 or "최소생활비</b>(217만 원) 수준" not in md2
+
+
+def test_v54_overseas_share_is_diversification_only():
+    """(v54) 해외주식 비중: 기대수익·변동성은 국내와 같고 상관만 0.6 — 섞으면 확률이 오르고(분산), 전부 해외면 전부 국내와 같은 수준이다."""
+    from retire_sim import advice
+    from retire_sim.inputs import DEFAULTS
+    p = dict(DEFAULTS)
+    pr = {o: advice.essential_prob(advice.run_case(p, {"overseas": o})) for o in (0, 50, 100)}
+    assert pr[50] > pr[0] + 0.01, pr                      # 반반이면 분산 효과로 오른다
+    assert abs(pr[100] - pr[0]) < 0.01, pr                # 전부 해외 = 전부 국내 (기대수익·변동성이 같으니까)
+    assert DEFAULTS["overseas"] == 0                      # 기본값은 국내만 — 기준 가구 숫자가 바뀌지 않는다
+
+
+def test_v54_quick_start_asks_house_pension_when_55_plus():
+    """(v54) 첫 화면: 55세 이상이면 집 시세 구간과 주택연금을 묻고, '이미 받고 있어요'면 지금부터 주택연금이 계산에 들어간다. 해외주식도 고를 수 있다."""
+    import pathlib
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(str(pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"), default_timeout=600); at.run()
+    assert not [s for s in at.selectbox if s.key == "q_house"], "52세 기본값에서는 집을 묻지 않는다"
+    [n for n in at.number_input if n.key == "q_age"][0].set_value(62)
+    [n for n in at.number_input if n.key == "q_ret"][0].set_value(60)
+    at.run()
+    [s for s in at.selectbox if s.key == "q_house"][0].select("6억~9억")
+    at.run()
+    [r for r in at.radio if r.key == "q_rm"][0].set_value("이미 받고 있어요")
+    [s for s in at.selectbox if s.key == "q_ovs"][0].select("해외 50%")
+    [b for b in at.button if b.label == "바로 결과 보기"][0].click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    p = at.session_state["p"]
+    assert p["h_market"] == 7.5 and p["rm_age"] == 60 and p["overseas"] == 50      # 부부: 배우자(60세)부터 = 지금부터
+    md = " ".join(m.value for m in at.markdown)
+    assert "주택연금 60세부터" in md and "해외주식 50%" in md and "주택연금은 60세부터 종신지급" in md

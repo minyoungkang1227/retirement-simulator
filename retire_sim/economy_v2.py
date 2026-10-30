@@ -59,6 +59,12 @@ class EconomyV2:
     house_real_sd: float = 0.0       # 실질 상승률 추정 불확실성(경로별)
     house_sigma: float = 0.0         # 집값 로그수익 변동성(연, 개별 주택)
     rho_hs: float = 0.1              # 집값-주식 충격 상관
+    # ── v54 해외주식 ──  주식 중 해외 비중(f_share)만큼은 국내와 상관이 1이 아닌 두 번째 지수를 따른다(원화 기준).
+    #   기대수익과 변동성은 국내와 같게 둔다(사람이 '해외가 더 오른다'고 고르는 길을 열지 않기 위해) — 효과는 분산뿐.
+    #   폭락 점프는 두 지수에 같이 온다(2008·2020처럼 세계 동시 하락). 상관 0.6은 추정치이며 자료 대조 전(아래 FOREIGN_EQUITY_NOTE).
+    f_share: float = 0.0             # 주식 중 해외주식 비중 (0~1)
+    f_sigma: float | None = None     # 해외주식 원화 기준 연 변동성(확산). None이면 국내와 같게
+    rho_df: float = 0.6              # 국내-해외 확산 충격 상관
 
     @classmethod
     def enhanced(cls, calibrated: bool = True, **kw):
@@ -214,7 +220,13 @@ def generate(e: EconomyV2, T: int, n: int, rng) -> dict:
         if e.jump_lambda > 0:
             nj = rng.poisson(e.jump_lambda, n)
             logret += nj * e.jump_mu + np.sqrt(nj) * e.jump_sigma * rng.standard_normal(n) - e.jump_lambda * k_j
-        stock[:, t] = np.exp(logret) - 1
+        if e.f_share > 0:                                 # (v54) 해외주식: 같은 금리·ERP·점프, 확산 충격만 일부 독립
+            Zf = e.rho_df * X[:, t, 4] + np.sqrt(max(1 - e.rho_df ** 2, 0.0)) * rng.standard_normal(n)
+            fs = e.s_sigma if e.f_sigma is None else e.f_sigma
+            logret_f = logret - (e.s_sigma * X[:, t, 4] - 0.5 * e.s_sigma ** 2) + (fs * Zf - 0.5 * fs ** 2)
+            stock[:, t] = (1 - e.f_share) * np.exp(logret) + e.f_share * np.exp(logret_f) - 1
+        else:
+            stock[:, t] = np.exp(logret) - 1
     for t, v in (e.stock_shocks or {}).items():
         if t < T: stock[:, t] = v
     if e.fee > 0:
@@ -248,4 +260,10 @@ CALIBRATED_EQUITY_2026_08 = dict(
 #   오르기 어렵다는 점(인구 감소 포함)을 사전분포로 반영
 # - 상관: 월별 주식 0.05·물가 0.07·금리변화 0.18 (평활로 0 쪽 편의) → 주식 상관 0.1 사용.
 #   물가 연동은 "명목 집값 = 실질 지수 × CPI" 구조로 반영
+# 해외주식 (v54) — 자료 대조 전 추정치. 두 지수(KOSPI, 원화 기준 S&P500)의 연 수익률 상관은 0.5~0.7 범위로 알려져 있어
+# 0.6을 쓴다. 기대수익과 변동성은 국내와 같게 둔다 — 그래서 해외 비중을 올려도 '더 오른다'가 아니라 '한쪽만 나쁠 때가
+# 줄어든다'는 분산 효과만 생긴다(기준 가구에서 해외 50%면 약 +2%p, 100%면 0%p). 실데이터(FinanceDataReader 'US500' × 원달러)로
+# 상관·변동성을 다시 추정하는 일은 다음 버전 과제다. 자료가 있어도 '기대수익이 더 높다'는 가정은 넣지 않는다.
+FOREIGN_EQUITY_NOTE = "기대수익·변동성은 국내와 같고 상관 0.6 — 분산 효과만, 상관은 추정치(자료 대조 전)"
+
 CALIBRATED_HOUSE_2026_08 = dict(house_real_growth=0.0125, house_real_sd=0.0118, house_sigma=0.10, rho_hs=0.1)

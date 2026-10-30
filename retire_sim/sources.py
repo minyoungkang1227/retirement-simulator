@@ -45,6 +45,12 @@ SOURCES = (
         how="노트북의 주식 보정 셀 실행 → economy_v2.CALIBRATED_EQUITY_2026_08 교체",
         stale="변동성 추정은 표본이 길어 안정적이다. 큰 폭락장을 겪은 뒤에는 다시 받는 게 좋다."),
     Source(
+        key="foreign_equity", name="해외주식 — 국내 주식과의 상관 0.6 (추정치, 자료 대조 전)",
+        org="(없음 — v54 가정값)", used_for="주식 중 해외 비중의 분산 효과. 기대수익·변동성은 국내와 같게 두고 상관만 0.6",
+        as_of="2026-10", cycle="다음 버전에서 실데이터로 추정", where="FinanceDataReader 'US500' × 원달러 환율로 추정 예정",
+        how="retire_sim/economy_v2.py 의 EconomyV2.rho_df(와 f_sigma)를 추정치로 교체하고 FOREIGN_EQUITY_NOTE 갱신",
+        stale="**아직 자료로 추정하지 않은 값.** 상관을 0.5~0.7 사이에서 바꿔도 기준 가구 효과는 ±1%p 안이다. 기대수익이 국내보다 높다는 가정은 자료가 있어도 넣지 않는다."),
+    Source(
         key="erp", name="성숙시장 주식 위험프리미엄 4.2% (사전분포)",
         org="Damodaran (NYU Stern), 2026", used_for="한국 ERP의 베이즈 사전분포(+국가위험 약 0.7%p)",
         as_of="2026", cycle="연 1회(연초)", where="Damodaran 홈페이지의 ERP 자료",

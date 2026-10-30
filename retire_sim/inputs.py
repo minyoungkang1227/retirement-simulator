@@ -87,7 +87,7 @@ DEFAULTS = dict(
     region="대도시", h_official=0.0, h_market=0.0, h_n=1, h_joint=False, h_years=10, h_hi=0.0, rent=0,
     biz=0, biz_until=65, biz_work=False, rm_age=0, ds_age=0, ds_ratio=50, events=[],
     ev_ltv=60, ev_loan_years=30, ev_jeonse=0.0, ev_rent=0,
-    overseas=20, own_equal=True, survivor=70, enhanced=True, paths=10000,
+    overseas=0, own_equal=True, survivor=70, enhanced=True, paths=10000,
     # (v36) 간병비 초과상승률(%p/년), 부양하는 부모, 행동 가정
     care_growth=1.0, parents=[], behaviour=False,
     # (v48) 이미 갚고 있는 대출: 남은 원금(억), 금리(%, 0이면 시장금리+1.5%p), 남은 기간(년)
@@ -333,6 +333,7 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
     for key in ("stock_shocks", "infl_shocks"):
         if key in ekw:
             ekw[key] = {int(t): x for t, x in ekw[key].items()}
+    ekw.setdefault("f_share", float(v.get("overseas", p.get("overseas", 0))) / 100)   # (v54) 해외주식 비중 → 수익률 분산에 반영
     eco = EconomyV2.enhanced(**ekw) if p["enhanced"] else EconomyV2(**ekw)
 
     tkw = dict(overseas_share=p["overseas"] / 100, n_children=p["children"],

@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 53          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 54          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -73,6 +73,18 @@ st.markdown(f"""
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
 <style>
 html, body, [class*="css"], .stMarkdown, button, input, label {{ font-family: 'Pretendard', -apple-system, 'Malgun Gothic', sans-serif; }}
+.big-card {{ background: linear-gradient(180deg,#FFFFFF,#F3F7F8); border: 1px solid #DCE6E8; border-radius: 20px; padding: 1.3rem 1.4rem 1.1rem; margin: .2rem 0 .7rem; }}
+.big-card .k {{ font-size: .95rem; font-weight: 700; margin-bottom: .2rem; }}
+.big-card .n {{ font-size: 2.6rem; font-weight: 800; color: {INK}; line-height: 1.15; letter-spacing: -.02em; }}
+.big-card .t {{ font-size: 1.1rem; color: {INK}; margin-top: .15rem; }}
+.big-card .m {{ color: {MUTED}; font-size: .95rem; line-height: 1.65; margin-top: .3rem; }}
+.kpis {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; margin: .2rem 0 .6rem; }}
+.kpi {{ background: white; border: 1px solid #DCE6E8; border-radius: 16px; padding: .9rem 1rem; }}
+.kpi .k {{ color: {MUTED}; font-size: .86rem; font-weight: 600; }}
+.kpi .v {{ font-size: 1.6rem; font-weight: 800; color: {INK}; margin: .15rem 0; letter-spacing: -.01em; }}
+.kpi .s {{ color: {MUTED}; font-size: .86rem; line-height: 1.5; }}
+.act .g {{ flex: 0 0 auto; text-align: right; font-size: 1.25rem; font-weight: 800; color: {TEAL}; line-height: 1.1; }}
+.act .g span {{ display: block; font-size: .8rem; font-weight: 600; color: {MUTED}; }}
 .hero {{ font-size: 1.8rem; line-height: 1.35; font-weight: 700; color: {INK}; margin: .3rem 0 .5rem; }}
 .hero .n {{ color: {CORAL}; }}
 .sub {{ color: {MUTED}; font-size: 1rem; }}
@@ -119,6 +131,9 @@ table.cmp td.n {{ white-space: nowrap; text-align: right; }}
 .key {{ display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin: 0 4px -1px 0; }}
 .stMarkdown p, .stMarkdown li, .hero, .gap, .goal, .tip, .legend {{ word-break: keep-all; overflow-wrap: anywhere; }}
 @media (max-width: 640px) {{
+  .kpis {{ grid-template-columns: 1fr; }}
+  .big-card .n {{ font-size: 2.1rem; }} .big-card {{ padding: 1rem 1rem .9rem; }}
+  .kpi .v {{ font-size: 1.35rem; }}
   .hero {{ font-size: 1.45rem; }}
   .gap .big {{ font-size: 1.3rem; }}
   .goal .v {{ font-size: 1.2rem; }}
@@ -481,6 +496,33 @@ TIERS = {
 ASSET_RANGES = {"5천만 원 미만": 0.3, "5천만 원~1억": 0.75, "1억~3억": 2.0, "3억~5억": 4.0, "5억~10억": 7.5, "10억~20억": 15.0, "20억 이상": 30.0}   # 억 원
 SALARY_RANGES = {"3천만 원 미만": 2500, "3천만~5천만 원": 4000, "5천만~7천만 원": 6000, "7천만~1억 원": 8500, "1억 원 이상": 12000}              # 만 원/년 (세전)
 RANGE_EXACT = "정확히 입력할게요"
+# (v54) 55세 이상에게 첫 화면·1단계에서 집과 주택연금을 묻는다 — 고령 가구는 집이 가장 큰 재산이고 주택연금이 결과를 크게 바꾼다.
+HOUSE_RANGES = {"집 없음(전월세)": 0.0, "3억 미만": 2.0, "3억~6억": 4.5, "6억~9억": 7.5, "9억~12억": 10.5, "12억 이상": 15.0}   # 시세, 억 원
+RM_OPTIONS = ["안 할 생각이에요 · 모르겠어요", "이미 받고 있어요", "은퇴 후에 받을 생각이에요"]
+RM_ASK_AGE = 55
+# (v54) 주식 중 해외주식 비중 — 기대수익은 국내와 같게 두고 분산 효과만 반영(경제 모형 FOREIGN_EQUITY_NOTE)
+OVERSEAS_OPTIONS = {"국내 주식만": 0, "해외 20%": 20, "해외 50%": 50, "해외 80%": 80, "전부 해외": 100}
+
+
+def overseas_label(v: int) -> str:
+    for k, x in OVERSEAS_OPTIONS.items():
+        if x == int(v): return k
+    return f"해외 {int(v)}%"
+
+
+def rm_age_from(choice: str, p: dict) -> int:
+    """(v54) 주택연금 선택지 → 가입 나이. '이미 받는 중'은 지금부터(부부 중 어린 쪽 나이), '예정'은 은퇴 후·65세 이상."""
+    if choice == RM_OPTIONS[1]:
+        return int(min(p["age"], p["s_age"]) if p.get("spouse") else p["age"])
+    if choice == RM_OPTIONS[2]:
+        return int(max(65, p["retire_age"], p["age"]))
+    return 0
+
+
+def rm_choice_of(p: dict) -> str:
+    rm = int(p.get("rm_age", 0) or 0)
+    if rm <= 0: return RM_OPTIONS[0]
+    return RM_OPTIONS[1] if rm <= p["age"] else RM_OPTIONS[2]
 
 
 def range_pick(label: str, options: dict, current: str, key: str, help_: str = "", disabled: bool = False) -> str:
@@ -521,7 +563,10 @@ def tier_assumptions(p: dict) -> list:
         if p.get("spend_avg"):
             out.append(f"생활비를 모른다고 해서 평균값(기본생활 월 {p['essential']}만 원, 여행·취미 연 {p['lifestyle']:,}만 원, 국민연금연구원 2024년 조사의 '최소생활비' 기준)으로 계산")
         if p.get("quick_start"):
-            out.append("첫 화면의 여섯 가지만 물었습니다. 집·대출·전월세 보증금·퇴직금·사적연금·남길 자산은 없다고 가정 — 해당되면 '더 정확하게'에서 넣어 주세요")
+            out.append(("첫 화면의 숫자 몇 개만 물었습니다. " + ("집은 고른 구간의 가운데 값, " if p.get("h_market", 0) > 0 else "집·") + "대출·전월세 보증금·퇴직금·사적연금·남길 자산은 없다고 가정")
+                       + " — 해당되면 '더 정확하게'에서 넣어 주세요")
+        if int(p.get("rm_age", 0) or 0) > 0:
+            out.append(f"주택연금은 {p['rm_age']}세부터 종신지급 정액형(한국주택금융공사 2026-03 월지급금 기준)으로 받는다고 가정")
             if p.get("sal_range"):
                 out.append(f"국민연금은 본인 연소득 '{p['sal_range']}' 구간의 가운데 값으로 추정한 월 {p['nps']}만 원"
                            + (f", 배우자는 기본값 월 {p['s_nps']}만 원" if p.get("spouse") else ""))
@@ -549,7 +594,8 @@ def tier_assumptions(p: dict) -> list:
         out += ["여행·취미 지출은 75세부터 줄어 85세에 절반, 기본생활비는 평생 같음 (나이에 따른 지출 변화)",
                 "부모님 간병비 분담 없음",
                 f"한 명만 남았을 때 생활비는 부부일 때의 {p.get('survivor', 70)}%",
-                f"주식 중 해외주식 {p.get('overseas', 20)}%, 금융자산은 부부 균등 명의",
+                (f"주식 중 해외주식 {p.get('overseas', 0)}% — 기대수익은 국내와 같다고 보고 분산 효과만 반영" if p.get("overseas") else "주식은 모두 국내 주식으로 가정")
+                + ", 금융자산은 부부 균등 명의",
                 "간병비는 물가보다 연 1.0%p 더 오름 (2022~2026 장기요양 수가 실적)"]
     return out
 
@@ -629,25 +675,38 @@ if not ss.get("done") and not ss.get("tier_set") and not ss.get("stage_set") and
     st.markdown('<p class="sub">내가 원하는 은퇴생활을 지키려면 무엇이 필요한지, 1만 가지 미래로 확인합니다. '
                 '<b>숫자 몇 개만 넣으면 바로 첫 결과</b>를 보여드리고, 더 정확하게 하고 싶으면 그다음에 이어서 넣으시면 됩니다.</p>',
                 unsafe_allow_html=True)
-    with st.form("quick"):
+    # (v53.4) 폼을 쓰지 않는다 — 구간을 고르면 금액 칸이 바로 사라지고, '평균으로'를 고르면 생활비 칸이 바로 잠긴다.
+    # 휴대폰에서는 칸이 한 줄씩 쌓이므로, 꼭 필요한 다섯 가지 다음에 바로 버튼을 두고 나머지는 접어 둔다.
+    c1, c2, c3 = st.columns(3)
+    q_age = c1.number_input("현재 나이", 20, 90, int(p["age"]), key="q_age")
+    q_ret = c2.number_input("은퇴 (예정) 나이", 40, 90, int(p["retire_age"]), key="q_ret", help="이미 은퇴했다면 현재 나이 이하로 입력")
+    q_hh = c3.radio("가구", ["부부", "혼자"], index=0 if p["spouse"] else 1, horizontal=True, key="q_hh")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        q_rng = range_pick("금융자산 (집 제외)", ASSET_RANGES, "", "q_arng",
+                           "예금·주식·퇴직연금·연금저축을 모두 더한 금액. 퇴직연금은 '지금 계좌에 쌓여 있는 돈'만 — 나중에 매달 받을 금액이 아닙니다. "
+                           "정확히 모르면 구간을 고르세요(구간의 가운데 값으로 계산).")
+    q_tot = (c2.number_input("금융자산 합계 (억 원)", 0.0, 500.0, float(round(total_assets(p), 1)), step=0.1, key="q_tot")
+             if q_rng == RANGE_EXACT else ASSET_RANGES[q_rng])
+    q_sav = c3.number_input("한 달 저축·투자액 (만 원)", 0, 5000, int(p["saving"]), step=10, key="q_sav", help="은퇴 전까지 매달 모으는 금액. 이미 은퇴했다면 0")
+    q_avg = st.checkbox("생활비를 잘 모르겠어요 — 평균값(최소생활비 기준)으로", value=False, key="q_avg")
+    q_ess = st.number_input("월 기본생활비 (만 원)", 0, 5000, int(p["essential"]), step=10, key="q_ess", disabled=q_avg,
+                            help="식비·주거·공과금·통신·보험료·병원비. 국민연금연구원 2024년 조사: 부부 월 217만 원(최소) ~ 298만 원(적정), 혼자 139만 ~ 198만 원")
+    q_house, q_rm = "", RM_OPTIONS[0]
+    if int(q_age) >= RM_ASK_AGE:                                  # (v54) 고령 가구: 집과 주택연금
+        c1, c2 = st.columns(2)
+        q_house = c1.selectbox("사는 집 시세", list(HOUSE_RANGES), index=0, key="q_house",
+                               help="본인 명의(부부 공동 포함) 집의 대략 시세. 전월세면 '집 없음'.")
+        q_rm = c2.radio("주택연금", RM_OPTIONS, index=0, key="q_rm", disabled=HOUSE_RANGES[q_house] <= 0,
+                        help="집을 담보로 평생 매달 받는 연금(한국주택금융공사). 받는 동안 집에 계속 살고, 사망 뒤 집값에서 정산합니다. 55세 이상·공시가격 12억 원 이하 1주택이면 가입할 수 있습니다.")
+    with st.expander("여행 예산·연소득·해외주식도 넣으면 더 정확해져요 (선택 — 안 넣으면 여행 연 1,000만 원, 국민연금 평균, 국내 주식만)"):
         c1, c2, c3 = st.columns(3)
-        q_age = c1.number_input("현재 나이", 20, 90, int(p["age"]), key="q_age")
-        q_ret = c2.number_input("은퇴 (예정) 나이", 40, 90, int(p["retire_age"]), key="q_ret", help="이미 은퇴했다면 현재 나이 이하로 입력")
-        q_hh = c3.radio("가구", ["부부", "혼자"], index=0 if p["spouse"] else 1, horizontal=True, key="q_hh")
-        c1, c2, c3 = st.columns(3)
-        q_tot = c1.number_input("금융자산 합계 (억 원)", 0.0, 500.0, float(round(total_assets(p), 1)), step=0.1, key="q_tot",
-                                help="예금·주식·퇴직연금·연금저축을 모두 더한 금액. 집은 빼고요. 퇴직연금은 '지금 계좌에 쌓여 있는 돈'만 더하세요 — 나중에 매달 받을 금액이 아닙니다.")
-        with c2:
-            q_rng = range_pick("또는 대략 구간으로", ASSET_RANGES, "", "q_arng", "구간을 고르면 왼쪽 금액 칸 대신 구간의 가운데 값으로 계산합니다.")
-        q_sav = c3.number_input("한 달 저축·투자액 (만 원)", 0, 5000, int(p["saving"]), step=10, key="q_sav", help="은퇴 전까지 매달 모으는 금액. 이미 은퇴했다면 0")
-        c1, c2, c3 = st.columns(3)
-        q_ess = c1.number_input("월 기본생활비 (만 원)", 0, 5000, int(p["essential"]), step=10, key="q_ess",
-                                help="식비·주거·공과금·통신·보험료·병원비. 국민연금연구원 2024년 조사: 부부 월 217만 원(최소) ~ 298만 원(적정), 혼자 139만 ~ 198만 원")
-        q_life = c2.number_input("연 여행·취미 예산 (만 원)", 0, 50000, int(p["lifestyle"]), step=100, key="q_life")
-        q_inc = c3.selectbox("본인 연소득 (세전)", [INCOME_UNKNOWN] + list(SALARY_RANGES), index=0, key="q_inc",
-                             help="국민연금 예상액을 소득으로 추정합니다. 모르면 '잘 모르겠어요' — 평균값(월 110만 원)을 씁니다.")
-        q_avg = st.checkbox("생활비를 잘 모르겠어요 — 평균값(최소생활비 기준)으로 계산할게요", value=False, key="q_avg")
-        go_q = st.form_submit_button("바로 결과 보기", type="primary", width="stretch")
+        q_life = c1.number_input("연 여행·취미 예산 (만 원)", 0, 50000, int(p["lifestyle"]), step=100, key="q_life", disabled=q_avg)
+        q_inc = c2.selectbox("본인 연소득 (세전)", [INCOME_UNKNOWN] + list(SALARY_RANGES), index=0, key="q_inc",
+                             help="국민연금 예상액을 소득으로 추정합니다. 모르면 '잘 모르겠어요' — 평균값(월 110만 원)으로 계산합니다.")
+        q_ovs = c3.selectbox("주식 중 해외주식", list(OVERSEAS_OPTIONS), index=0, key="q_ovs",
+                             help="해외주식이 더 오른다고 보지는 않습니다. 국내와 해외가 같이 나빠지지 않는 만큼의 분산 효과만 반영합니다.")
+    go_q = st.button("바로 결과 보기", type="primary", width="stretch", key="q_go")
     if go_q:
         pre_q = int(q_age) < int(q_ret)
         tot_q = ASSET_RANGES[q_rng] if q_rng != RANGE_EXACT else float(q_tot)
@@ -658,7 +717,11 @@ if not ss.get("done") and not ss.get("tier_set") and not ss.get("stage_set") and
                  deposit=round(tot_q * TIER1_SPLIT[0], 2), invest=round(tot_q * TIER1_SPLIT[1], 2), ret_acct=round(tot_q * TIER1_SPLIT[2], 2), other=0.0,
                  assets_range="" if q_rng == RANGE_EXACT else q_rng, saving=int(q_sav) if pre_q else 0, save_mode="월 금액",
                  essential=ess_q, lifestyle=life_q, spend_avg=bool(q_avg), stage=0, tier=1, skipped_step=0, quick_start=True,
-                 h_market=0.0, h_official=0.0, debt=0.0, jeonse=0.0, legacy=0.0, priv=0, ret_contrib=False, post_inc=0, post_until=0, nps_auto=False, nps_unknown=False, sal_range="", s_sal_range="")
+                 h_market=0.0, h_official=0.0, debt=0.0, jeonse=0.0, legacy=0.0, priv=0, ret_contrib=False, post_inc=0, post_until=0, nps_auto=False, nps_unknown=False, sal_range="", s_sal_range="",
+                 overseas=int(OVERSEAS_OPTIONS[q_ovs]), rm_age=0, ds_age=0)
+        if q_house and HOUSE_RANGES[q_house] > 0:                 # (v54) 55세 이상이 고른 집·주택연금
+            hm = HOUSE_RANGES[q_house]
+            p.update(h_market=hm, h_official=round(hm * 0.69, 1), h_n=1, h_years=10, rm_age=rm_age_from(q_rm, p))
         if q_inc != INCOME_UNKNOWN:
             sal_q = float(SALARY_RANGES[q_inc])
             p.update(nps=int(round(estimate_nps_monthly(sal_q, tier1_nps_years(int(q_age)), int(q_age), int(q_ret)))), salary=sal_q, sal_range=q_inc, nps_unknown=True)
@@ -773,6 +836,10 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
                                   help="주택담보대출·신용대출 남은 원금 합계")
             dyr = c3.number_input("대출 남은 기간 (년)", 1, 40, int(p.get("debt_years", 10)))
             st.caption("집·대출이 없으면 0으로 두세요. 대출은 은퇴 전에는 월급에서 갚는다고 보고, **은퇴 후까지 남는 상환분만** 노후자금에서 나갑니다.")
+            rm1 = rm_choice_of(p)
+            if p["age"] >= RM_ASK_AGE:                            # (v54) 고령 가구에는 주택연금을 바로 묻는다
+                rm1 = st.radio("주택연금", RM_OPTIONS, index=RM_OPTIONS.index(rm_choice_of(p)), horizontal=True,
+                               help="집을 담보로 평생 매달 받는 연금(한국주택금융공사). 받는 동안 집에 계속 살고, 사망 뒤 집값에서 정산합니다. 55세 이상·공시가격 12억 원 이하 1주택이면 가입할 수 있습니다. 집 시세가 0이면 계산에서 빠집니다.")
             jse = st.number_input("전월세 보증금 (억 원, 집이 없을 때)", 0.0, 100.0, float(p.get("jeonse", 0.0)), step=0.1,
                                   help="돌려받을 돈이라 상속재산에 들어가고, 기초연금 재산과 건강보험료 재산(보증금의 30%)에도 잡힙니다. 생활비로 꺼내 쓰지는 않는다고 봅니다.")
             back, nxt, skip = nav1(i, "t1s1")
@@ -785,6 +852,7 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
                          saving=int(sav) if pre else 0, save_mode="월 금액",
                          h_market=float(h_mkt), h_official=round(float(h_mkt) * 0.69, 1), h_n=1, h_years=10,
                          debt=float(dbt), debt_years=int(dyr), debt_rate=0.0, jeonse=float(jse))
+                p.update(rm_age=rm_age_from(rm1, p) if float(h_mkt) > 0 else 0)
                 if skip:
                     p.update(skipped_step=1, tier=1); ss.done = True; st.rerun()
                 go1(1 if nxt else -1)
@@ -839,6 +907,8 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
             pun1 = c2.number_input("몇 살까지 일하나요", 0, 90, int(p.get("post_until", 0)) or p["retire_age"] + 5)
             prof = st.radio("투자 성향", list(PROFILES), index=list(PROFILES).index(p["profile"]), horizontal=True,
                             captions=["주식 약 30%, 안정 위주", "주식 약 50%, 균형", "주식 약 70%, 장기 성장"])
+            ovs1 = st.radio("주식 중 해외주식", list(OVERSEAS_OPTIONS), index=list(OVERSEAS_OPTIONS).index(overseas_label(p.get("overseas", 0))) if overseas_label(p.get("overseas", 0)) in OVERSEAS_OPTIONS else 0,
+                            horizontal=True, help="해외주식이 더 오른다고 보지는 않습니다. 국내와 해외가 같이 나빠지지 않는 만큼의 분산 효과만 반영합니다(양도세도 해외 기준으로).")
             back, nxt = nav(i, "t1s3")
             if nxt or back:
                 if sal_rng != RANGE_EXACT: sal = SALARY_RANGES[sal_rng]
@@ -852,7 +922,7 @@ if not ss.get("done") and int(p.get("tier", 2)) == 1:
                          sal_range="" if sal_rng == RANGE_EXACT else sal_rng, s_sal_range="" if ssal_rng == RANGE_EXACT else ssal_rng)
                 p.update(nps_auto=auto, nps=int(nps), s_nps=int(s_nps), salary=float(sal), s_salary=float(ssal),
                          nps_years=tier1_nps_years(p["age"]), s_nps_years=tier1_nps_years(p["s_age"]),
-                         nps_start=65, priv=0, legacy=0.0, profile=prof)
+                         nps_start=65, priv=0, legacy=0.0, profile=prof, overseas=int(OVERSEAS_OPTIONS[ovs1]))
                 go1(1 if nxt else -1)
         else:
             need, pension, gap = income_gap(p)
@@ -1218,17 +1288,21 @@ with st.spinner("1만 가지 미래를 계산하는 중"):
     base = run(p)
 s = base["s"]
 _t = int(p.get("tier", 2))
-c_ed, c_up = st.columns(2)
-if c_ed.button("입력 수정하기", width="stretch"):
-    ss.done = False; ss.step = (len(STEPS1) if _t == 1 else len(STEPS)) - 1; st.rerun()
-if _t < 3 and c_up.button(f"더 정확하게 — {_t + 1}단계 · {TIERS[_t + 1][0]}로", width="stretch",
-                          help="지금까지 넣은 값은 그대로 두고, 이 단계에서 가정으로 채운 항목을 직접 넣습니다."):
-    p["tier"] = _t + 1; ss.done = False; ss.step = 0; st.rerun()
-if _t < 3:
-    with st.expander(f"{_t}단계 · {TIERS[_t][0]} — 묻지 않고 가정한 값 보기"):
-        st.markdown("\n".join(f"- {a}" for a in tier_assumptions(p)))
-        st.caption("이 값들은 결과를 조금씩 바꿉니다. 영향이 큰 항목(은퇴 나이·생활비·여행 예산·금융자산·투자 성향·집·대출)은 "
-                   "이미 직접 넣으셨습니다. 아래 '가정 범위'가 주식 수익률·수명·간병 같은 누구도 모르는 값의 영향을 따로 보여줍니다.")
+
+
+def edit_controls():
+    """(v54) 입력 수정·더 정확하게·가정 목록 — 큰 숫자 아래로 내렸다(첫 화면은 결과부터)."""
+    c_ed, c_up = st.columns(2)
+    if c_ed.button("입력 수정하기", width="stretch"):
+        ss.done = False; ss.step = (len(STEPS1) if _t == 1 else len(STEPS)) - 1; st.rerun()
+    if _t < 3 and c_up.button(f"더 정확하게 — {_t + 1}단계 · {TIERS[_t + 1][0]}로", width="stretch",
+                              help="지금까지 넣은 값은 그대로 두고, 이 단계에서 가정으로 채운 항목을 직접 넣습니다."):
+        p["tier"] = _t + 1; ss.done = False; ss.step = 0; st.rerun()
+    if _t < 3:
+        with st.expander(f"{_t}단계 · {TIERS[_t][0]} — 묻지 않고 가정한 값 보기"):
+            st.markdown("\n".join(f"- {a}" for a in tier_assumptions(p)))
+            st.caption("이 값들은 결과를 조금씩 바꿉니다. 영향이 큰 항목(은퇴 나이·생활비·여행 예산·금융자산·투자 성향·집·대출)은 "
+                       "이미 직접 넣으셨습니다. '자세히 보기'의 '가정 범위'가 주식 수익률·수명·간병 같은 누구도 모르는 값의 영향을 따로 보여줍니다.")
 
 # (v50.10) 탭 8개 → 5개: 위기 상황·세금은 '바꿔보기' 안 펼침 칸(누를 때만 계산), 설명하기는 '이 계산에 대하여' 안 펼침 칸으로
 tab1, tab2, tab6, tab8, tab5 = st.tabs(["결과", "바꿔보기", "상품 추가", "리포트", "이 계산에 대하여"])
@@ -1236,40 +1310,55 @@ tab1, tab2, tab6, tab8, tab5 = st.tabs(["결과", "바꿔보기", "상품 추가
 with tab1:
     need, pension, gap = income_gap(p)
     ok = s["기본생활 유지 확률"]; n_ok = int(round(ok * 10)); n_bad = 10 - n_ok
+    short = max(gap, 0)
+    pre_ = p["age"] < p["retire_age"]
 
-    # 0) (v49.1) 맨 위 요약 숫자 — 무엇을 넣고 계산했는지 한 줄로
-    chips = [("금융자산", f"{total_assets(p):.1f}억"), ("월 저축", f"{monthly_saving(p):.0f}만" if p["age"] < p["retire_age"] else "—"),
-             ("연금", f"월 {pension:.0f}만"), ("기본생활비", f"월 {p['essential']}만")]
-    st.markdown('<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.2rem 0 .6rem">' + "".join(
-        f'<div style="flex:1;min-width:110px;border:1px solid #CBD7DB;border-radius:12px;padding:.45rem .7rem;background:white">'
-        f'<div style="color:{MUTED};font-size:.8rem">{k}</div><div style="font-weight:700;font-size:1.05rem">{v}</div></div>'
-        for k, v in chips) + '</div>', unsafe_allow_html=True)
-
-    # 1) 한 문장 결론
-    if n_bad == 0:
-        st.markdown('<div class="hero">지금 계획대로면<br>10번 중 <span style="color:#1F6F78">9번 이상</span> 생활비를 끝까지 낼 수 있어요</div>', unsafe_allow_html=True)
+    # (v54) 결과 화면을 다시 짰다 — 인터뷰에서 "숫자는 좋은데 문장이 어렵다", 처음 읽는 건 '10번 중 몇 번'이었다.
+    #   맨 위에 큰 숫자 하나와 그 뜻 한 줄, 그 아래 숫자 카드 셋(언제·얼마·몇 살), 할 일 셋. 나머지는 '자세히 보기'를 눌러야 계산·표시한다.
+    # 1) 큰 카드: 10번 중 몇 번 + 뜻 한 줄
+    if n_ok >= 9:
+        mood, mood_c, meaning = "지금 계획이면 괜찮아요", TEAL, "앞으로 생길 수 있는 1만 가지 상황을 모두 돌려 봤어요. 그중 거의 전부에서 꼭 필요한 생활비가 마지막까지 모자라지 않았어요."
+    elif n_ok >= 7:
+        mood, mood_c, meaning = "조금만 손보면 돼요", "#B7791F", f"1만 가지 상황 중 {ok * 100:.0f}%에서는 생활비가 끝까지 괜찮았고, {100 - ok * 100:.0f}%에서는 나중에 모자랐어요. 아래 할 일 하나면 대부분 메워져요."
     else:
-        when = f"{base['dep_age']:.0f}세쯤 " if base["dep_age"] else ""
-        st.markdown(f'<div class="hero">지금 계획대로면<br>10번 중 <span class="n">{n_bad}번</span>은 {when}생활비가 모자라요</div>', unsafe_allow_html=True)
+        mood, mood_c, meaning = "지금부터 준비가 필요해요", CORAL, f"1만 가지 상황 중 {100 - ok * 100:.0f}%에서 생활비가 중간에 모자랐어요. 아직 시간이 있고, 아래에 효과가 큰 순서로 할 일을 적었어요."
     dots = "".join(f'<div class="dot {"bad" if k < n_bad else "ok"}"></div>' for k in range(10))
-    st.markdown(f'<div class="dots">{dots}</div><div class="legend"><span class="key" style="background:{CORAL}"></span>모자라는 경우 &nbsp; '
-                f'<span class="key" style="background:{TEAL}"></span>끝까지 괜찮은 경우 &nbsp;·&nbsp; 앞으로 있을 수 있는 여러 미래를 10번으로 줄여 표시했어요</div>',
-                unsafe_allow_html=True)
-    # 1-2) (v49.1) 몇 살에 은퇴하면 10번 중 9번 지키나 — 은퇴 전 가구만
+    st.markdown(
+        f'<div class="big-card"><div class="k" style="color:{mood_c}">{mood}</div>'
+        f'<div class="n">10번 중 <span style="color:{TEAL if n_ok >= 7 else CORAL}">{n_ok}번</span></div>'
+        f'<div class="t">은퇴 뒤에도 <b>꼭 필요한 생활비</b>를 마지막까지 낼 수 있어요</div>'
+        f'<div class="dots">{dots}</div><div class="m">{meaning}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="legend" style="margin:-.2rem 0 .8rem">넣은 값 — 금융자산 {total_assets(p):.1f}억 · '
+                + (f'월 저축 {monthly_saving(p):.0f}만 · ' if pre_ else '') + f'연금 월 {pension:.0f}만 · 기본생활비 월 {p["essential"]}만'
+                + (f' · 집 {p["h_market"]:.1f}억' if p.get("h_market", 0) > 0 else '') + (f' · 주택연금 {p["rm_age"]}세부터' if int(p.get("rm_age", 0) or 0) > 0 else '')
+                + (f' · 해외주식 {p["overseas"]}%' if p.get("overseas") else '') + '</div>', unsafe_allow_html=True)
+
+    # 2) 숫자 카드 셋 — 언제, 얼마, 몇 살
     ret_age = None
-    if p["age"] < p["retire_age"]:
+    if pre_:
         with st.spinner("은퇴 가능 나이를 찾는 중"):
             ret_age, ret_p = retire_age_for(json.dumps(p, sort_keys=True))
+    cards = []
+    if n_bad == 0:
+        cards.append(("모자라기 시작하는 나이", "없어요", "거의 모든 경우에 마지막까지 괜찮았어요"))
+    else:
+        cards.append(("모자라기 시작하는 나이", f'{base["dep_age"]:.0f}세쯤' if base["dep_age"] else "—", f"모자라는 {n_bad}번의 경우, 보통 이 나이부터예요"))
+    if short > 0:
+        cards.append(("매달 모자라는 돈", f"{short:.0f}만 원", f"생활비 {need:.0f}만 − 연금 {pension:.0f}만. 모아둔 돈에서 꺼내 써요"))
+    else:
+        cards.append(("매달 모자라는 돈", "없어요", f"연금 {pension:.0f}만 원으로 생활비 {need:.0f}만 원이 돼요"))
+    if pre_:
         if ret_age is None:
-            st.markdown(f'<div class="tip">은퇴를 {p["retire_age"] + 15}세까지 늦춰도 10번 중 9번에는 못 미쳐요 '
-                        f'(그때 {ret_p * 100:.0f}%). 생활비나 저축을 함께 바꿔야 합니다.</div>', unsafe_allow_html=True)
+            cards.append(("10번 중 9번이 되는 은퇴 나이", "—", f"{p['retire_age'] + 15}세까지 늦춰도 안 돼요. 생활비·저축도 같이 바꿔야 해요"))
         else:
             d_ = ret_age - p["retire_age"]
-            rel = "지금 계획대로도 충분해요" if d_ <= 0 else f"지금 계획보다 <b>{d_}년</b> 늦게"
-            if d_ < 0:
-                rel = f"지금 계획보다 <b>{-d_}년</b> 일찍 은퇴해도 돼요"
-            st.markdown(f'<div class="tip">🎯 <b>{ret_age}세</b>에 은퇴하면 기본생활을 <b>10번 중 9번</b> 지킬 수 있어요 — {rel}.</div>',
-                        unsafe_allow_html=True)
+            cards.append(("10번 중 9번이 되는 은퇴 나이", f"{ret_age}세",
+                          "지금 계획으로 충분해요" if d_ <= 0 else f"지금 계획({p['retire_age']}세)보다 {d_}년 늦게"))
+    else:
+        cards.append(("이 숫자가 움직일 수 있는 폭", "아래에서", "가정이 빗나가면 결과도 움직여요 — '자세히 보기'"))
+    st.markdown('<div class="kpis">' + "".join(
+        f'<div class="kpi"><div class="k">{k}</div><div class="v">{v}</div><div class="s">{t_}</div></div>' for k, v, t_ in cards) + '</div>',
+        unsafe_allow_html=True)
 
     stage_banner(p, ok)                                      # (v52) 단계별 첫 문장
 
@@ -1278,12 +1367,43 @@ with tab1:
     if ln:
         who = "부부" if ln["spouse"] else "혼자"
         near = ln["ess"] <= ln["min"] * 1.05
-        st.markdown(f'<div class="tip">💡 기본생활비 월 <b>{ln["ess"]}만 원</b>은 국민연금연구원 2024년 조사의 {who} '
-                    + ('<b>최소생활비</b>(' + f'{ln["min"]}만 원) 수준이에요. ' if near else f'최소 {ln["min"]}만 원 ~ 적정 {ln["adq"]}만 원 사이예요. ')
-                    + f'<b>적정생활비 {ln["adq"]}만 원</b>으로 잡으면 기본생활 유지 확률이 <b>{ln["prob"] * 100:.0f}%</b>에서 <b>{ln["prob_adq"] * 100:.0f}%</b>로 바뀝니다.</div>',
+        st.markdown(f'<div class="tip">💡 지금 넣은 기본생활비 월 <b>{ln["ess"]}만 원</b>은 {who} 기준 '
+                    + ('<b>최소생활비</b>(' + f'{ln["min"]}만 원, 국민연금연구원 2024년 조사)예요. ' if near else f'최소 {ln["min"]}만 ~ 적정 {ln["adq"]}만 원 사이예요. ')
+                    + f'조금 여유 있는 <b>적정생활비 {ln["adq"]}만 원</b>으로 잡으면 <b>10번 중 {int(round(ln["prob_adq"] * 10))}번</b>({ln["prob_adq"] * 100:.0f}%)이 돼요.</div>',
                     unsafe_allow_html=True)
 
-    # 3) 목표별 결과: 기본 / 여행·취미 / 자녀 — 결론 바로 아래에 둔다(v50.4)
+    # 3) 할 일 셋 — 효과 큰 순서
+    if n_ok < 9:
+        with st.spinner("효과가 큰 방법을 찾는 중"):
+            acts = action_ranking(json.dumps(p, sort_keys=True))
+        if acts:
+            st.markdown(sec("지금 할 수 있는 것", "효과가 큰 순서대로"), unsafe_allow_html=True)
+            for rank, (lab, how, gain, ci_) in enumerate(acts[:3], 1):
+                st.markdown(f'<div class="act"><div class="r">{rank}</div><div style="flex:1"><b>{lab}</b><div class="s">{how}</div></div>'
+                            f'<div class="g">{min(ok + gain, 1) * 100:.0f}%<span>{gain * 100:+.0f}%p</span></div></div>', unsafe_allow_html=True)
+            st.caption("'하세요'가 아니라, 각 선택이 얼마나 효과가 있는지 계산한 거예요. 섞어서 보려면 위의 '바꿔보기' 탭.")
+    else:
+        st.markdown(sec("지금 할 수 있는 것"), unsafe_allow_html=True)
+        st.markdown('<div class="tip">지금 계획을 그대로 지키면 돼요. 여행·취미 예산을 늘리거나 남길 돈을 넣어 보고 싶으면 위의 <b>바꿔보기</b> 탭에서 해 보세요.</div>', unsafe_allow_html=True)
+    if p.get("events"):
+        ds_ = base.get("debt_share", 0)
+        st.caption("큰 지출 반영: " + ", ".join(f'{e_["age"]}세 {e_["kind"]}' for e_ in p["events"])
+                   + (f" · 은퇴 때 갚을 빚이 남는 경우 10번 중 {ds_ * 10:.0f}번" if ds_ > 0.05 else ""))
+
+    # 입력 수정·더 정확하게·가정 목록
+    st.markdown(sec("입력을 고치거나 더 넣기"), unsafe_allow_html=True)
+    edit_controls()
+
+    # 4) 나머지는 눌러야 보인다 — 첫 화면은 가볍게, 계산도 그때 한다
+    st.markdown('<div style="height:.6rem"></div>', unsafe_allow_html=True)
+    show_detail = st.toggle("자세히 보기 — 목표별 결과, 다른 계산기와 비교, 이 숫자가 얼마나 확실한지, 나이별 남는 돈", value=bool(ss.get("detail", False)), key="detail_tg")
+    ss.detail = show_detail
+    if not show_detail:
+        st.caption("궁금한 게 더 있으면 위 스위치를 켜 주세요. 10초쯤 더 계산해요.")
+
+if show_detail:
+  with tab1:
+    # 3) 목표별 결과: 기본 / 여행·취미 / 자녀
     st.markdown(sec("목표별로 보면"), unsafe_allow_html=True)
     cards = [("🏠 기본 생활", "먹고 사는 데 꼭 필요한 돈", f'10번 중 <span class="hl">{n_ok}번</span> 끝까지 가능해요')]
     if p["lifestyle"] > 0:
@@ -1295,7 +1415,6 @@ with tab1:
 
     # 2) 매달 부족한 돈: 생활비 − 연금 = 부족분, 그리고 채우는 방법
     st.markdown(sec("매달 얼마가 모자라나"), unsafe_allow_html=True)
-    short = max(gap, 0)
     if short > 0:
         fill = "이 부족분은 <b>모아둔 돈에서 꺼내 채워요.</b>" + (f" 국민연금을 받기 전({p['nps_start']}세 전)에는 생활비 {need:.0f}만 원 전부를 모아둔 돈에서 씁니다." if pension > 0 else "")
         big = f'매달 <span class="n">{short:.0f}만 원</span>이 부족해요'
@@ -1311,8 +1430,6 @@ with tab1:
         with st.spinner("필요한 자산을 계산 중"):
             req_a, _ = required_assets(json.dumps(p, sort_keys=True))
             req_s = required_saving(json.dumps(p, sort_keys=True))[0] if p["age"] < p["retire_age"] else None
-        # (v50.6) 막대·'방법 1/2' 상자 대신 한 문장씩. 이미 은퇴한 가구는 저축 방법이 없는데도
-        # '둘 중 하나'라고 써서 헷갈렸다 — 실제로 있는 방법의 수에 맞춰 문장을 만든다.
         cur_a, cur_s = total_assets(p), monthly_saving(p)
         parts = []
         if req_a:
@@ -1329,22 +1446,6 @@ with tab1:
                         unsafe_allow_html=True)
             st.caption(("둘 중 하나만 하면 돼요. " if len(parts) == 2 else "")
                        + "은퇴를 늦추거나 생활비를 줄이는 것과 섞으면 훨씬 덜 필요해요 — 위의 '바꿔보기' 탭에서 섞어 볼 수 있어요.")
-
-    # 4-2) 무엇부터 하면 되나 — 효과 순위
-    if n_ok < 9:
-        with st.spinner("효과가 큰 방법을 찾는 중"):
-            acts = action_ranking(json.dumps(p, sort_keys=True))
-        if acts:
-            st.markdown(sec("무엇부터 하면 좋을까", "효과가 큰 순서대로 세 가지"), unsafe_allow_html=True)
-            for rank, (lab, how, gain, ci_) in enumerate(acts[:3], 1):
-                st.markdown(f'<div class="act"><div class="r">{rank}</div><div><b>{lab}</b>'
-                            f'<div class="s">{how}<br>기본 생활을 지킬 가능성 {ok * 100:.0f}% → <b>{min(ok + gain, 1) * 100:.0f}%</b> '
-                            f'({gain * 100:+.0f}%p)</div></div></div>', unsafe_allow_html=True)
-            st.caption("권유가 아니라 '어떤 선택이 얼마나 효과가 큰지' 계산한 결과입니다. 자세한 조정은 위의 '바꿔보기' 탭에서 하세요.")
-    if p.get("events"):
-        ds_ = base.get("debt_share", 0)
-        st.caption("큰 지출 반영: " + ", ".join(f'{e_["age"]}세 {e_["kind"]}' for e_ in p["events"])
-                   + (f" · 은퇴 때 갚을 빚이 남는 경우 10번 중 {ds_ * 10:.0f}번" if ds_ > 0.05 else ""))
 
     # 3-3) (v50.7) 다른 계산기였다면 — 같은 입력을 시중 계산기 방식으로, 그리고 한국 제도를 하나씩 빼서
     with st.spinner("다른 계산 방식과 비교하는 중"):
@@ -1527,10 +1628,13 @@ with tab2:
                        help=f"지금 기본 월 {p['essential']}만 원 + 여행 연 {p['lifestyle']:,}만 원")
         ns = c2.slider("국민연금 시작 나이", 60, 70, int(ss.get("tweak", {}).get("ns", p["nps_start"])))
         prof_list = list(PROFILES)
-        pf = st.radio("투자 성향", prof_list, index=prof_list.index(ss.get("tweak", {}).get("pf", p["profile"])), horizontal=True)
+        c1, c2 = st.columns(2)
+        pf = c1.radio("투자 성향", prof_list, index=prof_list.index(ss.get("tweak", {}).get("pf", p["profile"])), horizontal=True)
+        ov = c2.slider("주식 중 해외주식", 0, 100, int(ss.get("tweak", {}).get("ov", p.get("overseas", 0))), step=10, format="%d%%",
+                       help="기대수익은 국내와 같게 두고 분산 효과만 반영합니다 — 해외 비중을 올려도 '더 오른다'가 아니라 '한쪽만 나쁠 때'가 줄어드는 효과입니다.")
         go_tw = st.form_submit_button("이 조건으로 다시 계산", type="primary", width="stretch")
     if go_tw:
-        ss.tweak = dict(rd=rd, sd=sd, sm=sm, ns=ns, pf=pf)
+        ss.tweak = dict(rd=rd, sd=sd, sm=sm, ns=ns, pf=pf, ov=ov)
 
     tw = ss.get("tweak")
     if tw:
@@ -1540,6 +1644,7 @@ with tab2:
         if tw["sm"]: v["spend_mult"] = 1 + tw["sm"] / 100; desc.append(f"생활비 {tw['sm']:+d}%")
         if tw["ns"] != p["nps_start"]: v["nps_start"] = tw["ns"]; desc.append(f"국민연금 {tw['ns']}세부터")
         if tw["pf"] != p["profile"]: v["stock_weight"] = PROFILES[tw["pf"]]; desc.append(f"투자 성향 {tw['pf']}")
+        if tw.get("ov", p.get("overseas", 0)) != p.get("overseas", 0): v["overseas"] = tw["ov"]; desc.append(f"해외주식 {tw['ov']}%")
         if not v:
             st.info("바꾼 조건이 없습니다. 슬라이더를 움직인 뒤 '이 조건으로 다시 계산'을 누르세요.")
         else:
@@ -2030,7 +2135,7 @@ with tab5:
                                 "공식 계산기": "확인 중" if r["official"] is None else f'{r["official"]:,.2f} {r["unit"]}',
                                 "결과": {"일치": "✓ 일치", "불일치": "✗ 다름", "대기": "—"}[r["status"]]} for r in _orows]),
                  hide_index=True, width="stretch")
-    _gaps = [r for r in _orows if r["known"]]
+    _gaps = [r for r in _orows if r.get("known")]
     if _gaps:
         st.markdown("**다른 사례와 원인** — 아직 모델을 고치지 않았고, 원인을 확인 중입니다.")
         for _g in _gaps:
