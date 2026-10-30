@@ -151,12 +151,15 @@ def longevity_multiplier(n: int, T: int, sigma_level: float, sigma_trend: float,
     return np.exp(eta[:, None] - eps[:, None] * t - 0.5 * var)
 
 
-def apply_widowhood(alive, incare, severe, qx_list, ages, sexes, excess, tau, improve, seed, qmult=None, spike=0.0):
+def apply_widowhood(alive, incare, severe, qx_list, ages, sexes, excess, tau, improve, seed, qmult=None, spike=0.0,
+                    care_mult: float = 1.0, progress: float = 0.0):
     """사별 후 생존 배우자의 사망 위험 상승(애도·돌봄 상실 등). 2인 가구에만 적용.
     alive: (2, n, T+1). 사별 s년 뒤 추가 사망률 = q_t × excess × (1 + spike·exp(−s/τ)).
     먼저 사망한 사람은 영향 없음(순서 보존).
-    sexes: 구성원별 "M"/"F", excess: (남성, 여성) 초과 위험 — 구성원의 성별로 고른다."""
-    if alive.shape[0] != 2 or (excess[0] <= 0 and excess[1] <= 0):
+    sexes: 구성원별 "M"/"F", excess: (남성, 여성) 초과 위험 — 구성원의 성별로 고른다.
+    (v56) care_mult > 1 이면 사별한 생존자가 경증 간병 중일 때 중증(시설 수준) 진입 확률을 progress×(care_mult−1)만큼
+    더한다(이기주·석재은 2024: 무배우자 시설 입소 위험 1.4~1.56배). 별도 난수 흐름(seed, 37)이라 1.0이면 결과가 그대로다."""
+    if alive.shape[0] != 2 or (excess[0] <= 0 and excess[1] <= 0 and care_mult <= 1.0):
         return alive, incare, severe
     r = np.random.default_rng([int(seed) if seed is not None else 0, 31])
     n, Tp1 = alive.shape[1], alive.shape[2]
@@ -175,4 +178,18 @@ def apply_widowhood(alive, incare, severe, qx_list, ages, sexes, excess, tau, im
             out[i, d, t + 1:] = False
     inc2 = incare & out if incare is not None else None
     sev2 = severe & out if severe is not None else None
+    if care_mult > 1.0 and progress > 0 and inc2 is not None and sev2 is not None:
+        r2 = np.random.default_rng([int(seed) if seed is not None else 0, 37])
+        sev2 = sev2.copy()
+        extra = progress * (care_mult - 1.0)
+        for i in (0, 1):
+            j = 1 - i
+            widowed = ~out[j]                                           # j 사망 이후 (사망 연도 포함)
+            for t in range(Tp1 - 1):
+                cand = out[i, :, t + 1] & widowed[:, t] & inc2[i, :, t] & ~sev2[i, :, t] & inc2[i, :, t + 1]
+                hit = cand & (r2.random(n) < extra)
+                if hit.any():
+                    # 그 뒤 간병이 이어지는 동안 중증으로 (회복해 간병을 벗어나면 함께 끝난다)
+                    stay = np.cumprod(inc2[i, hit, t + 1:], axis=1).astype(bool)
+                    sev2[i, hit, t + 1:] |= stay
     return out, inc2, sev2

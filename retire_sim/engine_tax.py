@@ -122,7 +122,9 @@ def life_paths(hh: Household, cfg: SimConfig, qx_table, T, n, rng, markov: bool)
             alive, incare, severe, [qx_table[m.sex] for m in hh.members],
             [m.age for m in hh.members], [m.sex for m in hh.members],
             cfg.widow_excess, cfg.widow_tau, cfg.mortality_improvement, cfg.seed,
-            qmult, cfg.widow_spike)
+            qmult, cfg.widow_spike,
+            care_mult=getattr(cfg, "widow_care_mult", 1.0) if markov else 1.0,
+            progress=getattr(cfg.care, "progress", 0.0) if markov else 0.0)
     return alive, incare, severe, care_level, sev_level
 
 

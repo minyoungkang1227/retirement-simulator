@@ -1932,3 +1932,44 @@ def test_v54_quick_start_asks_house_pension_when_55_plus():
     assert p["h_market"] == 7.5 and p["rm_age"] == 60 and p["overseas"] == 50      # 부부: 배우자(60세)부터 = 지금부터
     md = " ".join(m.value for m in at.markdown)
     assert "주택연금 60세부터" in md and "해외주식 50%" in md and "주택연금은 60세부터 종신지급" in md
+
+
+def test_v56_care_calibration_matches_official_prevalence():
+    """(v56) 간병 발생률은 공단 통계연보 2023 연령별 인정률에 맞춰 보정했다 — 65~79세는 ±1%p, 80세 이상은 ±3%p 안에서 맞고,
+    발생률은 연령에 따라 단조 증가한다(구간별 따로 맞추면 들쭉날쭉해지는 문제를 곡선으로 막았다)."""
+    import numpy as np
+    from retire_sim.config import CareMarkov
+    from retire_sim import mortality
+    c = CareMarkov(); q = mortality.default_qx()
+    inc = [v for _, v in c.incidence]
+    assert all(b >= a for a, b in zip(inc, inc[1:])), inc
+    groups = [(65, 70), (70, 75), (75, 80), (80, 85)]; target = [0.027, 0.058, 0.129, 0.298]
+    prev = np.zeros(len(groups))
+    for sex in ("M", "F"):
+        al, ic, _ = mortality.simulate_life(q[sex], 60, 45, 20000, np.random.default_rng(1 if sex == "M" else 2), c, return_severe=True)
+        for g, (lo, hi) in enumerate(groups):
+            cols = slice(lo - 60, hi - 60); prev[g] += ic[:, cols].sum() / max(al[:, cols].sum(), 1) / 2
+    for p_, t_, tol in zip(prev, target, (0.01, 0.01, 0.012, 0.03)):
+        assert abs(p_ - t_) < tol, (prev, target)
+
+
+def test_v56_widowed_survivor_enters_severe_care_more():
+    """(v56) 사별한 생존자는 경증 간병에서 중증으로 더 자주 넘어간다(widow_care_mult=1.5, 이기주·석재은 2024).
+    배수를 1.0으로 두면 사별 효과는 사망률에만 남고 중증 전이는 그대로다."""
+    from dataclasses import replace
+    import numpy as np
+    from retire_sim import engine_tax, mortality
+    from retire_sim.config import Person, Household, SimConfig, CareMarkov
+    from retire_sim.economy_v2 import EconomyV2
+    from retire_sim.tax import TaxConfig, HouseConfig
+    hh = Household(members=[Person(65, "M", nps_monthly=110, nps_start_age=65, nps_years=25),
+                            Person(63, "F", nps_monthly=50, nps_start_age=65, nps_years=20)],
+                   liquid_assets=30_000, stock_weight=0.4, annual_spending=3604, essential=2604, lifestyle=1000,
+                   retire_age=65, annual_saving=0)
+    cfg = SimConfig(n_paths=4000, seed=3, care=CareMarkov())
+    qx = mortality.default_qx(); rng_a = np.random.default_rng(3); rng_b = np.random.default_rng(3)
+    T = 40
+    _, _, sev_on, _, _ = engine_tax.life_paths(hh, cfg, qx, T, 4000, rng_a, True)
+    _, _, sev_off, _, _ = engine_tax.life_paths(hh, replace(cfg, widow_care_mult=1.0), qx, T, 4000, rng_b, True)
+    assert sev_on.sum() > sev_off.sum() * 1.03, (sev_on.sum(), sev_off.sum())
+    assert hh.survivor_spending_ratio == 0.65                       # 사별 후 생활비 비율 기본값(국민노후보장패널 10차 0.66)
