@@ -40,6 +40,7 @@ from retire_sim.inputs import (EARLY_EXIT, PROFILES, AVG_SPEND, DEFAULTS, STAGES
 from retire_sim import stage as stage_mod
 from retire_sim import advice
 from retire_sim.advice import action_ranking as _action_ranking, assumption_band as _assumption_band
+from retire_sim.metrics import compare as metrics_compare
 from retire_sim import reporting
 from retire_sim.reporting import build_report, fan_rows
 from retire_sim.branding import Brand
@@ -129,9 +130,24 @@ table.cmp td.n {{ white-space: nowrap; text-align: right; }}
 .act .r {{ flex: 0 0 26px; height: 26px; border-radius: 50%; background: {TEAL}; color: white; text-align: center; font-weight: 700; line-height: 26px; }}
 .act .s {{ color: {MUTED}; font-size: .9rem; margin-top: .15rem; }}
 .key {{ display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin: 0 4px -1px 0; }}
+.big-card .row {{ display: flex; gap: 1.3rem; align-items: center; }}
+.big-card .row .txt {{ flex: 1; min-width: 0; }}
+.big-card .row .gg {{ flex: 0 0 auto; }}
+.bands {{ display: flex; gap: 1rem; flex-wrap: wrap; color: {MUTED}; font-size: .82rem; margin-top: .5rem; }}
+.scen {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; margin: .3rem 0 .5rem; }}
+.scen .c {{ background: white; border: 1px solid #DCE6E8; border-radius: 16px; padding: .9rem .9rem .8rem; text-align: center; }}
+.scen .c.now {{ background: #F3F7F8; }}
+.scen .c.best {{ border: 2px solid {TEAL}; }}
+.scen .h {{ font-size: .86rem; font-weight: 700; color: {MUTED}; margin-bottom: .4rem; min-height: 2.4em; }}
+.scen .n {{ font-size: 1.15rem; font-weight: 800; color: {INK}; margin-top: .3rem; }}
+.scen .d {{ font-size: .9rem; font-weight: 700; color: {TEAL}; }}
+.scen .w {{ color: {MUTED}; font-size: .84rem; line-height: 1.5; margin-top: .4rem; text-align: left; }}
+.scen .w b {{ color: {INK}; }}
 .stMarkdown p, .stMarkdown li, .hero, .gap, .goal, .tip, .legend {{ word-break: keep-all; overflow-wrap: anywhere; }}
 @media (max-width: 640px) {{
   .kpis {{ grid-template-columns: 1fr; }}
+  .scen {{ grid-template-columns: 1fr; }}
+  .big-card .row {{ gap: .8rem; }}
   .big-card .n {{ font-size: 2.1rem; }} .big-card {{ padding: 1rem 1rem .9rem; }}
   .kpi .v {{ font-size: 1.35rem; }}
   .hero {{ font-size: 1.45rem; }}
@@ -345,6 +361,66 @@ def share_card_svg(p: dict, ok: float, band: tuple, ret_age, cid: str, life: flo
 <text x="60" y="1285" font-size="28" fill="{MUTED}">계산 ID {esc(cid)} · 모델 v{esc(MODEL_VERSION)} · 같은 입력이면 같은 결과</text>
 <text x="60" y="1325" font-size="26" fill="{MUTED}">투자 권유가 아니라 같은 시나리오 위에서의 계산입니다</text>
 </svg>'''
+
+
+def mood_color(ok: float) -> str:
+    """(v55) 확률 → 신호등 색. 90% 이상 청록(괜찮아요) · 70~89% 호박(손보면 돼요) · 70% 미만 산호(준비 필요)."""
+    n_ok = int(round(ok * 10))
+    return TEAL if n_ok >= 9 else ("#B7791F" if n_ok >= 7 else CORAL)
+
+
+def gauge_svg(ok: float, size: int = 150, label: str = "") -> str:
+    """(v55) 도넛 게이지 — 업계 공통 문법(성공 확률 원형 게이지). 숫자는 결과 화면과 같은 값, 색은 신호등 구간."""
+    r = size * 0.4; c = size / 2; stroke = size * 0.11
+    circ = 2 * 3.14159265 * r
+    filled = circ * max(0.0, min(ok, 1.0))
+    col = mood_color(ok)
+    sub = f'<text x="{c}" y="{c + size * 0.2}" text-anchor="middle" font-size="{size * 0.085:.0f}" fill="{MUTED}">{label}</text>' if label else ""
+    return (f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" role="img" aria-label="기본생활 유지 확률 {ok * 100:.0f}%">'
+            f'<circle cx="{c}" cy="{c}" r="{r}" fill="none" stroke="#E3EBED" stroke-width="{stroke}"/>'
+            f'<circle cx="{c}" cy="{c}" r="{r}" fill="none" stroke="{col}" stroke-width="{stroke}" stroke-linecap="round" '
+            f'stroke-dasharray="{filled:.1f} {circ - filled:.1f}" transform="rotate(-90 {c} {c})"/>'
+            f'<text x="{c}" y="{c + size * 0.06}" text-anchor="middle" font-size="{size * 0.22:.0f}" font-weight="800" fill="{INK}">{ok * 100:.0f}%</text>'
+            f'{sub}</svg>')
+
+
+@st.cache_data(ttl=600, max_entries=64, show_spinner=False)
+def combo_gain(p_json: str, v_json: str, paths: int = 3000) -> float:
+    """(v55) 선택지 몇 개를 **함께** 적용했을 때의 개선폭 — 같은 난수, 3,000개 미래. '시나리오 나란히 보기'에 쓴다.
+    action_ranking과 같은 경로 수로 돌려 1순위 하나의 효과와 더한 효과를 같은 잣대로 비교한다."""
+    pp, v = json.loads(p_json), json.loads(v_json)
+    paths = min(pp.get("paths", paths), paths)
+    base_ = advice.run_case(pp, {"paths": paths})
+    r = advice.run_case(pp, {**v, "paths": paths})
+    return float(-metrics_compare(r, base_)["차이"])
+
+
+def merge_variants(a: dict, b: dict) -> dict | None:
+    """두 선택지의 variant를 합친다. 같은 항목을 다르게 바꾸는 둘(예: 국민연금 65세와 70세)은 합칠 수 없어 None."""
+    out = dict(a)
+    for k, val in b.items():
+        if k == "house" and isinstance(val, dict) and isinstance(out.get("house"), dict):
+            if set(val) & set(out["house"]):
+                return None
+            out["house"] = {**out["house"], **val}
+        elif k in out:
+            return None
+        else:
+            out[k] = val
+    return out
+
+
+def band_chart(fan_rows_: list, height: int = 230):
+    """(v55) 나이별 남는 돈 — 보통일 때(중앙값) 선과 운이 좋을 때~나쁠 때(25~75%) 띠. 선 셋보다 띠 하나가 읽기 쉽다."""
+    fan = pd.DataFrame(fan_rows_, columns=["나이", "좋을 때", "보통", "나쁠 때"])
+    base_ = alt.Chart(fan).encode(x=alt.X("나이:Q", title="나이"))
+    band = base_.mark_area(opacity=0.22, color=TEAL).encode(
+        y=alt.Y("나쁠 때:Q", title="억 원", axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=-5)),
+        y2="좋을 때:Q", tooltip=["나이", alt.Tooltip("좋을 때:Q", format=".1f"), alt.Tooltip("보통:Q", format=".1f"), alt.Tooltip("나쁠 때:Q", format=".1f")])
+    med = base_.mark_line(strokeWidth=3, color=TEAL).encode(y="보통:Q")
+    worst = base_.mark_line(strokeWidth=1.5, color=CORAL, strokeDash=[4, 3]).encode(y="나쁠 때:Q")
+    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color=MUTED, strokeDash=[2, 2]).encode(y="y:Q")
+    return (band + med + worst + zero).properties(height=height)
 
 
 def progress_bar(label: str, cur: float, need: float, unit: str, fmt: str = "{:.1f}") -> str:
@@ -1323,11 +1399,16 @@ with tab1:
     else:
         mood, mood_c, meaning = "지금부터 준비가 필요해요", CORAL, f"1만 가지 상황 중 {100 - ok * 100:.0f}%에서 생활비가 중간에 모자랐어요. 아직 시간이 있고, 아래에 효과가 큰 순서로 할 일을 적었어요."
     dots = "".join(f'<div class="dot {"bad" if k < n_bad else "ok"}"></div>' for k in range(10))
+    # (v55) 왼쪽에 도넛 게이지(성공 확률의 업계 공통 표기), 오른쪽에 '10번 중 N번'. 인터뷰에서 처음 읽는 건 '10번 중 몇 번'이라 그 자리는 그대로 두고 게이지를 곁들였다.
+    bands = (f'<div class="bands"><span><span class="key" style="background:{TEAL}"></span>90% 이상 괜찮아요</span>'
+             f'<span><span class="key" style="background:#B7791F"></span>70~89% 손보면 돼요</span>'
+             f'<span><span class="key" style="background:{CORAL}"></span>70% 미만 준비가 필요해요</span></div>')
     st.markdown(
-        f'<div class="big-card"><div class="k" style="color:{mood_c}">{mood}</div>'
+        f'<div class="big-card"><div class="row"><div class="gg">{gauge_svg(ok, 150, "기본생활 유지")}</div><div class="txt">'
+        f'<div class="k" style="color:{mood_c}">{mood}</div>'
         f'<div class="n">10번 중 <span style="color:{TEAL if n_ok >= 7 else CORAL}">{n_ok}번</span></div>'
-        f'<div class="t">은퇴 뒤에도 <b>꼭 필요한 생활비</b>를 마지막까지 낼 수 있어요</div>'
-        f'<div class="dots">{dots}</div><div class="m">{meaning}</div></div>', unsafe_allow_html=True)
+        f'<div class="t">은퇴 뒤에도 <b>꼭 필요한 생활비</b>를 마지막까지 낼 수 있어요</div></div></div>'
+        f'<div class="dots">{dots}</div><div class="m">{meaning}</div>{bands}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="legend" style="margin:-.2rem 0 .8rem">넣은 값 — 금융자산 {total_assets(p):.1f}억 · '
                 + (f'월 저축 {monthly_saving(p):.0f}만 · ' if pre_ else '') + f'연금 월 {pension:.0f}만 · 기본생활비 월 {p["essential"]}만'
                 + (f' · 집 {p["h_market"]:.1f}억' if p.get("h_market", 0) > 0 else '') + (f' · 주택연금 {p["rm_age"]}세부터' if int(p.get("rm_age", 0) or 0) > 0 else '')
@@ -1372,16 +1453,37 @@ with tab1:
                     + f'조금 여유 있는 <b>적정생활비 {ln["adq"]}만 원</b>으로 잡으면 <b>10번 중 {int(round(ln["prob_adq"] * 10))}번</b>({ln["prob_adq"] * 100:.0f}%)이 돼요.</div>',
                     unsafe_allow_html=True)
 
-    # 3) 할 일 셋 — 효과 큰 순서
+    # 3) 할 일 셋 — 효과 큰 순서. (v55) 세 칸 나란히: 지금 계획 → 1순위만 → 1순위+2순위(같이 적용). 그 아래 선택지 목록.
     if n_ok < 9:
         with st.spinner("효과가 큰 방법을 찾는 중"):
             acts = action_ranking(json.dumps(p, sort_keys=True))
         if acts:
-            st.markdown(sec("지금 할 수 있는 것", "효과가 큰 순서대로"), unsafe_allow_html=True)
+            st.markdown(sec("지금 할 수 있는 것", "효과가 큰 순서대로 — 왼쪽에서 오른쪽으로 하나씩 더하면"), unsafe_allow_html=True)
+            vmap = {lab: v for lab, _how, v in advice.candidates(p)}
+            lab1, how1, gain1, _ = acts[0]
+            cols = [("now", "지금 계획", ok, None, None),
+                    ("", f"① {lab1}", min(ok + gain1, 1), gain1, f"<b>{lab1}</b><br>{how1}")]
+            if len(acts) >= 2:
+                lab2, how2, gain2, _ = acts[1]
+                both = merge_variants(vmap.get(lab1, {}), vmap.get(lab2, {}))
+                if both:
+                    with st.spinner("두 가지를 같이 하면 어떻게 되는지 계산 중"):
+                        g12 = combo_gain(json.dumps(p, sort_keys=True), json.dumps(both, sort_keys=True))
+                    cols.append(("best", f"① + ② {lab2}", min(ok + g12, 1), g12, f"<b>{lab1}</b> + <b>{lab2}</b><br>{how2}"))
+            if len(cols) == 2:
+                cols[1] = ("best", cols[1][1], cols[1][2], cols[1][3], cols[1][4])
+            html_ = ""
+            for cls, head, pr_, g_, what_ in cols:
+                html_ += (f'<div class="c {cls}"><div class="h">{head}</div>{gauge_svg(pr_, 104)}'
+                          f'<div class="n">10번 중 {int(round(pr_ * 10))}번</div>'
+                          + (f'<div class="d">{g_ * 100:+.0f}%p</div>' if g_ is not None else '<div class="d" style="color:transparent">—</div>')
+                          + (f'<div class="w">{what_}</div>' if what_ else '') + '</div>')
+            st.markdown(f'<div class="scen">{html_}</div>', unsafe_allow_html=True)
             for rank, (lab, how, gain, ci_) in enumerate(acts[:3], 1):
                 st.markdown(f'<div class="act"><div class="r">{rank}</div><div style="flex:1"><b>{lab}</b><div class="s">{how}</div></div>'
                             f'<div class="g">{min(ok + gain, 1) * 100:.0f}%<span>{gain * 100:+.0f}%p</span></div></div>', unsafe_allow_html=True)
-            st.caption("'하세요'가 아니라, 각 선택이 얼마나 효과가 있는지 계산한 거예요. 섞어서 보려면 위의 '바꿔보기' 탭.")
+            st.caption("'하세요'가 아니라, 각 선택이 얼마나 효과가 있는지 같은 1만 가지 미래 위에서 계산한 거예요. "
+                       "세 칸의 '같이 하면' 숫자는 3,000개 미래로 계산해 1~2%p 다를 수 있어요. 다른 조합은 위의 '바꿔보기' 탭.")
     else:
         st.markdown(sec("지금 할 수 있는 것"), unsafe_allow_html=True)
         st.markdown('<div class="tip">지금 계획을 그대로 지키면 돼요. 여행·취미 예산을 늘리거나 남길 돈을 넣어 보고 싶으면 위의 <b>바꿔보기</b> 탭에서 해 보세요.</div>', unsafe_allow_html=True)
@@ -1390,13 +1492,20 @@ with tab1:
         st.caption("큰 지출 반영: " + ", ".join(f'{e_["age"]}세 {e_["kind"]}' for e_ in p["events"])
                    + (f" · 은퇴 때 갚을 빚이 남는 경우 10번 중 {ds_ * 10:.0f}번" if ds_ > 0.05 else ""))
 
+    # (v55) 나이별 남는 돈 — 첫 화면으로. 계산은 이미 끝나 있어(base["fan"]) 그리기만 한다. 선 셋 대신 띠 하나 + 중앙값 선.
+    st.markdown(sec("나이별로 남는 돈", "오늘 돈 가치 · 집은 뺀 금융자산"), unsafe_allow_html=True)
+    st.altair_chart(band_chart(base["fan"], 230), width="stretch")
+    st.markdown(f'<div class="legend"><span class="key" style="background:{TEAL}"></span>굵은 선은 보통일 때, 옅은 띠는 운이 좋을 때~나쁠 때(가운데 절반), '
+                f'<span class="key" style="background:{CORAL}"></span>점선은 운이 나쁠 때예요. 선이 0에 닿는 때가 모아둔 돈을 다 쓰는 때예요.</div>',
+                unsafe_allow_html=True)
+
     # 입력 수정·더 정확하게·가정 목록
     st.markdown(sec("입력을 고치거나 더 넣기"), unsafe_allow_html=True)
     edit_controls()
 
     # 4) 나머지는 눌러야 보인다 — 첫 화면은 가볍게, 계산도 그때 한다
     st.markdown('<div style="height:.6rem"></div>', unsafe_allow_html=True)
-    show_detail = st.toggle("자세히 보기 — 목표별 결과, 다른 계산기와 비교, 이 숫자가 얼마나 확실한지, 나이별 남는 돈", value=bool(ss.get("detail", False)), key="detail_tg")
+    show_detail = st.toggle("자세히 보기 — 목표별 결과, 다른 계산기와 비교, 이 숫자가 얼마나 확실한지, 한 달 살림", value=bool(ss.get("detail", False)), key="detail_tg")
     ss.detail = show_detail
     if not show_detail:
         st.caption("궁금한 게 더 있으면 위 스위치를 켜 주세요. 10초쯤 더 계산해요.")
@@ -1520,20 +1629,7 @@ if show_detail:
                     '모아둔 돈에서 꺼내 쓰고, 그 돈이 바닥나는 때가 위의 "모자라는 나이"예요. 건보료는 소득분과 재산분을 모두 넣은 금액이에요.</div>',
                     unsafe_allow_html=True)
 
-    # 5) 나이별 남는 돈 (3개 선)
-    fan = pd.DataFrame(base["fan"], columns=["나이", "좋을 때", "보통", "나쁠 때"])
-    lines_df = pd.concat([pd.DataFrame({"나이": fan["나이"], "억 원": fan[c], "경우": lab})
-                          for c, lab in (("좋을 때", "운이 좋을 때"), ("보통", "보통일 때"), ("나쁠 때", "운이 나쁠 때"))])
-    st.markdown(sec("나이별로 남는 돈", "오늘 돈 가치"), unsafe_allow_html=True)
-    st.altair_chart(alt.Chart(lines_df).mark_line(strokeWidth=3).encode(
-        x=alt.X("나이:Q", title="나이"),
-        y=alt.Y("억 원:Q", title="억 원", axis=alt.Axis(titleAngle=0, titleAlign="left", titleY=-10, titleX=-5)),
-        color=alt.Color("경우:N", sort=["운이 좋을 때", "보통일 때", "운이 나쁠 때"],
-                        scale=alt.Scale(range=["#7FB8BE", TEAL, CORAL]),
-                        legend=alt.Legend(title=None, orient="bottom", direction="horizontal", labelLimit=0, columns=3)),
-        tooltip=["경우", "나이", alt.Tooltip("억 원:Q", format=".1f")]).properties(height=280), width="stretch")
-    st.markdown('<div class="legend">선이 0에 닿는 때가 모아둔 돈을 다 쓰는 때예요. 운이 나쁘면(주가 하락·물가 상승 등) 더 빨리, '
-                '운이 좋으면 더 늦게 닿습니다. 집은 포함하지 않았어요.</div>', unsafe_allow_html=True)
+    # (v55) 나이별 남는 돈 그래프는 첫 화면으로 올렸다(위).
 
     # 6) (v49.1) 공유용 결과 한 장
     with st.expander("결과를 한 장으로 저장하기"):
