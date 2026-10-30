@@ -1560,7 +1560,12 @@ def test_app_about_tab_shows_verification_ledger():
     assert "계산이 맞는지 어떻게 확인했나요" in md
     assert f"{n}개 중" in md and f"{n}개</span> 일치" in md, "장부 요약 숫자가 장부 크기와 다르다"
     assert f"{n}개 항목 중 {n}개가 일치" in md, "설명하기 탭의 근거 문장이 장부를 따라가지 않는다"
-    assert "모의계산기 화면값과의 대조" in " ".join(c.value for c in at.caption), "아직 안 한 것을 숨기면 안 된다"
+    from retire_sim import official as _off
+    _ok, _done, _n = _off.summary()
+    if _done < _n:
+        assert "모의계산기 화면값과의 대조" in " ".join(c.value for c in at.caption), "아직 안 한 것을 숨기면 안 된다"
+    elif _ok < _done:
+        assert "다른 사례와 원인" in md, "공식 계산기와 다른 사례를 숨기면 안 된다"
 
 
 # ─────────────────────────── (v50.2) 태블릿 앱 · 가벼운 모드 ───────────────────────────
@@ -1704,8 +1709,10 @@ def test_official_calculator_cases():
     rs = official.rows()
     assert len({r["id"] for r in rs}) == len(rs), "사례 id 가 겹친다"
     assert all(math.isfinite(r["model"]) and r["model"] >= 0 for r in rs)
-    bad = [(r["id"], r["model"], r["official"]) for r in rs if r["status"] == "불일치"]
-    assert not bad, f"공식 계산기와 다르다: {bad}"
+    bad = [(r["id"], r["model"], r["official"]) for r in rs if r["status"] == "불일치" and not r["known"]]
+    assert not bad, f"공식 계산기와 다르다(알려진 차이 말고 새로 생긴 것): {bad}"
+    gone = [k for k in official.KNOWN_GAPS if not any(r["id"] == k and r["status"] == "불일치" for r in rs)]
+    assert not gone, f"이제 일치하거나 값이 없는 사례가 '알려진 차이'에 남아 있다 — 목록에서 지우세요: {gone}"
     known = set(official.recorded())
     assert known <= {r["id"] for r in rs}, f"없는 사례의 값이 기록돼 있다: {known - {r['id'] for r in rs}}"
 

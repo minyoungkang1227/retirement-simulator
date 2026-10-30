@@ -2030,6 +2030,11 @@ with tab5:
                                 "공식 계산기": "확인 중" if r["official"] is None else f'{r["official"]:,.2f} {r["unit"]}',
                                 "결과": {"일치": "✓ 일치", "불일치": "✗ 다름", "대기": "—"}[r["status"]]} for r in _orows]),
                  hide_index=True, width="stretch")
+    _gaps = [r for r in _orows if r["known"]]
+    if _gaps:
+        st.markdown("**다른 사례와 원인** — 아직 모델을 고치지 않았고, 원인을 확인 중입니다.")
+        for _g in _gaps:
+            st.markdown(f"- `{_g['id']}` {_g['known']}")
     _pending = "아직 하지 않은 것: 국민건강보험공단·국민연금공단 등 **모의계산기 화면값과의 대조** 일부. " if _o_done < _o_n else ""
     st.caption(_pending + "건보료 재산분에는 자동차와 월세 환산분을 넣지 않았습니다(전월세 보증금은 v50부터 30% 반영). 법이 바뀌면 이 표도 함께 고칩니다.")
 

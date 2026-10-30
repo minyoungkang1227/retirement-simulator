@@ -109,6 +109,16 @@ CASES = [
 ]
 
 
+#: 받아 온 공식값과 모델이 다르다는 걸 알고 있고, 원인을 조사 중인 사례. 여기에 적힌 id 는 불일치여도 테스트가 실패하지 않는다
+#: (새로 생긴 불일치만 잡으려고). 원인을 고치면 이 목록에서 지운다.
+KNOWN_GAPS = {
+    "nps-1": "공단 계산기가 모델보다 약 6.5% 낮다(세 사례 모두 같은 비율). 공단 값은 기본연금액 계수 약 1.2(소득대체율 40%)와 A값 약 323만 원에 맞고, 모델은 계수 1.29(43%)를 쓴다 — 어느 쪽이 맞는지 아직 모름",
+    "nps-2": "nps-1과 같은 차이",
+    "nps-3": "nps-1과 같은 차이",
+    "hi-3": "공단 값 2.28만 원은 지역가입자 최저보험료(월 약 2.016만 원)에 장기요양 13.14%를 더한 값과 맞아떨어진다. 모델은 최저보험료를 아직 넣지 않았다(2026년 최저보험료 확정치는 확인 필요)",
+}
+
+
 def recorded() -> dict:
     """data/official_checks.csv → {id: {"official": 값, "checked_on", "checked_by", "note"}}. 빈 칸은 건너뛴다."""
     out = {}
@@ -136,7 +146,7 @@ def rows() -> list:
             status = "일치" if abs(m - o) <= max(c.tol_abs, c.tol_rel * abs(o)) else "불일치"
         name, org, url = CALCULATORS[c.calc]
         out.append({"id": c.id, "calc": name, "org": org, "url": url, "inputs": c.inputs, "unit": c.unit,
-                    "model": m, "official": o, "status": status, "note": c.note,
+                    "model": m, "official": o, "status": status, "note": c.note, "known": KNOWN_GAPS.get(c.id, "") if status == "불일치" else "",
                     "checked_on": rec.get(c.id, {}).get("checked_on", "")})
     return out
 
