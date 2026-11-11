@@ -15,7 +15,7 @@ import streamlit as st
 # Streamlit은 이 파일이 바뀌면 다시 읽지만, 이미 불러온 retire_sim 패키지는 메모리에 그대로 둔다.
 # 그래서 새 코드를 올려도 계산 모듈만 옛 버전인 상태가 생기고, 알아보기 힘든 TypeError 로 터진다.
 # 여기서 먼저 확인해 "앱을 다시 시작하라"는 안내로 바꾼다. (Manage app → ⋮ → Reboot app)
-APP_EXPECTS_MODEL = 54          # 이 앱 파일이 전제하는 retire_sim 버전
+APP_EXPECTS_MODEL = 57          # 이 앱 파일이 전제하는 retire_sim 버전
 try:
     from retire_sim import __version__ as MODEL_VERSION
     _model_ok = int(MODEL_VERSION) >= APP_EXPECTS_MODEL
@@ -35,7 +35,7 @@ from retire_sim.economy_v2 import EconomyV2
 from retire_sim import engine_tax, mortality, optimize, report, product, sources, verify
 from retire_sim.session import calc_id, save_blob, load_blob
 from retire_sim.pension import estimate_nps_monthly
-from retire_sim.inputs import (EARLY_EXIT, PROFILES, AVG_SPEND, DEFAULTS, STAGES, STAGE_AGES, build_case,
+from retire_sim.inputs import (EARLY_EXIT, PROFILES, AVG_SPEND, DEFAULTS, STAGES, build_case,
                               total_assets, nps_values, monthly_saving, income_gap, severance_estimate, kid_total)
 from retire_sim import stage as stage_mod
 from retire_sim import advice

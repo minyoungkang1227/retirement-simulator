@@ -851,6 +851,14 @@ def test_retirement_income_tax_hand_calc_v49():
     assert float(retirement_income_tax(3000, 30)) == 0.0          # 근속공제 6,500만 > 퇴직금 → 세금 없음
 
 
+def test_v57_deferred_retirement_income_ratio_three_tiers():
+    """(v57) 이연퇴직소득 연금수령 시 산출세액 대비 과세 비율 — 1~10년차 70%, 11~20년차 60%, 21년차부터 50%
+    (2025년 세법 개정, 2026-01-01 이후 수령분). v56까지는 11년차 이후를 모두 60%로 두었다."""
+    from retire_sim.tax import ret_income_pension_ratio
+    got = ret_income_pension_ratio(np.array([1, 10, 11, 20, 21, 35])).tolist()
+    assert got == [0.7, 0.7, 0.6, 0.6, 0.5, 0.5]
+
+
 def test_severance_v49():
     """(v49) 퇴직급여: 없으면 결과가 그대로, DB(마지막 월급 × 근속연수)는 확률을 올리고,
     퇴직소득세가 실제로 매겨지며(세금을 끄면 확률이 더 높다), 근속이 길수록 퇴직급여가 크다."""

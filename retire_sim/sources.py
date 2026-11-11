@@ -140,12 +140,12 @@ SOURCES = (
               "1,500만 원에서 4,100~5,600만 원으로 늘어나므로, 재산분을 빼면 은퇴 후 고정비를 "
               "크게 과소평가한다. 점수당 금액 고시가 바뀌면 바로 갱신."),
     Source(
-        key="retirement_tax", name="퇴직소득세 — 근속연수공제(2023년 이후 퇴직분), 환산급여공제, 이연퇴직소득 연금수령 시 70%(1~10년차)·60%(11년차~)",
-        org="소득세법 제48조(퇴직소득공제)·제55조(세율)·제146조, 시행령 제40조의2(연금수령한도)",
+        key="retirement_tax", name="퇴직소득세 — 근속연수공제(2023년 이후 퇴직분), 환산급여공제, 이연퇴직소득 연금수령 시 70%(1~10년차)·60%(11~20년차)·50%(21년차~)",
+        org="소득세법 제48조(퇴직소득공제)·제55조(세율)·제146조, 시행령 제40조의2(연금수령한도), 2025년 세법 개정(20년 초과 수령 50%, 2026-01-01 이후 수령분)",
         used_for="퇴직금(DB)·퇴직연금(DC)을 은퇴 때 IRP로 받아 연금으로 나눠 쓸 때의 세금",
         as_of="2026", cycle="세법 개정 시",
         where="law.go.kr 「소득세법」 제48·55조, 국세청 퇴직소득세 계산 안내",
-        how="retire_sim/tax.py 의 retirement_service_deduction·retirement_conv_deduction·RET_INCOME_PENSION_RATIO 교체 "
+        how="retire_sim/tax.py 의 retirement_service_deduction·retirement_conv_deduction·RET_INCOME_PENSION_RATIO(3구간) 교체 "
             "→ tests 의 test_retirement_income_tax_hand_calc_v49 손검산 재확인",
         stale="공제표가 물가연동이 아니라 명목 퇴직금이 커질수록 실효세율이 오른다. 대표 30대 가구에서 퇴직소득세는 "
               "퇴직급여의 3~4%(연금수령 시 그 70%)로 결과를 1%p 안쪽으로 움직인다."),

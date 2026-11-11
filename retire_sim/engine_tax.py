@@ -10,7 +10,7 @@ from . import mortality, pension
 from .economy_v2 import EconomyV2, generate
 from .tax import (reverse_mortgage_monthly, acquisition_tax_rate, one_house_cgt, TaxConfig, HouseConfig, income_tax_person, private_pension_tax, health_premium,
                   property_tax, comprehensive_property_tax, rent_tax, gift_tax, hi_property_monthly,
-                  retirement_income_tax, RET_INCOME_PENSION_RATIO,
+                  retirement_income_tax, ret_income_pension_ratio,
                   earned_income_deduction, earned_income_credit, HI_JEONSE_RATIO)
 
 
@@ -604,7 +604,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             # (필요한 만큼 IRP에서 한꺼번에 꺼내면 과세계좌가 그대로 남아 금융소득세·건보료가 늘어난다 — 측정으로 확인)
             draw = np.minimum(np.minimum(np.maximum(need, 0), np.minimum(cap, tc.pen_withdraw_cap * na)), Wr)
             part_r = np.minimum(draw, Rr); part_g = draw - part_r      # 이연퇴직소득부터, 그다음 운용수익
-            ret_tax_now = part_r * tau * np.where(first10, RET_INCOME_PENSION_RATIO[0], RET_INCOME_PENSION_RATIO[1])
+            ret_tax_now = part_r * tau * ret_income_pension_ratio(kyr)   # (v57) 21년차부터 50%
             g_taxable = part_g
             Wr = Wr - draw; Rr = Rr - part_r; need = need - draw; ret_draw = draw
         pw = np.zeros(n); pw_taxable = np.zeros(n)
