@@ -1,4 +1,7 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if hasattr(sys.stdout, "reconfigure"):          # 윈도우 콘솔(cp949)에서 '—' 같은 글자가 깨지지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 """재산분 건보료(v45 법정 산식)가 결과를 얼마나 바꾸는지 짝지은 비교로 측정.
 
     PYTHONPATH=. python scripts/measure_hi_property.py

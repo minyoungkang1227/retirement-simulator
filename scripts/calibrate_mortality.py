@@ -1,4 +1,7 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if hasattr(sys.stdout, "reconfigure"):          # 윈도우 콘솔(cp949)에서 '—' 같은 글자가 깨지지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 """사망률 개선율 재추정 (v27).
 
 사용법: KOSIS 「생명표」 완전생명표를 연도별로 내려받아 retire_sim/data/life_table_<연도>.csv

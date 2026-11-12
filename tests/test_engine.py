@@ -769,14 +769,14 @@ def test_notebook_matches_modules():
         pytest.skip("노트북이 없는 배포")
     root = nb_path.parent.parent
     stale = []
-    for c in json.loads(nb_path.read_text())["cells"]:
+    for c in json.loads(nb_path.read_text(encoding="utf-8"))["cells"]:
         if c.get("cell_type") != "code":
             continue
         head, _, body = "".join(c["source"]).partition("\n")
         if not head.strip().startswith("%%writefile"):
             continue
         f = root / head.split(None, 1)[1].strip()
-        if f.exists() and body != f.read_text():
+        if f.exists() and body != f.read_text(encoding="utf-8"):
             stale.append(str(f.relative_to(root)))
     assert not stale, "노트북이 모듈과 다릅니다 (python scripts/sync_notebook.py): " + ", ".join(stale)
 
@@ -968,7 +968,7 @@ def test_changelog_covers_current_version():
     path = pathlib.Path(__file__).resolve().parent.parent / "CHANGELOG.md"
     if not path.exists():
         pytest.skip("CHANGELOG 없는 배포")
-    heads = re.findall(r"^## v(\d+(?:\.\d+)?)", path.read_text(), re.M)
+    heads = re.findall(r"^## v(\d+(?:\.\d+)?)", path.read_text(encoding="utf-8"), re.M)
     assert heads, "CHANGELOG에 '## vNN' 항목이 없습니다"
     assert int(float(heads[0])) == int(__version__), (
         f"CHANGELOG 맨 위가 v{heads[0]} 인데 모델은 v{__version__} — CHANGELOG.md 에 이번 버전 항목을 추가하세요")
@@ -1031,7 +1031,7 @@ def test_sources_doc_matches_registry():
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
     out = root / "docs" / "SOURCES.md"
     assert out.exists(), "docs/SOURCES.md 가 없습니다 — python scripts/make_sources_doc.py"
-    assert out.read_text() == mod.build(), "docs/SOURCES.md 가 오래됐습니다 — python scripts/make_sources_doc.py"
+    assert out.read_text(encoding="utf-8") == mod.build(), "docs/SOURCES.md 가 오래됐습니다 — python scripts/make_sources_doc.py"
 
 
 def test_every_source_entry_is_complete():
@@ -1064,7 +1064,7 @@ def test_docs_do_not_contradict_mortality_default():
         path = root / f
         if not path.exists():
             continue
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         hit = [x for x in stale if x in text]
         assert not hit, f"{f} 가 모델 기본값(코호트 개선 반영)과 어긋납니다: {hit}"
 
@@ -1088,7 +1088,7 @@ def test_explanation_tabs_avoid_jargon():
     """설명 화면에서 어려운 전문용어를 쓰지 않는다 (50~60대 독자 기준)."""
     import pathlib
     import re
-    src = (pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py").read_text()
+    src = (pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py").read_text(encoding="utf-8")
     m = re.search(r"with tab5:(.*?)\n# ── 설계사용", src, re.S)
     assert m, "'이 계산에 대하여' 탭을 찾지 못했습니다"
     banned = ["확실성등가", "위험회피계수", "CRRA", "소득인정액", "연계감액", "코호트",
@@ -1189,6 +1189,25 @@ def test_death_benefit_helps_only_where_it_is_needed():
     ok = lambda r, m: float((r["depleted_at"][m] < 0).mean())
     assert ok(with_, died) > ok(base, died) + 0.03, "사망 경로에서 뚜렷이 좋아져야 한다"
     assert ok(with_, ~died) < ok(base, died), "생존 경로에서는 보험료만큼 나빠진다"
+
+
+def test_death_benefit_covers_the_last_year_of_the_term():
+    """보장기간 **마지막 해**에 사망한 경로도 보험금을 받아야 한다.
+
+    보험료는 보장기간 전체에 걸쳐 나가므로, 기간 안에 사망한 경로는 반드시 보험금을
+    받아야 한다. 따라서 보장기간을 1년 늘려도 **원래 기간 안에 사망한 경로의 결과는
+    달라지지 않아야** 한다 — 달라진다면 경계에서 보장이 새고 있다는 뜻이다.
+    """
+    hh = _earner_hh()
+    qx = mortality.default_qx()
+    term, benefit = 10, 100_000
+    dt = _run(hh, qx_table=qx)["death_t"][0]
+    edge = dt == term                                  # 보장기간 마지막 해에 사망
+    assert edge.any(), "경계에서 사망하는 경로가 없으면 검정이 성립하지 않는다"
+    kw = dict(death_benefit=benefit, death_premium=0.0)   # 보험료 0 → 보험금 지급만 비교
+    a = _run(hh, qx_table=qx, addons=AddOns(death_term_years=term, **kw))
+    b = _run(hh, qx_table=qx, addons=AddOns(death_term_years=term + 1, **kw))
+    assert np.allclose(a["W_real"][edge], b["W_real"][edge]),         "보장기간 마지막 해 사망 경로에 보험금이 지급되지 않는다 (경계 누락)"
 
 
 def test_death_t_agrees_with_household_survival():
@@ -1511,8 +1530,8 @@ def test_money_flow_is_shared_by_app_and_report():
     src = inspect.getsource(reporting.build_report)
     assert "money_flow(" in src, "리포트가 money_flow() 를 쓰지 않습니다"
     app = pathlib.Path(__file__).resolve().parent.parent / "streamlit_app.py"
-    assert "reporting.money_flow(" in app.read_text(), "앱이 money_flow() 를 쓰지 않습니다"
-    assert "balance_svg" in app.read_text(), "앱이 돈의 흐름(들어오는 돈 = 나가는 돈) 그래프를 그리지 않습니다"
+    assert "reporting.money_flow(" in app.read_text(encoding="utf-8"), "앱이 money_flow() 를 쓰지 않습니다"
+    assert "balance_svg" in app.read_text(encoding="utf-8"), "앱이 돈의 흐름(들어오는 돈 = 나가는 돈) 그래프를 그리지 않습니다"
 
 
 # ───────────── v48.1: 검증 장부 — 화면과 테스트가 같은 목록을 읽는다 ─────────────
@@ -1559,7 +1578,7 @@ def test_verify_ledger_points_at_registered_sources():
 def test_analytic_benchmark_uses_the_ledger():
     """해석해 대조 스크립트와 장부의 엔진 항목이 같은 설정을 쓴다(설정이 두 곳에 있으면 언젠가 어긋난다)."""
     import pathlib
-    src = (pathlib.Path(__file__).resolve().parent.parent / "scripts" / "benchmark_analytic.py").read_text()
+    src = (pathlib.Path(__file__).resolve().parent.parent / "scripts" / "benchmark_analytic.py").read_text(encoding="utf-8")
     assert "from retire_sim.verify import analytic_rows" in src
     assert "EconomyV2(" not in src, "스크립트에 설정이 다시 생겼다"
 
@@ -1981,3 +2000,45 @@ def test_v56_widowed_survivor_enters_severe_care_more():
     _, _, sev_off, _, _ = engine_tax.life_paths(hh, replace(cfg, widow_care_mult=1.0), qx, T, 4000, rng_b, True)
     assert sev_on.sum() > sev_off.sum() * 1.03, (sev_on.sum(), sev_off.sum())
     assert hh.survivor_spending_ratio == 0.65                       # 사별 후 생활비 비율 기본값(국민노후보장패널 10차 0.66)
+
+
+# ── v11 OU 모수 추정: 아는 모수로 만든 경로에서 그 모수가 되돌아오는가 ──
+
+def _ou_path(kappa, theta, sigma, dt, n, rng):
+    """정확 이산화로 OU 경로 생성 — 축차식이라 벡터화되지 않는다."""
+    b = np.exp(-kappa * dt)
+    eps = rng.normal(0, sigma * np.sqrt((1 - b**2) / (2 * kappa)), n)
+    x = np.empty(n); x[0] = theta
+    for i in range(1, n):
+        x[i] = theta + (x[i - 1] - theta) * b + eps[i]
+    return x
+
+
+def test_ou_mle_is_unbiased_on_paths_with_known_parameters():
+    """OU 최우추정이 아는 모수를 **편향 없이** 되찾아야 한다.
+
+    이 추정값은 사람이 손으로 economy_v2.CALIBRATED_2026_08 에 옮겨 적는다 —
+    추정기가 틀리면 물가·실질금리 가정이 조용히 편향되고 시뮬레이션 어디에서도
+    드러나지 않는다. 한 경로는 운에 좌우되므로 여러 경로의 평균으로 본다.
+    """
+    from retire_sim.calibrate import ou_mle
+    kappa, theta, sigma, dt, n, R = 0.8, 0.02, 0.01, 1 / 12, 12_000, 16
+    est = [ou_mle(_ou_path(kappa, theta, sigma, dt, n, np.random.default_rng(s)), dt)
+           for s in range(R)]
+    for key, true in (("kappa", kappa), ("theta", theta), ("sigma", sigma)):
+        v = np.array([e[key] for e in est])
+        se_mean = v.std(ddof=1) / np.sqrt(R)              # 평균의 표준오차
+        assert abs(v.mean() - true) < 3 * se_mean, (
+            f"{key} 추정이 편향됐다: 평균 {v.mean():.4f} vs 참값 {true} (±{3*se_mean:.4f})")
+    assert est[0]["n"] == n - 1
+
+
+def test_ou_mle_refuses_an_explosive_series():
+    """평균회귀가 아니라 발산하는 계열에는 모수를 만들어내지 말고 거절해야 한다."""
+    from retire_sim.calibrate import ou_mle
+    rng = np.random.default_rng(3)
+    x = np.empty(2000); x[0] = 0.01
+    for i in range(1, len(x)):                            # b > 1 — 발산
+        x[i] = 1.01 * x[i - 1] + rng.normal(0, 1e-5)
+    with pytest.raises(ValueError, match="평균회귀"):
+        ou_mle(x, 1 / 12)

@@ -1,4 +1,7 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if hasattr(sys.stdout, "reconfigure"):          # 윈도우 콘솔(cp949)에서 '—' 같은 글자가 깨지지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 """'어떤 상품을 고르느냐' vs '언제부터 받느냐' — 어느 쪽이 더 큰 선택인가.
 
 실행: PYTHONPATH=. python scripts/product_spread.py
