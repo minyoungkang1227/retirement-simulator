@@ -1,4 +1,7 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if hasattr(sys.stdout, "reconfigure"):          # 윈도우 콘솔(cp949)에서 '—' 같은 글자가 깨지지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 """라이브러리를 코드에서 쓰는 가장 짧은 예제 — 60세 부부, 금융자산 5억, 생활비 월 300만 원.
 
     PYTHONPATH=. python scripts/run_example.py

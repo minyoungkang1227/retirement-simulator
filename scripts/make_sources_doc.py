@@ -1,4 +1,7 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if hasattr(sys.stdout, "reconfigure"):          # 윈도우 콘솔(cp949)에서 '—' 같은 글자가 깨지지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 """retire_sim/sources.py 로부터 docs/SOURCES.md 를 만든다.
 
     python scripts/make_sources_doc.py          # 만든다
@@ -43,7 +46,7 @@ def build() -> str:
 if __name__ == "__main__":
     text = build()
     if "--check" in sys.argv:
-        cur = OUT.read_text() if OUT.exists() else ""
+        cur = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
         if cur != text:
             print("docs/SOURCES.md 가 retire_sim/sources.py 와 다릅니다 — "
                   "python scripts/make_sources_doc.py 로 다시 만드세요.")
@@ -51,5 +54,5 @@ if __name__ == "__main__":
         print("docs/SOURCES.md 가 최신입니다.")
     else:
         OUT.parent.mkdir(exist_ok=True)
-        OUT.write_text(text)
+        OUT.write_text(text, encoding="utf-8")
         print(f"{OUT.relative_to(OUT.parent.parent)} 를 만들었습니다 ({len(text.splitlines())}줄).")

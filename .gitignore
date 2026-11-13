@@ -11,3 +11,8 @@ secrets*
 my_*.ipynb
 my_data/
 *_private*
+
+# 커버리지 측정 산출물
+.coverage
+.coverage.*
+htmlcov/

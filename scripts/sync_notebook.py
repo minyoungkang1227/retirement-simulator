@@ -1,4 +1,7 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if hasattr(sys.stdout, "reconfigure"):          # 윈도우 콘솔(cp949)에서 '—' 같은 글자가 깨지지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 """노트북의 %%writefile 셀을 저장소의 실제 파일 내용과 맞춘다.
 
 노트북은 Colab에서 모듈을 풀어쓰기 위해 파일 내용을 셀 안에 복사해 두는데,
@@ -30,11 +33,11 @@ def expected(cell, path):
     """그 셀이 가져야 할 source: 첫 줄(%%writefile ...) + 파일 내용 그대로.
     ipynb의 source는 '줄 끝 개행을 포함한 줄들의 리스트'라서 splitlines(keepends)를 쓴다."""
     head = "".join(cell["source"]).split("\n", 1)[0]
-    return [head + "\n"] + path.read_text().splitlines(keepends=True)
+    return [head + "\n"] + path.read_text(encoding="utf-8").splitlines(keepends=True)
 
 
 def main(check=False):
-    nb = json.loads(NB.read_text())
+    nb = json.loads(NB.read_text(encoding="utf-8"))
     drift = []
     for cell, path in cells(nb):
         if not path.exists():
@@ -52,7 +55,7 @@ def main(check=False):
         print("노트북과 모듈이 일치합니다.")
         return 0
     if drift:
-        NB.write_text(json.dumps(nb, ensure_ascii=False, indent=1) + "\n")
+        NB.write_text(json.dumps(nb, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
         print(f"{len(drift)}개 셀을 맞췄습니다:")
         for d in drift:
             print("  -", d)

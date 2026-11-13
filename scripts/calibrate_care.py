@@ -1,4 +1,7 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if hasattr(sys.stdout, "reconfigure"):          # 윈도우 콘솔(cp949)에서 '—' 같은 글자가 깨지지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 """간병 발생률·진행률 보정 (v17, 목표 갱신 v56).
 
 목표 연령별 유병률(장기요양 인정자 / 의료보장 적용인구, 2023, 국민건강보험공단 「노인장기요양보험통계연보」(2024 발간)

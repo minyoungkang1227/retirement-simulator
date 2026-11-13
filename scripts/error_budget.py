@@ -1,4 +1,7 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if hasattr(sys.stdout, "reconfigure"):          # 윈도우 콘솔(cp949)에서 '—' 같은 글자가 깨지지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 """오차 예산: 결과의 불확실성이 '난수'에서 오는지 '가정'에서 오는지 나눠 본다.
 
 실행: PYTHONPATH=. python scripts/error_budget.py

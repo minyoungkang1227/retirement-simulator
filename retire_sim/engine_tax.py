@@ -520,8 +520,9 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
         dl_ben = np.zeros(n); dl_cost = np.zeros(n)
         if ad.death_benefit > 0 and ad.death_member < k and t < ad.death_term_years:
             j = ad.death_member
-            died_now = alive[j, :, t - 1] & ~a[j] if t > 0 else ~a[j]
-            dl_ben = ad.death_benefit * died_now * live      # 남은 가족이 있어야 쓸 수 있다
+            died_now = a[j] & ~alive[j, :, t + 1]            # t년 중 사망 — 보장 마지막 해도 포함
+            heirs = alive[:, :, t + 1].sum(0) > 0            # 남은 가족이 있어야 쓸 수 있다
+            dl_ben = ad.death_benefit * died_now * heirs
             dl_cost = ad.death_premium * a[j]
         income_all = (nps.sum(0) + surv.sum(0) + basic_inc + priv.sum(0) + rent + bz.sum(0) + wage.sum(0)
                       + ann_inc + ci_ben + dl_ben + rm_inc)

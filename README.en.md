@@ -38,7 +38,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 4. **Stochastic economy** — OU real rate and inflation estimated from Bank of Korea (ECOS) data, with a Fisher link, two-factor closed-form bond pricing, exact joint distribution of integrated rates, crash jumps, parameter uncertainty, fees
 5. **Statistically honest comparisons** — paired-difference confidence intervals on common random numbers decide "different / not different"
 
-## Example (model v51 · 10,000 paths · reproduce with `scripts/readme_numbers.py`)
+## Example (model v58 · 10,000 paths · reproduce with `scripts/readme_numbers.py`)
 
 **Couple aged 52 and 50, retiring at 60, KRW 500M financial assets, saving KRW 1.5M/month** (app defaults as shipped: essential KRW 2.17M/month + lifestyle KRW 10M/year, pensions KRW 1.6M/month, KRW 100M legacy — KRW 2.17M is the 'minimum' couple living cost from the National Pension Research Institute panel; raising it to KRW 3M, close to their 'adequate' level, drops essential success to 50%)
 
@@ -48,10 +48,10 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 |---|---|
 | Retire 2 years later | **+7.4pp** (±0.5) |
 | Spend 10% less | +6.1pp (±0.5) |
-| Retire exactly at 60 (no timing risk) | +6.2pp (±0.5) |
-| Growth profile (70% equity) | +0.2pp (±0.4) |
-| Save KRW 0.5M more per month | +2.6pp (±0.3) |
-| Conservative profile (30% equity) | −4.0pp (±0.5) |
+| Retire exactly at 60 (no timing risk) | +6.0pp (±0.5) |
+| Growth profile (70% equity) | −0.4pp (±0.4) |
+| Save KRW 0.5M more per month | +2.5pp (±0.3) |
+| Conservative profile (30% equity) | −3.9pp (±0.5) |
 
 | Crisis | Change in essential success |
 |---|---|
@@ -62,7 +62,7 @@ Most Korean retirement calculators fix returns and lifespan and ignore taxes and
 | Long-term care incidence doubled | −7.1pp |
 
 - For this household **retirement timing is the strongest lever**, and the same crash hurts most right after retirement (sequence-of-returns risk).
-- **The assumption band is 69%–83%**: the minimum and maximum of moving the equity risk premium, longevity and long-term care incidence one at a time by their estimated ranges (v47). The width is effectively set by the **equity risk premium** — on its own (5.2% ± 1.4pp) it spans 69%–83%, while longevity spans 76%–78% and care incidence (±20%) 75%–79%. Monte Carlo noise of ±0.8pp is about one seventeenth of that, and unlike it this band does not shrink with more paths. That is why differences between choices matter more than levels.
+- **The assumption band is 69%–82%**: the minimum and maximum of moving the equity risk premium, longevity and long-term care incidence one at a time by their estimated ranges (v47). The width is effectively set by the **equity risk premium** — on its own (5.2% ± 1.4pp) it spans 69%–82%, while longevity spans 76%–78% and care incidence (±20%) 75%–79%. Monte Carlo noise of ±0.8pp is about one sixteenth of that, and unlike it this band does not shrink with more paths. That is why differences between choices matter more than levels.
 
 **Young savers (dual-income couple aged 30 and 29, KRW 90M gross income, 15% saving rate, workplace pension, National Pension estimated automatically)**
 

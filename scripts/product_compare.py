@@ -1,4 +1,7 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if hasattr(sys.stdout, "reconfigure"):          # 윈도우 콘솔(cp949)에서 '—' 같은 글자가 깨지지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 """연금보험 상품 비교: 같은 돈을 연금보험·펀드·예금에 넣으면 어떻게 달라지는가.
 
 실행: PYTHONPATH=. python scripts/product_compare.py

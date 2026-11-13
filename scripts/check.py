@@ -1,4 +1,7 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+if hasattr(sys.stdout, "reconfigure"):          # 윈도우 콘솔(cp949)에서 '—' 같은 글자가 깨지지 않게
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 """작업을 마칠 때마다 돌리는 **오류 검증 + 최적화 점검** 한 번에.
 
     PYTHONPATH=. python scripts/check.py          # 전체 (테스트 포함, 약 3분)
@@ -26,7 +29,9 @@ def head(t):
 
 def sh(cmd, timeout=900):
     r = subprocess.run(cmd, shell=True, cwd=ROOT, capture_output=True, text=True,
-                       timeout=timeout, env={**os.environ, "PYTHONPATH": "."})
+                       encoding="utf-8", errors="replace",   # 자식 스크립트가 UTF-8 로 쓴다
+                       timeout=timeout,
+                       env={**os.environ, "PYTHONPATH": ".", "PYTHONIOENCODING": "utf-8"})
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
@@ -60,9 +65,9 @@ for cmd, name in (("python scripts/make_sources_doc.py --check", "자료 출처 
         todo.append(f"{name} 어긋남 — {cmd.replace(' --check', '')} 실행")
 
 # 버전 일관성
-ver = re.search(r'__version__ = "(\d+)"', (ROOT / "retire_sim" / "__init__.py").read_text()).group(1)
-app = re.search(r"^APP_EXPECTS_MODEL = (\d+)", (ROOT / "streamlit_app.py").read_text(), re.M).group(1)
-chg = re.search(r"^## v(\d+)", (ROOT / "CHANGELOG.md").read_text(), re.M).group(1)
+ver = re.search(r'__version__ = "(\d+)"', (ROOT / "retire_sim" / "__init__.py").read_text(encoding="utf-8")).group(1)
+app = re.search(r"^APP_EXPECTS_MODEL = (\d+)", (ROOT / "streamlit_app.py").read_text(encoding="utf-8"), re.M).group(1)
+chg = re.search(r"^## v(\d+)", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M).group(1)
 print(f"  버전: 모델 v{ver} · 앱 기대 v{app} · CHANGELOG v{chg}")
 if not (ver == app == chg):
     todo.append(f"버전 불일치 (모델 {ver} / 앱 {app} / CHANGELOG {chg})")
@@ -71,13 +76,13 @@ if not (ver == app == chg):
 head("② 최적화 점검")
 
 pyfiles = [p for p in ROOT.rglob("*.py") if "__pycache__" not in str(p) and ".git" not in str(p)]
-blob = "\n".join(p.read_text() for p in pyfiles)
+blob = "\n".join(p.read_text(encoding="utf-8") for p in pyfiles)
 NB = (ROOT / "notebooks" / "retire_sim_colab.ipynb")
-nb_text = NB.read_text() if NB.exists() else ""
+nb_text = NB.read_text(encoding="utf-8") if NB.exists() else ""
 
 dead = []
 for p in pyfiles:
-    body = p.read_text()
+    body = p.read_text(encoding="utf-8")
     tree = ast.parse(body)
     for n in ast.walk(tree):
         if isinstance(n, (ast.Import, ast.ImportFrom)):
@@ -113,7 +118,7 @@ for o in orphan:
 quiet = []
 for p in sorted((ROOT / "scripts").glob("*.py")):
     if len(re.findall(re.escape(p.name), refs)) <= 1:
-        makes = re.findall(r'savefig\([^)]*"([^"]+)"|write_text\(|OUT\.write_text', p.read_text())
+        makes = re.findall(r'savefig\([^)]*"([^"]+)"|write_text\(|OUT\.write_text', p.read_text(encoding="utf-8"))
         quiet.append(f"{p.name} (문서 언급 없음{' · 파일을 만드는 스크립트라 확인 필요' if makes else ''})")
 if quiet:
     print("  문서에 언급 없는 스크립트 (지우기 전 무엇을 만드는지 확인):")
@@ -133,9 +138,9 @@ r=engine_tax.run(hh,c,e=E,tc=T,qx_table=Q)
 ts=[]
 for _ in range(3):
     t=time.time(); engine_tax.run(hh,c,e=E,tc=T,qx_table=Q); ts.append(time.time()-t)
-src=open('retire_sim/engine_tax.py').read()
+src=open('retire_sim/engine_tax.py', encoding='utf-8').read()
 f=max((x for x in ast.walk(ast.parse(src)) if isinstance(x,ast.FunctionDef)),key=lambda x:x.end_lineno-x.lineno)
-ln=sum(1 for p in pathlib.Path('retire_sim').glob('*.py') for _ in open(p))
+ln=sum(1 for p in pathlib.Path('retire_sim').glob('*.py') for _ in open(p, encoding='utf-8'))
 print(f\\"{sorted(ts)[1]:.2f}|{f.name}|{f.end_lineno-f.lineno+1}|{ln}|{engine_tax.summarize(r)['기본생활 유지 확률']*100:.1f}\\")
 " """)
 if code == 0 and "|" in out:
