@@ -100,3 +100,23 @@ def assumption_band_detail(p: dict, paths: int | None = None) -> dict:
 def assumption_band(p: dict, paths: int | None = None) -> tuple:
     """(min, max) — 호환용. 자세한 분해는 assumption_band_detail."""
     return assumption_band_detail(p, paths)["overall"]
+
+
+#: (v59) 퇴직급여를 받는 방법 — (이름, variant). 같은 미래(같은 난수) 위에서 비교한다.
+PAYOUTS = [("모자라는 만큼만 연금으로", {"ret_payout": "need"}),
+           ("일시금", {"ret_payout": "lump"}),
+           ("10년에 나눠", {"ret_payout": "fixed", "ret_payout_years": 10}),
+           ("20년에 나눠", {"ret_payout": "fixed", "ret_payout_years": 20}),
+           ("종신연금", {"ret_payout": "life"})]
+
+
+def payout_compare(p: dict) -> list:
+    """(v59) 퇴직급여 받는 방법별 결과. [{"name", "prob", "cte70", "delta"}] — delta는 일시금 대비 확률 차이."""
+    rows = []
+    for name, v in PAYOUTS:
+        s = engine_tax.summarize(run_case(p, v))
+        rows.append({"name": name, "prob": float(s["기본생활 유지 확률"]), "cte70": float(s["CTE70 부족액(실질)"])})
+    lump = next(r["prob"] for r in rows if r["name"] == "일시금")
+    for r in rows:
+        r["delta"] = r["prob"] - lump
+    return rows

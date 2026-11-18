@@ -96,6 +96,8 @@ DEFAULTS = dict(
     tier=2,
     # (v49) 퇴직급여: 제도("DC" 확정기여형·"DB" 확정급여형·퇴직금), 지금 직장 근속연수(년, 본인·배우자)
     ret_plan="DC", tenure=0, s_tenure=0,
+    # (v59) 퇴직급여 받는 방법: "need" 모자라는 만큼만 연금으로 · "lump" 일시금 · "fixed" 정한 햇수에 나눠 · "life" 종신연금
+    ret_payout="need", ret_payout_years=10,
     # (v50) 은퇴 후 근로(월 만 원, 몇 살 전까지 — 본인·배우자), 전월세 보증금(억), 나이에 따른 지출 변화
     post_inc=0, post_until=0, s_post_inc=0, s_post_until=0, jeonse=0.0, spend_profile="lifestyle",
     # (v50.9) 자녀 직장건보 피부양자로 등록할 수 있나 (소득 2,000만·재산 기준은 엔진이 해마다 판정)
@@ -184,8 +186,9 @@ def income_gap(p: dict) -> tuple:
 CHOICES = {"sex": ("M", "F"), "s_sex": ("M", "F"), "profile": tuple(PROFILES), "early_exit": tuple(EARLY_EXIT),
            "region": ("대도시", "중소도시", "농어촌"), "save_mode": ("월 금액", "소득의 %"),
            "floor": ("계리적", "보수적"), "ret_plan": ("DC", "DB"),
+           "ret_payout": ("need", "lump", "fixed", "life"),
            "spend_profile": ("flat", "lifestyle", "all")}
-RANGES = {"age": (18, 100), "s_age": (18, 100), "retire_age": (30, 100), "nps_start": (55, 75),
+RANGES = {"ret_payout_years": (1, 40), "age": (18, 100), "s_age": (18, 100), "retire_age": (30, 100), "nps_start": (55, 75),
           "paths": (100, 200_000), "survivor": (0, 100), "overseas": (0, 100), "children": (0, 10),
           "care_growth": (-2.0, 5.0), "debt_rate": (0.0, 20.0), "debt_years": (1, 40), "tier": (1, 3),
           "tenure": (0, 50), "s_tenure": (0, 50), "post_until": (0, 100), "s_post_until": (0, 100),
@@ -299,6 +302,8 @@ def build_case(p: dict, v: dict | None = None) -> tuple:
                      + v.get("saving_delta", 0) * 12 / sal_tot) if use_rate else 0.0,
         wage_growth=p.get("wage_g", 1.0) / 100,
         retirement_contrib=bool(p.get("ret_contrib")) and p["age"] < p["retire_age"],
+        ret_payout=v.get("ret_payout", p.get("ret_payout", "need")),
+        ret_payout_years=int(v.get("ret_payout_years", p.get("ret_payout_years", 10))),
         ret_plan=p.get("ret_plan", "DC"), spend_profile=v.get("spend_profile", p.get("spend_profile", "lifestyle")),
         stock_weight=v.get("stock_weight", PROFILES[p["profile"]]),
         annual_spending=p["essential"] * 12 * m, essential=p["essential"] * 12 * m,

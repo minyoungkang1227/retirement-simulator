@@ -52,6 +52,7 @@ class EconomyV2:
     jump_mu: float = -0.15     # 점프 크기 로그평균
     jump_sigma: float = 0.10   # 점프 크기 로그표준편차
     antithetic: bool = False   # 반대 난수 사용
+    stock_z: object = None     # (v59) 검증용: 주식의 표준화 충격 (경로, 연도)를 밖에서 넣는다. None이면 모형이 뽑는다
     # ── v11 수리적 보완 ──
     term_premium: float = 0.0      # 위험의 시장가격: 가격용(Q) 장기평균 = θ + term_premium → 채권 기간 프리미엄
     # ── v26 집값 ──
@@ -191,6 +192,8 @@ def generate(e: EconomyV2, T: int, n: int, rng) -> dict:
     else:
         Z = rng.standard_normal((n, T, 5)); U = rng.standard_normal((n, 3)) if need_u else np.zeros((n, 3))
     X = Z @ L.T
+    if e.stock_z is not None:                         # (v59) 평균·변동성은 그대로 두고 충격의 모양·순서만 바꿔 본다(scripts/bootstrap_check.py)
+        X[:, :, 4] = np.asarray(e.stock_z, float)[:n, :T]
     erp = e.erp + e.erp_sd * U[:, 0]
     pth = e.pi_theta + e.pi_theta_sd * U[:, 1]
     qth = e.q_theta + e.q_theta_sd * U[:, 2]

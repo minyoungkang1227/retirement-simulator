@@ -2042,3 +2042,44 @@ def test_ou_mle_refuses_an_explosive_series():
         x[i] = 1.01 * x[i - 1] + rng.normal(0, 1e-5)
     with pytest.raises(ValueError, match="평균회귀"):
         ou_mle(x, 1 / 12)
+
+def test_v59_severance_payout_modes():
+    """(v59) 퇴직급여 받는 방법. 기본값("need")은 v58과 같은 계산이고, 일시금은 퇴직소득세를 감면 없이 한꺼번에 내므로
+    연금으로 받는 어느 방법보다 확률이 낮다. 종신연금은 오래 사는 경로를 받쳐 나쁜 30%의 부족액이 일시금보다 작다."""
+    from retire_sim import advice
+    from retire_sim.inputs import defaults
+    p = defaults(); p.update(paths=2000, salary=9000, ret_contrib=True, ret_plan="DB", tenure=25)
+    base = advice.essential_prob(advice.run_case(p))
+    rows = {r["name"]: r for r in advice.payout_compare(p)}
+    assert rows["모자라는 만큼만 연금으로"]["prob"] == base
+    lump = rows["일시금"]
+    assert lump["delta"] == 0.0
+    for name in ("모자라는 만큼만 연금으로", "10년에 나눠", "20년에 나눠", "종신연금"):
+        assert rows[name]["prob"] > lump["prob"], name
+    assert rows["종신연금"]["cte70"] < lump["cte70"]
+    assert rows["20년에 나눠"]["prob"] >= rows["10년에 나눠"]["prob"]      # 오래 나눌수록 감면이 크다
+    q = dict(p); q.update(ret_contrib=False)                               # 퇴직급여가 없으면 받는 방법은 결과와 무관
+    assert len({round(r["prob"], 12) for r in advice.payout_compare(q)}) == 1
+
+
+def test_v59_stock_shock_injection_and_block_bootstrap():
+    """(v59) 검증용 주입: stock_z 를 넣으면 주식 충격만 바뀌고 금리·물가는 그대로다. 블록 부트스트랩은 과거 값만 쓰고,
+    블록 안에서는 과거의 순서를 지킨다."""
+    import importlib.util
+    import pathlib
+    from dataclasses import replace
+    from retire_sim.economy_v2 import EconomyV2, generate
+    e = EconomyV2.enhanced()
+    a = generate(e, 30, 500, np.random.default_rng(1))
+    b = generate(replace(e, stock_z=np.zeros((500, 30))), 30, 500, np.random.default_rng(1))
+    assert np.array_equal(a["rate"], b["rate"]) and np.array_equal(a["cpi"], b["cpi"])
+    assert b["stock"].std() < a["stock"].std()
+    root = pathlib.Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("bootstrap_check", root / "scripts" / "bootstrap_check.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    z = m.hist_z()
+    assert len(z) == 30 and abs(z.mean()) < 1e-12 and abs(z.std() - 1) < 1e-12
+    zp = m.block_paths(z, 200, 40, 5)
+    assert zp.shape == (200, 40) and np.isin(zp, z).all()
+    i0 = int(np.where(z == zp[0, 0])[0][0])
+    assert np.array_equal(zp[0, :5], z[(i0 + np.arange(5)) % len(z)])

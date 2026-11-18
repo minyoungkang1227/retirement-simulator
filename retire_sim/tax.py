@@ -50,6 +50,10 @@ def pension_deduction(x):
     return np.minimum(d, 900)
 
 
+# (v59) 종신계약 연금의 연금소득세율(지방소득세 포함) — 2025년 세법 개정, 2026-01-01 이후 수령분부터 나이와 무관하게 3.3%(이전 4.4%)
+LIFE_ANNUITY_RATE = 0.033
+
+
 def private_pension_rate(age):
     return np.where(age >= 80, .033, np.where(age >= 70, .044, .055))
 

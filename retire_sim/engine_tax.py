@@ -10,7 +10,7 @@ from . import mortality, pension
 from .economy_v2 import EconomyV2, generate
 from .tax import (reverse_mortgage_monthly, acquisition_tax_rate, one_house_cgt, TaxConfig, HouseConfig, income_tax_person, private_pension_tax, health_premium,
                   property_tax, comprehensive_property_tax, rent_tax, gift_tax, hi_property_monthly,
-                  retirement_income_tax, ret_income_pension_ratio,
+                  retirement_income_tax, ret_income_pension_ratio, LIFE_ANNUITY_RATE,
                   earned_income_deduction, earned_income_credit, HI_JEONSE_RATIO)
 
 
@@ -316,6 +316,9 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
     t_ret_p = np.full(n, -1)                                   # 경로별 은퇴 연차(-1 = 아직)
     debt_settled_p = np.zeros(n, bool)
     sev_real = np.zeros(n); sev_tax_real = np.zeros(n)
+    payout = getattr(hh, "ret_payout", "need")                 # (v59) 퇴직급여 수령 방법
+    t55 = max(55 - hh.members[0].age, 0)                       # 연금을 받을 수 있게 되는 연차(본인 55세)
+    rl_pay = np.zeros(n); rl_fr = np.zeros(n)                  # 종신연금 전환분: 연 지급액(명목), 그중 이연퇴직소득 비율
     jeonse = np.full(n, float(getattr(house, 'jeonse', 0.0)))   # (v50) 전월세 보증금(오늘 가치) — 집을 사면 그 자금으로 들어가고 0
     joint_factor = lambda t0: joint_pv(hh, qx_table, t0)
     # (v52) 결혼 이벤트: 배우자(members[1])는 결혼 나이 전까지 가구 밖이다 — 소득·저축에 들어오지 않고 계좌 한도(ISA·연금)도 1인분.
@@ -594,20 +597,46 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
                 R_tot = sum(R_i)
                 tax_tot = sum(retirement_income_tax(R_i[i], hh.members[i].tenure + ty) for i in range(k))
                 tau = np.where(newly_ret, np.where(R_tot > 0, tax_tot / np.maximum(R_tot, 1e-9), 0.0), tau)
-                Wr = Wr + R_tot; Rr = Rr + R_tot; Wdc = np.where(newly_ret, 0.0, Wdc)
+                if payout == "lump":                                   # (v59) 일시금: 퇴직소득세 전액을 내고 과세계좌로
+                    net = R_tot - (tax_tot if tc.enabled else 0.0)
+                    Wt = Wt + net; Bt = Bt + net
+                else:
+                    Wr = Wr + R_tot; Rr = Rr + R_tot
+                Wdc = np.where(newly_ret, 0.0, Wdc)
                 sev_real = np.where(newly_ret, R_tot / cpi[:, t], sev_real); sev_tax_real = np.where(newly_ret, tax_tot / cpi[:, t], sev_tax_real)
         ret_tax_now = np.zeros(n); g_taxable = np.zeros(n); ret_draw = np.zeros(n)
+        # (v59) 연금수령연차는 '연금을 받을 수 있게 된 해'가 1년차다(소득세법 시행령 제40조의2) — 55세 전에 은퇴하면 55세부터 센다.
+        kyr = np.where(t_ret_p >= 0, t - np.maximum(t_ret_p, t55) + 1, 0)
+        if payout == "life" and t >= t55:                              # (v59) 종신연금 전환: 연금 개시 때 IRP 전액을 연금으로
+            conv = (Wr > 0) & R & (t_ret_p >= 0)
+            if conv.any():
+                af = annuity_factor(t) * (1 + ad.annuity_loading)
+                rl_fr = np.where(conv, Rr / np.maximum(Wr, 1e-9), rl_fr)
+                rl_pay = np.where(conv, Wr / af, rl_pay); Wr = np.where(conv, 0.0, Wr); Rr = np.where(conv, 0.0, Rr)
         if Wr.any() and hh.members[0].age + t >= 55:
-            kyr = np.where(t_ret_p >= 0, t - t_ret_p + 1, 0)           # 경로별 연금수령연차
             first10 = kyr <= 10
             cap = np.where(first10, Wr * 1.2 / np.maximum(11 - kyr, 1), Wr) * (R & (t_ret_p >= 0))   # 연금수령한도
             # 연금계좌(IRP 포함)에서는 v48까지와 같이 1인당 연 pen_withdraw_cap(1,500만 원)까지만 꺼내고 나머지는 과세계좌에서.
             # (필요한 만큼 IRP에서 한꺼번에 꺼내면 과세계좌가 그대로 남아 금융소득세·건보료가 늘어난다 — 측정으로 확인)
-            draw = np.minimum(np.minimum(np.maximum(need, 0), np.minimum(cap, tc.pen_withdraw_cap * na)), Wr)
+            if payout == "fixed":                                      # (v59) 정한 햇수에 고르게: 남은 돈 ÷ 남은 햇수
+                draw = np.minimum(np.minimum(Wr / np.maximum(int(hh.ret_payout_years) - kyr + 1, 1), cap), Wr)
+            else:
+                draw = np.minimum(np.minimum(np.maximum(need, 0), np.minimum(cap, tc.pen_withdraw_cap * na)), Wr)
             part_r = np.minimum(draw, Rr); part_g = draw - part_r      # 이연퇴직소득부터, 그다음 운용수익
             ret_tax_now = part_r * tau * ret_income_pension_ratio(kyr)   # (v57) 21년차부터 50%
             g_taxable = part_g
             Wr = Wr - draw; Rr = Rr - part_r; need = need - draw; ret_draw = draw
+        life_tax = np.zeros(n)
+        if rl_pay.any():                                               # (v59) 종신연금 지급 — 가입자(들)가 살아 있는 동안
+            if len(ann_members) > 1:
+                b2 = a[ann_members[0]] & a[ann_members[1]]
+                lr = np.where(b2, 1.0, np.where(a[ann_members[0]] | a[ann_members[1]], ad.annuity_survivor_ratio, 0.0))
+            else:
+                lr = a[ann_members[0]].astype(float)
+            lpay = rl_pay * lr
+            ret_tax_now = ret_tax_now + lpay * rl_fr * tau * ret_income_pension_ratio(kyr)
+            life_tax = lpay * (1 - rl_fr) * LIFE_ANNUITY_RATE          # 운용수익분: 종신형 3.3%(2026-01-01 이후 수령분)
+            need = need - lpay
         pw = np.zeros(n); pw_taxable = np.zeros(n)
         pen_self = ad.pension_contrib_annual > 0 or hh.pension_balance > 0 or hh.retirement_contrib
         # 세금을 끄는 것(tc.enabled=False)은 '세금을 안 매긴다'는 뜻이어야 한다.
@@ -673,7 +702,7 @@ def run(hh: Household, cfg: SimConfig, e: EconomyV2 = None, tc: TaxConfig = None
             mixed_reg = reg_inc * rate + pm * 12 * reg_prop_share
             hi = (hi_w + np.where(any_work, mixed_reg, all_reg + sum(bz[i] for i in range(k)) * rate)) * live
         if tc.enabled:
-            taxes = taxes + ret_tax_now
+            taxes = taxes + ret_tax_now + life_tax
         tax_y[:, t] = taxes / cpi[:, t]; hi_y[:, t] = hi / cpi[:, t]; prop_y[:, t] = prop / cpi[:, t]
 
         # 8) 인출: 과세계좌 → ISA → (부족 시) 연금계좌 연금외수령
