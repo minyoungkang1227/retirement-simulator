@@ -29,12 +29,17 @@ def engine_files() -> list:
     return files
 
 
+def _content(f: pathlib.Path) -> bytes:
+    """줄바꿈을 LF로 맞춘 파일 내용. 윈도우에서 받은 저장소(CRLF)와 맥·리눅스(LF)가 같은 지문·같은 묶음을 내게 한다."""
+    return f.read_bytes().replace(b"\r\n", b"\n")
+
+
 def digest() -> str:
     """엔진 파일 내용의 지문 — 앱 묶음이 최신인지 확인하는 데 쓴다."""
     h = hashlib.sha256()
     for f in engine_files():
         h.update(f.relative_to(ROOT).as_posix().encode())
-        h.update(f.read_bytes())
+        h.update(_content(f))
     return h.hexdigest()[:16]
 
 
@@ -46,7 +51,7 @@ def build() -> dict:
         for f in engine_files():
             info = zipfile.ZipInfo(f.relative_to(ROOT).as_posix(), date_time=(2026, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
-            z.writestr(info, f.read_bytes())       # 날짜를 고정해 같은 엔진이면 같은 파일이 나오게
+            z.writestr(info, _content(f))          # 날짜를 고정해 같은 엔진이면 같은 파일이 나오게
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_bytes(buf.getvalue())
     meta = {"model_version": __version__, "digest": digest(), "files": len(engine_files()),

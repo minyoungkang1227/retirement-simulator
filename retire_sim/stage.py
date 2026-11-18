@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 
 from . import advice
-from .inputs import STAGES, kid_schedule, kid_total
+from .inputs import kid_schedule, kid_total
 
 EXTRA_SAVING = 50          # 1단계: '매달 이만큼 더 모으면' (만 원)
 
@@ -57,8 +57,3 @@ def headline(p: dict, paths: int = 3000) -> dict:
         return {"kind": "family", "prob": advice.essential_prob(base), "prob_without": advice.essential_prob(alt),
                 "n_kids": len(kids), "kid_total": kid_total(p), "n_parents": len(pars)}
     return {"kind": "none"}
-
-
-def stage_label(p: dict) -> str:
-    st = int(p.get("stage", 0) or 0)
-    return STAGES[st][0] if st in STAGES else ""
