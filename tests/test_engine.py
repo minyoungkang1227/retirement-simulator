@@ -2083,3 +2083,19 @@ def test_v59_stock_shock_injection_and_block_bootstrap():
     assert zp.shape == (200, 40) and np.isin(zp, z).all()
     i0 = int(np.where(z == zp[0, 0])[0][0])
     assert np.array_equal(zp[0, :5], z[(i0 + np.arange(5)) % len(z)])
+
+
+def test_source_refresh_deadlines():
+    """바깥 자료 갱신 시한(BCBS 239 원칙 5). 날짜를 고정해 계산 규칙만 본다."""
+    import datetime
+    from retire_sim import sources as S
+    keys = {s.key for s in S.SOURCES}
+    assert set(S.REFRESH_MONTHS) <= keys, "REFRESH_MONTHS 에 없는 자료 키가 있다"
+    for s in S.SOURCES:
+        if s.key in S.REFRESH_MONTHS:
+            assert S._as_of_month(s) is not None, f"{s.key}: as_of 맨 앞이 YYYY 또는 YYYY-MM 이어야 시한을 잰다"
+    st = {s.key: (x, d) for s, x, d in S.due_status(datetime.date(2026, 11, 27))}
+    assert st["credited_rate"] == ("지남", "2026-03")      # 2025-12 반영, 월간 → 3개월
+    assert st["kospi"] == ("이번 달", "2026-11")
+    assert st["basic_pension"][0] == "정상"
+    assert st["kid_cost"][0] == "수동 확인"

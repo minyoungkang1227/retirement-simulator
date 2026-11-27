@@ -205,6 +205,7 @@ scripts/             검증·생성 스크립트
   readme_numbers.py    문서 수치 재계산
   make_readme_images.py  문서 그림 재생성
   make_sources_doc.py  자료 출처 문서 생성
+  check_sources.py     자료 갱신 시한 점검
   sync_notebook.py     노트북↔모듈 동기화
   build_app.py         태블릿 앱의 엔진 묶음(docs/app/engine.zip) 다시 만들기 — 엔진을 고치면 꼭 실행
   product_compare.py · product_spread.py   연금보험 상품 비교, 상품 선택 vs 개시 나이
@@ -233,6 +234,7 @@ CHANGELOG.md         버전별 변경 내역 (무엇을 / 어떻게 / 전과 무
   PYTHONPATH=. python scripts/run_example.py        # 화면 없이 엔진만 돌려 보기
   PYTHONPATH=. python scripts/make_readme_images.py # 이 문서의 그림 다시 만들기
   PYTHONPATH=. python scripts/make_sources_doc.py   # 자료 출처 문서 다시 만들기
+  python scripts/check_sources.py                   # 자료 갱신 시한 점검 (지난 것이 있으면 종료 코드 1)
   ```
 
 ## 진행 상황
